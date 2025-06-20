@@ -55,44 +55,56 @@ def format_relative_time(epoch_time):
 
 @app.route('/')
 def index():
-    """Renders the main page with log file data."""
-    files_data = []
+    """Renders the main page with a combined list of log files and journald units."""
+    all_sources = []
     error = None
     try:
-        command_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
-        result_ls = subprocess.run(command_ls, shell=True, capture_output=True, text=True, check=True)
-        
-        all_entries = result_ls.stdout.strip().split('\n')
-        filenames = [entry for entry in all_entries if not entry.endswith('/') and entry]
+        # 1. Get traditional log files from /var/log
+        cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
+        res_ls = subprocess.run(cmd_ls, shell=True, capture_output=True, text=True, check=True)
+        filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
 
         for filename in filenames:
             file_path = os.path.join(LOG_DIRECTORY, filename)
-            command_stat = f"sudo stat -c '%s %Y' {shlex.quote(file_path)}"
-            result_stat = subprocess.run(command_stat, shell=True, capture_output=True, text=True, check=True)
-            size_bytes, mod_time_epoch = map(int, result_stat.stdout.strip().split())
+            cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(file_path)}"
+            res_stat = subprocess.run(cmd_stat, shell=True, capture_output=True, text=True, check=True)
+            size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
             
-            files_data.append({
+            all_sources.append({
+                'type': 'file',
                 'name': filename,
                 'size_bytes': size_bytes,
                 'size_formatted': format_bytes(size_bytes),
                 'modified_epoch': mod_time_epoch,
                 'modified_formatted': format_relative_time(mod_time_epoch)
             })
+            
+        # 2. Get journalctl units
+        cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq"
+        res_journal = subprocess.run(cmd_journal, shell=True, capture_output=True, text=True, check=True)
+        journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
+        
+        for unit in journal_units:
+             all_sources.append({
+                'type': 'journal',
+                'name': unit,
+                'size_bytes': 0, # Not applicable
+                'size_formatted': 'N/A',
+                'modified_epoch': 0, # Not applicable
+                'modified_formatted': 'Journald Service'
+            })
+
     except subprocess.CalledProcessError as e:
-        error = f"Error processing log files: {e.stderr}"
+        error = f"Error processing log sources: {e.stderr}"
     except Exception as e:
         error = f"An unexpected error occurred: {str(e)}"
         
-    return render_template('index.html', files=files_data, error=error)
+    return render_template('index.html', sources=all_sources, error=error)
 
 
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
-    """
-    API endpoint to get the content of a specific log file.
-    This function can now handle both plain text and gzipped (.gz) files.
-    It also returns a flag if the content length exceeds the analysis limit.
-    """
+    """API endpoint for traditional log files."""
     if '/' in filename or '..' in filename:
         return jsonify({'error': 'Invalid filename.'}), 400
 
@@ -105,26 +117,34 @@ def get_log_content(filename):
             command = f"sudo tail -n 500 {shlex.quote(file_path)}"
 
         result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
-        
         log_text = result.stdout
-        # Check if the fetched content is longer than the allowed character count for the API
         will_be_truncated = len(log_text) > MAX_CHAR_COUNT
-
         return jsonify({'content': log_text, 'will_be_truncated': will_be_truncated})
         
-    except subprocess.CalledProcessError as e:
-        error_message = f"Could not read log file '{filename}'. Error: {e.stderr}"
-        return jsonify({'error': error_message}), 500
     except Exception as e:
-        return jsonify({'error': f"An unexpected error occurred while reading '{filename}': {str(e)}"}), 500
+        return jsonify({'error': f"Could not read log file '{filename}': {str(e)}"}), 500
+
+@app.route('/journal/<path:unit>')
+def get_journal_content(unit):
+    """API endpoint for journalctl logs."""
+    if not unit or '/' in unit or '..' in unit:
+        return jsonify({'error': 'Invalid unit name.'}), 400
+        
+    try:
+        # --no-pager is essential for non-interactive output
+        command = f"sudo journalctl -u {shlex.quote(unit)} -n 500 --no-pager"
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+        log_text = result.stdout
+        will_be_truncated = len(log_text) > MAX_CHAR_COUNT
+        return jsonify({'content': log_text, 'will_be_truncated': will_be_truncated})
+
+    except Exception as e:
+        return jsonify({'error': f"Could not read journal for unit '{unit}': {str(e)}"}), 500
 
 @app.route('/analyse', methods=['POST'])
 def analyse_log():
     """API endpoint to analyse log content using OpenAI."""
     data = request.get_json()
-    if not data:
-        return jsonify({'error': 'Invalid request.'}), 400
-        
     log_content = data.get('log_content')
     api_key = data.get('api_key')
 
@@ -133,18 +153,14 @@ def analyse_log():
     if not log_content:
         return jsonify({'error': 'Missing log_content in request.'}), 400
     
-    # --- FIX for Context Length Error ---
     if len(log_content) > MAX_CHAR_COUNT:
-        # If the log is too long, truncate it, keeping the end of the file.
         truncation_message = f"[--- Log content truncated to the last {MAX_CHAR_COUNT} characters for analysis ---]\n\n"
         log_content = truncation_message + log_content[-MAX_CHAR_COUNT:]
 
     prompt = "Analyse this log for any errors and create a summary report, troubleshooting tips and any other advice relating to any other issues found."
 
     try:
-        # Set the API key for this specific request
         client = openai.OpenAI(api_key=api_key)
-        
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[

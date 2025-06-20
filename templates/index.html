@@ -25,14 +25,9 @@
         <h1 class="text-xl font-bold text-white">Local Log Viewer</h1>
         <div class="flex items-center space-x-4">
             <button id="settings-btn" class="text-gray-400 hover:text-white transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
-            <div class="bg-red-900/50 border border-red-700 text-red-200 px-3 py-1 rounded-full text-xs font-mono">
-                SUDO MODE ENABLED
-            </div>
+            <div class="bg-red-900/50 border border-red-700 text-red-200 px-3 py-1 rounded-full text-xs font-mono">SUDO MODE ENABLED</div>
         </div>
     </header>
 
@@ -53,15 +48,24 @@
                 </div>
             </div>
             <nav class="flex-1 overflow-y-auto p-2">
-                <ul id="file-list-container">
-                    {% for file in files %}
-                    <li class="file-item" data-name="{{ file.name }}" data-size="{{ file.size_bytes }}" data-modified="{{ file.modified_epoch }}">
-                        <a href="#" class="log-link flex flex-col w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 focus:bg-indigo-600 focus:text-white transition-all">
-                            <div class="flex justify-between items-center">
-                                <span class="font-medium truncate pr-2">{{ file.name }}</span>
-                                <span class="text-xs font-mono text-gray-400">{{ file.size_formatted }}</span>
+                <ul id="source-list-container">
+                    {% for source in sources %}
+                    <li class="source-item" data-name="{{ source.name }}" data-type="{{ source.type }}" data-size="{{ source.size_bytes }}" data-modified="{{ source.modified_epoch }}">
+                        <a href="#" class="log-link flex items-center w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 focus:bg-indigo-600 focus:text-white transition-all">
+                            <div class="flex-shrink-0 mr-3">
+                                {% if source.type == 'file' %}
+                                <!-- File Icon -->
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                {% else %}
+                                <!-- Journald Icon -->
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>
+                                {% endif %}
                             </div>
-                            <span class="text-xs text-gray-500 mt-1">{{ file.modified_formatted }}</span>
+                            <div class="flex-grow overflow-hidden">
+                                <span class="font-medium truncate block">{{ source.name }}</span>
+                                <span class="text-xs text-gray-500">{{ source.modified_formatted }}</span>
+                            </div>
+                            <span class="text-xs font-mono text-gray-400 ml-2 flex-shrink-0">{{ source.size_formatted }}</span>
                         </a>
                     </li>
                     {% endfor %}
@@ -73,12 +77,10 @@
         <main class="flex-1 flex flex-col bg-gray-900 overflow-hidden">
             <div id="log-view-panel" class="flex-1 flex flex-col overflow-hidden">
                 <div class="p-4 border-b border-gray-700 bg-gray-800/30 flex justify-between items-center">
-                    <h2 id="log-title" class="text-lg font-semibold text-gray-400 truncate">Select a log file</h2>
+                    <h2 id="log-title" class="text-lg font-semibold text-gray-400 truncate">Select a log source</h2>
                     <div class="flex items-center space-x-3">
-                        <span id="truncation-warning" class="hidden text-xs text-yellow-400 font-semibold">Log is too long and will be truncated</span>
-                        <button id="ai-analyse-btn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-                            AI Analyse
-                        </button>
+                        <span id="truncation-warning" class="hidden text-xs text-yellow-400 font-semibold">Log will be truncated for analysis</span>
+                        <button id="ai-analyse-btn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">AI Analyse</button>
                     </div>
                 </div>
                 <div id="log-content-wrapper" class="flex-1 p-4 overflow-auto bg-black/20">
@@ -99,11 +101,9 @@
     <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
         <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
             <h3 class="text-xl font-semibold mb-4">Settings</h3>
-            <div class="space-y-4">
-                <div>
-                    <label for="api-key-input" class="block text-sm font-medium text-gray-300 mb-1">OpenAI API Key</label>
-                    <input type="password" id="api-key-input" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="sk-...">
-                </div>
+            <div>
+                <label for="api-key-input" class="block text-sm font-medium text-gray-300 mb-1">OpenAI API Key</label>
+                <input type="password" id="api-key-input" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="sk-...">
             </div>
             <div class="mt-6 flex justify-end space-x-3">
                 <button id="cancel-api-key-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
@@ -113,208 +113,168 @@
     </div>
     
     <!-- Toast Notification -->
-    <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg">
-        API Key saved!
-    </div>
-
+    <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg"></div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // Main UI elements
-            const logTitle = document.getElementById('log-title');
-            const logContent = document.getElementById('log-content');
-            const fileListContainer = document.getElementById('file-list-container');
-            const searchBox = document.getElementById('search-box');
-            const sortControls = document.getElementById('sort-controls');
-            const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
-            const truncationWarning = document.getElementById('truncation-warning');
-            
-            // Panels and Resizer
-            const aiViewPanel = document.getElementById('ai-view-panel');
-            const aiContentWrapper = document.getElementById('ai-content-wrapper');
-            const logViewPanel = document.getElementById('log-view-panel');
-            const resizeHandle = document.getElementById('resize-handle');
+    document.addEventListener('DOMContentLoaded', () => {
+        const sourceListContainer = document.getElementById('source-list-container');
+        const logTitle = document.getElementById('log-title');
+        const logContent = document.getElementById('log-content');
+        const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
+        const truncationWarning = document.getElementById('truncation-warning');
+        
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsModal = document.getElementById('settings-modal');
+        const saveApiKeyBtn = document.getElementById('save-api-key-btn');
+        const cancelApiKeyBtn = document.getElementById('cancel-api-key-btn');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const toast = document.getElementById('toast-notification');
+        
+        const aiViewPanel = document.getElementById('ai-view-panel');
+        const aiContentWrapper = document.getElementById('ai-content-wrapper');
+        const logViewPanel = document.getElementById('log-view-panel');
+        const resizeHandle = document.getElementById('resize-handle');
 
-            // Settings Modal elements
-            const settingsBtn = document.getElementById('settings-btn');
-            const settingsModal = document.getElementById('settings-modal');
-            const saveApiKeyBtn = document.getElementById('save-api-key-btn');
-            const cancelApiKeyBtn = document.getElementById('cancel-api-key-btn');
-            const apiKeyInput = document.getElementById('api-key-input');
-            const toast = document.getElementById('toast-notification');
+        const searchBox = document.getElementById('search-box');
+        const sortControls = document.getElementById('sort-controls');
 
-            let currentLogContent = "";
+        let currentLogContent = "";
 
-            // --- SETTINGS MODAL & API KEY HANDLING ---
-            const showToast = (message) => {
-                toast.textContent = message;
-                toast.classList.remove('hidden');
-                setTimeout(() => toast.classList.add('hidden'), 3000);
-            };
+        // --- CORE LOGIC ---
+        sourceListContainer.addEventListener('click', async (event) => {
+            const link = event.target.closest('.log-link');
+            if (!link) return;
+            event.preventDefault();
 
-            settingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
-            cancelApiKeyBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
-            settingsModal.addEventListener('click', (e) => {
-                if (e.target === settingsModal) settingsModal.classList.add('hidden');
-            });
+            const sourceItem = link.closest('.source-item');
+            const name = sourceItem.dataset.name;
+            const type = sourceItem.dataset.type;
 
-            saveApiKeyBtn.addEventListener('click', () => {
-                const key = apiKeyInput.value.trim();
-                if (key) {
-                    localStorage.setItem('openai_api_key', key);
-                    showToast('API Key saved successfully!');
-                } else {
-                    localStorage.removeItem('openai_api_key');
-                    showToast('API Key removed.');
+            logTitle.textContent = `Loading: ${name}...`;
+            logContent.textContent = 'Fetching log data...';
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+            aiAnalyseBtn.disabled = true;
+
+            const url = type === 'file' ? `/log/${name}` : `/journal/${name}`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+                
+                currentLogContent = data.content;
+                logTitle.textContent = name;
+                logContent.textContent = currentLogContent || 'Log source is empty.';
+                
+                if (localStorage.getItem('openai_api_key') && currentLogContent) {
+                     aiAnalyseBtn.classList.remove('hidden');
+                     aiAnalyseBtn.disabled = false;
+                     if (data.will_be_truncated) {
+                         truncationWarning.classList.remove('hidden');
+                     }
                 }
-                settingsModal.classList.add('hidden');
-            });
+            } catch (error) {
+                logTitle.textContent = `Error loading ${name}`;
+                logContent.textContent = `An error occurred:\n\n${error.message}`;
+            }
+        });
 
-            apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
-
-
-            // --- UI LOGIC ---
-            function showAiPanel() {
-                aiViewPanel.classList.remove('hidden');
-                aiViewPanel.classList.add('flex');
-                resizeHandle.classList.remove('hidden');
-                logViewPanel.style.height = '50%';
-                aiViewPanel.style.height = '50%';
+        aiAnalyseBtn.addEventListener('click', async () => {
+            const apiKey = localStorage.getItem('openai_api_key');
+            if (!apiKey) {
+                showToast('API Key is missing. Please set it in Settings.');
+                return;
             }
 
-            // --- FILE CLICK LOGIC ---
-            fileListContainer.addEventListener('click', async (event) => {
-                const link = event.target.closest('.log-link');
-                if (!link) return;
-                event.preventDefault();
+            aiAnalyseBtn.textContent = 'Analysing...';
+            aiAnalyseBtn.disabled = true;
+            showAiPanel();
+            aiContentWrapper.innerHTML = '<p>Contacting AI assistant... Please wait.</p>';
 
-                const filename = link.closest('.file-item').dataset.name;
-                logTitle.textContent = `Loading: ${filename}...`;
-                logContent.textContent = 'Fetching log data...';
-                aiAnalyseBtn.classList.add('hidden');
-                truncationWarning.classList.add('hidden'); // Hide warning on new selection
-                aiAnalyseBtn.disabled = true;
-
-                try {
-                    const response = await fetch(`/log/${filename}`);
-                    const data = await response.json();
-                    if (data.error) throw new Error(data.error);
-                    
-                    currentLogContent = data.content;
-                    logTitle.textContent = filename;
-                    logContent.textContent = currentLogContent || 'Log file is empty.';
-                    
-                    if (localStorage.getItem('openai_api_key') && currentLogContent) {
-                         aiAnalyseBtn.classList.remove('hidden');
-                         aiAnalyseBtn.disabled = false;
-                         // Show truncation warning if the flag is true
-                         if (data.will_be_truncated) {
-                             truncationWarning.classList.remove('hidden');
-                         }
-                    }
-                } catch (error) {
-                    logTitle.textContent = `Error loading ${filename}`;
-                    logContent.textContent = `An error occurred:\n\n${error.message}`;
-                }
-            });
-
-            // --- AI ANALYSIS LOGIC ---
-            aiAnalyseBtn.addEventListener('click', async () => {
-                const apiKey = localStorage.getItem('openai_api_key');
-                if (!apiKey) {
-                    showToast('API Key is missing. Please set it in Settings.');
-                    return;
-                }
-
-                aiAnalyseBtn.textContent = 'Analysing...';
-                aiAnalyseBtn.disabled = true;
-                showAiPanel();
-                aiContentWrapper.innerHTML = '<p>Contacting AI assistant... Please wait.</p>';
-
-                try {
-                    const response = await fetch('/analyse', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            log_content: currentLogContent,
-                            api_key: apiKey 
-                        })
-                    });
-                    const data = await response.json();
-                    if (data.error) throw new Error(data.error);
-
-                    let formattedAnalysis = data.analysis
-                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') 
-                        .replace(/```([\s\S]*?)```/g, (match, p1) => `<pre class="bg-gray-900 p-3 rounded-md"><code>${p1.trim()}</code></pre>`)
-                        .replace(/`([^`]+)`/g, '<code class="bg-gray-700 px-1 rounded-sm">$1</code>')
-                        .replace(/\n/g, '<br>');
-                    
-                    aiContentWrapper.innerHTML = formattedAnalysis;
-
-                } catch (error) {
-                    aiContentWrapper.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
-                } finally {
-                    aiAnalyseBtn.textContent = 'AI Analyse';
-                    aiAnalyseBtn.disabled = false;
-                }
-            });
-
-            // --- PANEL RESIZING LOGIC ---
-            let isResizing = false;
-            resizeHandle.addEventListener('mousedown', (e) => {
-                isResizing = true;
-                document.body.style.cursor = 'ns-resize';
-                document.body.style.userSelect = 'none';
-            });
-
-            document.addEventListener('mousemove', (e) => {
-                if (!isResizing) return;
-                const mainPanel = logViewPanel.parentElement;
-                const totalHeight = mainPanel.offsetHeight;
-                const topPanelHeight = e.clientY - mainPanel.getBoundingClientRect().top;
-                const topPercent = (topPanelHeight / totalHeight) * 100;
-                if (topPercent > 20 && topPercent < 80) {
-                    logViewPanel.style.height = `${topPercent}%`;
-                    aiViewPanel.style.height = `${100 - topPercent}%`;
-                }
-            });
-
-            document.addEventListener('mouseup', () => {
-                isResizing = false;
-                document.body.style.cursor = 'default';
-                document.body.style.userSelect = 'auto';
-            });
-            
-             // --- SORTING AND FILTERING ---
-            const sortAndFilter = () => {
-                const filter = searchBox.value.toLowerCase();
-                const sortBy = sortControls.querySelector('.active').dataset.sort;
-                const items = Array.from(fileListContainer.querySelectorAll('.file-item'));
-                items.sort((a, b) => {
-                    if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
-                    if (sortBy === 'size') return parseInt(b.dataset.size) - parseInt(a.dataset.size);
-                    if (sortBy === 'date') return parseInt(b.dataset.modified) - parseInt(a.dataset.modified);
+            try {
+                const response = await fetch('/analyse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ log_content: currentLogContent, api_key: apiKey })
                 });
-                items.forEach(item => {
-                    const fileName = item.dataset.name.toLowerCase();
-                    item.style.display = fileName.includes(filter) ? '' : 'none';
-                    fileListContainer.appendChild(item);
-                });
-            };
-            searchBox.addEventListener('input', sortAndFilter);
-            sortControls.addEventListener('click', (e) => {
-                if (e.target.matches('.sort-btn')) {
-                    sortControls.querySelector('.active').classList.remove('active');
-                    e.target.classList.add('active');
-                    sortAndFilter();
-                }
-            });
-            sortAndFilter();
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+                let formattedAnalysis = data.analysis.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/```([\s\S]*?)```/g, (match, p1) => `<pre class="bg-gray-900 p-3 rounded-md"><code>${p1.trim()}</code></pre>`).replace(/`([^`]+)`/g, '<code class="bg-gray-700 px-1 rounded-sm">$1</code>').replace(/\n/g, '<br>');
+                aiContentWrapper.innerHTML = formattedAnalysis;
+            } catch (error) {
+                aiContentWrapper.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
+            } finally {
+                aiAnalyseBtn.textContent = 'AI Analyse';
+                aiAnalyseBtn.disabled = false;
+            }
         });
+
+        // --- UI & UTILITY FUNCTIONS ---
+        const showToast = (message) => {
+            toast.textContent = message;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 3000);
+        };
+
+        const showAiPanel = () => {
+            aiViewPanel.classList.remove('hidden');
+            aiViewPanel.classList.add('flex');
+            resizeHandle.classList.remove('hidden');
+            logViewPanel.style.height = '50%';
+            aiViewPanel.style.height = '50%';
+        };
+
+        settingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
+        cancelApiKeyBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+        saveApiKeyBtn.addEventListener('click', () => {
+            const key = apiKeyInput.value.trim();
+            localStorage.setItem('openai_api_key', key || '');
+            showToast(key ? 'API Key saved successfully!' : 'API Key removed.');
+            settingsModal.classList.add('hidden');
+        });
+        apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
+
+        // Resizer logic
+        let isResizing = false;
+        resizeHandle.addEventListener('mousedown', () => { isResizing = true; document.body.style.cursor = 'ns-resize'; document.body.style.userSelect = 'none'; });
+        document.addEventListener('mousemove', e => {
+            if (!isResizing) return;
+            const topPercent = (e.clientY - logViewPanel.parentElement.offsetTop) / logViewPanel.parentElement.offsetHeight * 100;
+            if (topPercent > 20 && topPercent < 80) {
+                logViewPanel.style.height = `${topPercent}%`;
+                aiViewPanel.style.height = `${100 - topPercent}%`;
+            }
+        });
+        document.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = 'default'; document.body.style.userSelect = 'auto'; });
         
-        document.querySelectorAll('.sort-btn').forEach(btn => {
-            btn.classList.add('px-3', 'py-1', 'rounded-md', 'transition-colors', 'hover:bg-gray-600');
+        // Sorting and filtering
+        const runSortAndFilter = () => {
+            const filter = searchBox.value.toLowerCase();
+            const sortBy = sortControls.querySelector('.active').dataset.sort;
+            const items = Array.from(sourceListContainer.querySelectorAll('.source-item'));
+            items.sort((a, b) => {
+                if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
+                if (sortBy === 'size') return parseInt(b.dataset.size) - parseInt(a.dataset.size);
+                if (sortBy === 'date') return parseInt(b.dataset.modified) - parseInt(a.dataset.modified);
+                return 0;
+            }).forEach(item => {
+                const name = item.dataset.name.toLowerCase();
+                item.style.display = name.includes(filter) ? '' : 'flex';
+                sourceListContainer.appendChild(item);
+            });
+        };
+        searchBox.addEventListener('input', runSortAndFilter);
+        sortControls.addEventListener('click', e => {
+            if (e.target.matches('.sort-btn')) {
+                sortControls.querySelector('.active').classList.remove('active');
+                e.target.classList.add('active');
+                runSortAndFilter();
+            }
         });
+        runSortAndFilter();
+    });
+    document.querySelectorAll('.sort-btn').forEach(btn => btn.classList.add('px-3', 'py-1', 'rounded-md', 'transition-colors', 'hover:bg-gray-600'));
     </script>
 </body>
 </html>
