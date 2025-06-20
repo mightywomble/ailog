@@ -14,7 +14,7 @@
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1f2937; }
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
-        .sort-btn.active { background-color: #4f46e5; color: white; }
+        .sort-btn.active, .filter-btn.active { background-color: #4f46e5; color: white; }
         #resize-handle { cursor: ns-resize; }
         #settings-modal.hidden, #toast-notification.hidden { display: none; }
     </style>
@@ -34,8 +34,13 @@
     <div class="flex flex-1 overflow-hidden">
         <!-- Left Panel -->
         <aside class="w-1/3 md:w-1/4 lg:w-1/5 bg-gray-800 border-r border-gray-700 flex flex-col">
-            <div class="p-4 border-b border-gray-700">
-                <input type="text" id="search-box" placeholder="Filter logs..." class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <div class="p-4 border-b border-gray-700 space-y-3">
+                <input type="text" id="search-box" placeholder="Filter by name..." class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div id="filter-controls" class="grid grid-cols-3 gap-1 text-sm">
+                    <button class="filter-btn active" data-filter="all">All</button>
+                    <button class="filter-btn" data-filter="file">Syslog</button>
+                    <button class="filter-btn" data-filter="journal">Journal</button>
+                </div>
             </div>
             <div class="p-2 border-b border-gray-700">
                 <div id="sort-controls" class="flex items-center justify-between text-xs">
@@ -54,10 +59,8 @@
                         <a href="#" class="log-link flex items-center w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 focus:bg-indigo-600 focus:text-white transition-all">
                             <div class="flex-shrink-0 mr-3">
                                 {% if source.type == 'file' %}
-                                <!-- File Icon -->
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                 {% else %}
-                                <!-- Journald Icon -->
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>
                                 {% endif %}
                             </div>
@@ -137,6 +140,7 @@
 
         const searchBox = document.getElementById('search-box');
         const sortControls = document.getElementById('sort-controls');
+        const filterControls = document.getElementById('filter-controls');
 
         let currentLogContent = "";
 
@@ -250,8 +254,10 @@
         
         // Sorting and filtering
         const runSortAndFilter = () => {
-            const filter = searchBox.value.toLowerCase();
+            const nameFilter = searchBox.value.toLowerCase();
+            const typeFilter = filterControls.querySelector('.active').dataset.filter;
             const sortBy = sortControls.querySelector('.active').dataset.sort;
+            
             const items = Array.from(sourceListContainer.querySelectorAll('.source-item'));
             items.sort((a, b) => {
                 if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
@@ -260,7 +266,12 @@
                 return 0;
             }).forEach(item => {
                 const name = item.dataset.name.toLowerCase();
-                item.style.display = name.includes(filter) ? '' : 'flex';
+                const type = item.dataset.type;
+
+                const nameMatch = name.includes(nameFilter);
+                const typeMatch = (typeFilter === 'all') || (type === typeFilter);
+                
+                item.style.display = (nameMatch && typeMatch) ? 'flex' : 'none';
                 sourceListContainer.appendChild(item);
             });
         };
@@ -272,9 +283,16 @@
                 runSortAndFilter();
             }
         });
+        filterControls.addEventListener('click', e => {
+             if (e.target.matches('.filter-btn')) {
+                filterControls.querySelector('.active').classList.remove('active');
+                e.target.classList.add('active');
+                runSortAndFilter();
+            }
+        });
         runSortAndFilter();
     });
-    document.querySelectorAll('.sort-btn').forEach(btn => btn.classList.add('px-3', 'py-1', 'rounded-md', 'transition-colors', 'hover:bg-gray-600'));
+    document.querySelectorAll('.sort-btn, .filter-btn').forEach(btn => btn.classList.add('px-3', 'py-1', 'rounded-md', 'transition-colors', 'hover:bg-gray-600', 'border', 'border-gray-700'));
     </script>
 </body>
 </html>

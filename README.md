@@ -6,6 +6,8 @@ Built with Flask and styled with Tailwind CSS, it offers a clean, responsive UI 
 Features
 Unified Log Access: View traditional logs from /var/log and journalctl logs for systemd services in a single interface.
 
+Log Type Filtering: Easily filter the view to show only syslog files, only journald services, or all sources combined.
+
 AI-Powered Analysis: Send log contents to the OpenAI API for a detailed analysis with a single click.
 
 Gzip Decompression: Automatically decompresses and displays .gz log archives on the fly.
