@@ -11,14 +11,17 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        /* Use Inter for general text and JetBrains Mono for code/logs */
         body { font-family: 'Inter', sans-serif; }
         pre, code { font-family: 'JetBrains Mono', monospace; }
-        /* Custom scrollbar for a more modern feel */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1f2937; }
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        /* Style for the active sort button */
+        .sort-btn.active {
+            background-color: #4f46e5;
+            color: white;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200 flex flex-col h-screen">
@@ -35,30 +38,49 @@
     <div class="flex flex-1 overflow-hidden">
         <!-- Left Panel: File List -->
         <aside class="w-1/3 md:w-1/4 lg:w-1/5 bg-gray-800 border-r border-gray-700 flex flex-col">
-            <h2 class="text-lg font-semibold p-4 border-b border-gray-700">Log Files in /var/log</h2>
+            <div class="p-4 border-b border-gray-700">
+                <input type="text" id="search-box" placeholder="Filter logs..." class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div class="p-2 border-b border-gray-700">
+                <div id="sort-controls" class="flex items-center justify-between text-xs">
+                    <span class="px-2 text-gray-400">Sort by:</span>
+                    <div class="flex space-x-1">
+                        <button class="sort-btn active" data-sort="name">Name</button>
+                        <button class="sort-btn" data-sort="size">Size</button>
+                        <button class="sort-btn" data-sort="date">Date</button>
+                    </div>
+                </div>
+            </div>
+
             {% if error %}
             <div class="m-4 p-4 bg-red-500/20 border border-red-500 rounded-md text-red-300">
                 <strong>Error:</strong><br>{{ error }}
             </div>
             {% endif %}
-            <nav id="file-list" class="flex-1 overflow-y-auto p-2">
-                <ul>
+
+            <nav class="flex-1 overflow-y-auto p-2">
+                <ul id="file-list-container">
                     {% for file in files %}
-                    <li>
-                        <a href="#" class="log-link block w-full text-left p-2 rounded-md hover:bg-gray-700 focus:bg-indigo-600 focus:outline-none transition-colors duration-150" data-filename="{{ file }}">
-                            {{ file }}
+                    <li class="file-item" data-name="{{ file.name }}" data-size="{{ file.size_bytes }}" data-modified="{{ file.modified_epoch }}">
+                        <a href="#" class="log-link flex flex-col w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 hover:border-gray-600 focus:bg-indigo-600 focus:text-white focus:outline-none transition-all duration-150">
+                            <div class="flex justify-between items-center">
+                                <span class="font-medium truncate pr-2">{{ file.name }}</span>
+                                <span class="text-xs font-mono text-gray-400 flex-shrink-0">{{ file.size_formatted }}</span>
+                            </div>
+                            <span class="text-xs text-gray-500 mt-1">{{ file.modified_formatted }}</span>
                         </a>
                     </li>
                     {% else %}
                     <li class="p-2 text-gray-500">No log files found or accessible.</li>
                     {% endfor %}
                 </ul>
+                <div id="no-results" class="text-center p-4 text-gray-500 hidden">No logs match your filter.</div>
             </nav>
         </aside>
 
         <!-- Right Panel: Log Content -->
         <main class="flex-1 flex flex-col bg-gray-900 overflow-hidden">
-            <div class="p-4 border-b border-gray-700 bg-gray-800/30">
+            <div class="p-4 border-b border-gray-700 bg-gray-800/30 flex justify-between items-center">
                  <h2 id="log-title" class="text-lg font-semibold text-gray-400 truncate">Select a log file to view its content</h2>
             </div>
             <div id="log-content-wrapper" class="flex-1 p-4 overflow-auto bg-black/20">
@@ -69,59 +91,121 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const fileLinks = document.querySelectorAll('.log-link');
             const logTitle = document.getElementById('log-title');
             const logContent = document.getElementById('log-content');
             const logContentWrapper = document.getElementById('log-content-wrapper');
+            const fileListContainer = document.getElementById('file-list-container');
+            const searchBox = document.getElementById('search-box');
+            const noResultsMessage = document.getElementById('no-results');
+            const sortControls = document.getElementById('sort-controls');
+            
+            let activeFileLink = null;
 
-            let activeLink = null;
+            // --- DEBOUNCE FUNCTION for search performance ---
+            function debounce(func, delay) {
+                let timeout;
+                return function(...args) {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), delay);
+                };
+            }
 
-            fileLinks.forEach(link => {
-                link.addEventListener('click', async (event) => {
-                    event.preventDefault();
-
-                    const filename = link.dataset.filename;
-                    
-                    // Update active state visuals
-                    if (activeLink) {
-                        activeLink.classList.remove('bg-indigo-600', 'text-white');
-                    }
-                    link.classList.add('bg-indigo-600', 'text-white');
-                    activeLink = link;
-
-                    // Show loading state
-                    logTitle.textContent = `Loading: ${filename}...`;
-                    logContent.textContent = 'Fetching log data...';
-                    logContentWrapper.scrollTop = 0; // Scroll to top
-
-                    try {
-                        const response = await fetch(`/log/${filename}`);
-                        
-                        if (!response.ok) {
-                            const errorData = await response.json();
-                            throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
-                        }
-
-                        const data = await response.json();
-
-                        if (data.error) {
-                             throw new Error(data.error);
-                        }
-                        
-                        logTitle.textContent = filename;
-                        logContent.textContent = data.content || 'Log file is empty or could not be read.';
-
-                    } catch (error) {
-                        console.error('Error fetching log:', error);
-                        logTitle.textContent = `Error loading ${filename}`;
-                        logContent.textContent = `An error occurred:\n\n${error.message}`;
-                        // Add error styling
-                        logContent.classList.add('text-red-400');
+            // --- SEARCH/FILTER LOGIC ---
+            const handleSearch = () => {
+                const filter = searchBox.value.toLowerCase();
+                const items = fileListContainer.querySelectorAll('.file-item');
+                let visibleCount = 0;
+                items.forEach(item => {
+                    const fileName = item.dataset.name.toLowerCase();
+                    if (fileName.includes(filter)) {
+                        item.classList.remove('hidden');
+                        visibleCount++;
+                    } else {
+                        item.classList.add('hidden');
                     }
                 });
-            });
-        });
-    </script>
+                noResultsMessage.classList.toggle('hidden', visibleCount > 0);
+            };
+            searchBox.addEventListener('input', debounce(handleSearch, 200));
 
+            // --- SORTING LOGIC ---
+            sortControls.addEventListener('click', (e) => {
+                if (!e.target.matches('.sort-btn')) return;
+
+                const sortBtn = e.target;
+                const sortBy = sortBtn.dataset.sort;
+
+                // Update active button style
+                sortControls.querySelector('.active').classList.remove('active');
+                sortBtn.classList.add('active');
+
+                const items = Array.from(fileListContainer.querySelectorAll('.file-item'));
+                
+                items.sort((a, b) => {
+                    if (sortBy === 'name') {
+                        return a.dataset.name.localeCompare(b.dataset.name);
+                    }
+                    if (sortBy === 'size') {
+                        return parseInt(b.dataset.size) - parseInt(a.dataset.size); // Descending
+                    }
+                    if (sortBy === 'date') {
+                        return parseInt(b.dataset.modified) - parseInt(a.dataset.modified); // Descending
+                    }
+                });
+
+                // Re-append sorted items
+                items.forEach(item => fileListContainer.appendChild(item));
+            });
+
+
+            // --- FILE CLICK LOGIC ---
+            fileListContainer.addEventListener('click', async (event) => {
+                const link = event.target.closest('.log-link');
+                if (!link) return;
+
+                event.preventDefault();
+                logContent.classList.remove('text-red-400');
+                
+                const listItem = link.closest('.file-item');
+                const filename = listItem.dataset.name;
+                
+                if (activeFileLink) {
+                    activeFileLink.classList.remove('bg-indigo-600', 'text-white');
+                }
+                link.classList.add('bg-indigo-600', 'text-white');
+                activeFileLink = link;
+
+                logTitle.textContent = `Loading: ${filename}...`;
+                logContent.textContent = 'Fetching log data...';
+                logContentWrapper.scrollTop = 0;
+
+                try {
+                    const response = await fetch(`/log/${filename}`);
+                    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                    const data = await response.json();
+                    if (data.error) throw new Error(data.error);
+                    
+                    logTitle.textContent = filename;
+                    logContent.textContent = data.content || 'Log file is empty or could not be read.';
+                } catch (error) {
+                    console.error('Error fetching log:', error);
+                    logTitle.textContent = `Error loading ${filename}`;
+                    logContent.textContent = `An error occurred:\n\n${error.message}`;
+                    logContent.classList.add('text-red-400');
+                }
+            });
+
+            // --- Apply default sort on load ---
+            sortControls.querySelector('[data-sort="name"]').click();
+        });
+
+        // Add a class to all sort buttons for styling
+        document.querySelectorAll('.sort-btn').forEach(btn => {
+            btn.classList.add('px-3', 'py-1', 'rounded-md', 'transition-colors', 'hover:bg-gray-600');
+        });
+
+    </script>
 </body>
 </html>
+```
+I've now displayed the `index.html` file in the Canvas. You can switch between it and the `app.py` file to see both parts of the applicati

@@ -1,7 +1,8 @@
 import subprocess
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import shlex
 import os
+import datetime
 
 # Initialize the Flask application
 app = Flask(__name__)
@@ -16,61 +17,100 @@ app = Flask(__name__)
 
 LOG_DIRECTORY = '/var/log'
 
+def format_bytes(size_bytes):
+    """Converts bytes to a human-readable format (KB, MB, etc.)."""
+    if size_bytes == 0:
+        return "0B"
+    power = 1024
+    n = 0
+    power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
+    while size_bytes >= power and n < len(power_labels) - 1:
+        size_bytes /= power
+        n += 1
+    # Format to one decimal place if it's not bytes
+    if n > 0:
+        return f"{size_bytes:.1f} {power_labels[n]}"
+    else:
+        return f"{int(size_bytes)} {power_labels[n]}"
+
+def format_relative_time(epoch_time):
+    """Converts an epoch timestamp into a relative time string."""
+    now = datetime.datetime.now()
+    dt_time = datetime.datetime.fromtimestamp(epoch_time)
+    delta = now - dt_time
+    
+    if delta.days > 1:
+        return f"{delta.days} days ago"
+    elif delta.days == 1:
+        return "Yesterday"
+    elif delta.seconds >= 3600:
+        return f"{delta.seconds // 3600} hours ago"
+    elif delta.seconds >= 60:
+        return f"{delta.seconds // 60} mins ago"
+    else:
+        return "Just now"
+
+
 @app.route('/')
 def index():
     """
     Renders the main page.
-    It gets a list of files from /var/log using 'sudo ls' and passes them
-    to the template.
+    It gets a list of files, their sizes, and modification times from /var/log.
     """
-    files = []
+    files_data = []
     error = None
     try:
-        # Command to list files in the log directory
-        command = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
-        # The '-p' flag adds a '/' to directory names
+        command_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
+        result_ls = subprocess.run(command_ls, shell=True, capture_output=True, text=True, check=True)
         
-        # Execute the command
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        
-        # Filter out directories from the list
-        all_entries = result.stdout.strip().split('\n')
-        files = [entry for entry in all_entries if not entry.endswith('/')]
+        all_entries = result_ls.stdout.strip().split('\n')
+        filenames = [entry for entry in all_entries if not entry.endswith('/') and entry]
+
+        for filename in filenames:
+            file_path = os.path.join(LOG_DIRECTORY, filename)
+            # Use 'stat' to get size (%s) and modification time as epoch (%Y)
+            command_stat = f"sudo stat -c '%s %Y' {shlex.quote(file_path)}"
+            result_stat = subprocess.run(command_stat, shell=True, capture_output=True, text=True, check=True)
+            size_bytes, mod_time_epoch = map(int, result_stat.stdout.strip().split())
+            
+            files_data.append({
+                'name': filename,
+                'size_bytes': size_bytes,
+                'size_formatted': format_bytes(size_bytes),
+                'modified_epoch': mod_time_epoch,
+                'modified_formatted': format_relative_time(mod_time_epoch)
+            })
 
     except subprocess.CalledProcessError as e:
-        # Handle cases where the command fails (e.g., permission issues)
-        error = f"Error listing log files: {e.stderr}"
+        error = f"Error processing log files: {e.stderr}"
     except Exception as e:
-        # Handle other potential exceptions
         error = f"An unexpected error occurred: {str(e)}"
         
-    return render_template('index.html', files=files, error=error)
+    return render_template('index.html', files=files_data, error=error)
 
 
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
     """
     API endpoint to get the content of a specific log file.
-    Takes a filename, reads it with 'sudo cat', and returns the content as JSON.
+    It can now optionally return the full log content.
     """
-    # Basic security check to prevent directory traversal attacks
     if '/' in filename or '..' in filename:
         return jsonify({'error': 'Invalid filename.'}), 400
 
     file_path = os.path.join(LOG_DIRECTORY, filename)
+    
+    # Check for 'full' query parameter
+    show_full_log = request.args.get('full', 'false').lower() == 'true'
 
     try:
-        # Command to read the last 500 lines of the log file to avoid huge files
-        # You can change '500' to a different number or use 'cat' to get the whole file
-        command = f"sudo tail -n 500 {shlex.quote(file_path)}"
+        if show_full_log:
+            # Command to read the entire log file
+            command = f"sudo cat {shlex.quote(file_path)}"
+        else:
+            # Command to read the last 500 lines of the log file
+            command = f"sudo tail -n 500 {shlex.quote(file_path)}"
         
-        # Execute the command
         result = subprocess.run(
             command,
             shell=True,
@@ -79,11 +119,9 @@ def get_log_content(filename):
             check=True
         )
         
-        # Return the content in a JSON response
         return jsonify({'content': result.stdout})
 
     except subprocess.CalledProcessError as e:
-        # Handle errors, e.g., file not found or not readable
         error_message = f"Could not read log file '{filename}'. Error: {e.stderr}"
         return jsonify({'error': error_message}), 500
     except Exception as e:
@@ -91,6 +129,4 @@ def get_log_content(filename):
 
 
 if __name__ == '__main__':
-    # Running in debug mode is convenient but should be disabled in a "production" dev environment
-    # Use host='0.0.0.0' to make it accessible from other machines on your network
     app.run(host='0.0.0.0', port=5001, debug=True)
