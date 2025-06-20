@@ -74,9 +74,12 @@
             <div id="log-view-panel" class="flex-1 flex flex-col overflow-hidden">
                 <div class="p-4 border-b border-gray-700 bg-gray-800/30 flex justify-between items-center">
                     <h2 id="log-title" class="text-lg font-semibold text-gray-400 truncate">Select a log file</h2>
-                    <button id="ai-analyse-btn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-                        AI Analyse
-                    </button>
+                    <div class="flex items-center space-x-3">
+                        <span id="truncation-warning" class="hidden text-xs text-yellow-400 font-semibold">Log is too long and will be truncated</span>
+                        <button id="ai-analyse-btn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                            AI Analyse
+                        </button>
+                    </div>
                 </div>
                 <div id="log-content-wrapper" class="flex-1 p-4 overflow-auto bg-black/20">
                     <pre><code id="log-content" class="text-sm text-gray-300">Log content will appear here...</code></pre>
@@ -124,6 +127,7 @@
             const searchBox = document.getElementById('search-box');
             const sortControls = document.getElementById('sort-controls');
             const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
+            const truncationWarning = document.getElementById('truncation-warning');
             
             // Panels and Resizer
             const aiViewPanel = document.getElementById('ai-view-panel');
@@ -166,7 +170,6 @@
                 settingsModal.classList.add('hidden');
             });
 
-            // Load saved API key on startup
             apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
 
 
@@ -189,6 +192,7 @@
                 logTitle.textContent = `Loading: ${filename}...`;
                 logContent.textContent = 'Fetching log data...';
                 aiAnalyseBtn.classList.add('hidden');
+                truncationWarning.classList.add('hidden'); // Hide warning on new selection
                 aiAnalyseBtn.disabled = true;
 
                 try {
@@ -203,6 +207,10 @@
                     if (localStorage.getItem('openai_api_key') && currentLogContent) {
                          aiAnalyseBtn.classList.remove('hidden');
                          aiAnalyseBtn.disabled = false;
+                         // Show truncation warning if the flag is true
+                         if (data.will_be_truncated) {
+                             truncationWarning.classList.remove('hidden');
+                         }
                     }
                 } catch (error) {
                     logTitle.textContent = `Error loading ${filename}`;
@@ -236,7 +244,7 @@
                     if (data.error) throw new Error(data.error);
 
                     let formattedAnalysis = data.analysis
-                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') // Basic escaping
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') 
                         .replace(/```([\s\S]*?)```/g, (match, p1) => `<pre class="bg-gray-900 p-3 rounded-md"><code>${p1.trim()}</code></pre>`)
                         .replace(/`([^`]+)`/g, '<code class="bg-gray-700 px-1 rounded-sm">$1</code>')
                         .replace(/\n/g, '<br>');
@@ -277,7 +285,7 @@
                 document.body.style.userSelect = 'auto';
             });
             
-             // --- SORTING AND FILTERING (UNCHANGED) ---
+             // --- SORTING AND FILTERING ---
             const sortAndFilter = () => {
                 const filter = searchBox.value.toLowerCase();
                 const sortBy = sortControls.querySelector('.active').dataset.sort;

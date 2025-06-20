@@ -16,6 +16,9 @@ app = Flask(__name__)
 # ---
 
 LOG_DIRECTORY = '/var/log'
+# Define a safe maximum character count to avoid exceeding the API's token limit.
+# A token is roughly 4 characters, so 40,000 chars is ~10,000 tokens, safely below the 16k limit.
+MAX_CHAR_COUNT = 40000 
 
 def format_bytes(size_bytes):
     """Converts bytes to a human-readable format (KB, MB, etc.)."""
@@ -80,24 +83,40 @@ def index():
     except Exception as e:
         error = f"An unexpected error occurred: {str(e)}"
         
-    # The openai_configured flag is no longer needed here
     return render_template('index.html', files=files_data, error=error)
 
 
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
-    """API endpoint to get the content of a specific log file."""
+    """
+    API endpoint to get the content of a specific log file.
+    This function can now handle both plain text and gzipped (.gz) files.
+    It also returns a flag if the content length exceeds the analysis limit.
+    """
     if '/' in filename or '..' in filename:
         return jsonify({'error': 'Invalid filename.'}), 400
 
     file_path = os.path.join(LOG_DIRECTORY, filename)
     
     try:
-        command = f"sudo tail -n 500 {shlex.quote(file_path)}"
+        if filename.endswith('.gz'):
+            command = f"sudo zcat {shlex.quote(file_path)} | tail -n 500"
+        else:
+            command = f"sudo tail -n 500 {shlex.quote(file_path)}"
+
         result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
-        return jsonify({'content': result.stdout})
+        
+        log_text = result.stdout
+        # Check if the fetched content is longer than the allowed character count for the API
+        will_be_truncated = len(log_text) > MAX_CHAR_COUNT
+
+        return jsonify({'content': log_text, 'will_be_truncated': will_be_truncated})
+        
+    except subprocess.CalledProcessError as e:
+        error_message = f"Could not read log file '{filename}'. Error: {e.stderr}"
+        return jsonify({'error': error_message}), 500
     except Exception as e:
-        return jsonify({'error': f"Could not read log file: {str(e)}"}), 500
+        return jsonify({'error': f"An unexpected error occurred while reading '{filename}': {str(e)}"}), 500
 
 @app.route('/analyse', methods=['POST'])
 def analyse_log():
@@ -113,6 +132,12 @@ def analyse_log():
         return jsonify({'error': 'OpenAI API key not provided. Please set it in the settings menu.'}), 400
     if not log_content:
         return jsonify({'error': 'Missing log_content in request.'}), 400
+    
+    # --- FIX for Context Length Error ---
+    if len(log_content) > MAX_CHAR_COUNT:
+        # If the log is too long, truncate it, keeping the end of the file.
+        truncation_message = f"[--- Log content truncated to the last {MAX_CHAR_COUNT} characters for analysis ---]\n\n"
+        log_content = truncation_message + log_content[-MAX_CHAR_COUNT:]
 
     prompt = "Analyse this log for any errors and create a summary report, troubleshooting tips and any other advice relating to any other issues found."
 
