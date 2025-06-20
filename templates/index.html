@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log File Viewer</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for a cleaner look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        /* Use Inter for general text and JetBrains Mono for code/logs */
+        body { font-family: 'Inter', sans-serif; }
+        pre, code { font-family: 'JetBrains Mono', monospace; }
+        /* Custom scrollbar for a more modern feel */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 flex flex-col h-screen">
+
+    <!-- Header -->
+    <header class="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-4 shadow-lg flex items-center justify-between">
+        <h1 class="text-xl font-bold text-white">Local Log Viewer</h1>
+        <div class="bg-red-900/50 border border-red-700 text-red-200 px-3 py-1 rounded-full text-xs font-mono">
+            SUDO MODE ENABLED
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="flex flex-1 overflow-hidden">
+        <!-- Left Panel: File List -->
+        <aside class="w-1/3 md:w-1/4 lg:w-1/5 bg-gray-800 border-r border-gray-700 flex flex-col">
+            <h2 class="text-lg font-semibold p-4 border-b border-gray-700">Log Files in /var/log</h2>
+            {% if error %}
+            <div class="m-4 p-4 bg-red-500/20 border border-red-500 rounded-md text-red-300">
+                <strong>Error:</strong><br>{{ error }}
+            </div>
+            {% endif %}
+            <nav id="file-list" class="flex-1 overflow-y-auto p-2">
+                <ul>
+                    {% for file in files %}
+                    <li>
+                        <a href="#" class="log-link block w-full text-left p-2 rounded-md hover:bg-gray-700 focus:bg-indigo-600 focus:outline-none transition-colors duration-150" data-filename="{{ file }}">
+                            {{ file }}
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="p-2 text-gray-500">No log files found or accessible.</li>
+                    {% endfor %}
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Right Panel: Log Content -->
+        <main class="flex-1 flex flex-col bg-gray-900 overflow-hidden">
+            <div class="p-4 border-b border-gray-700 bg-gray-800/30">
+                 <h2 id="log-title" class="text-lg font-semibold text-gray-400 truncate">Select a log file to view its content</h2>
+            </div>
+            <div id="log-content-wrapper" class="flex-1 p-4 overflow-auto bg-black/20">
+                <pre><code id="log-content" class="text-sm text-gray-300">Log content will appear here...</code></pre>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const fileLinks = document.querySelectorAll('.log-link');
+            const logTitle = document.getElementById('log-title');
+            const logContent = document.getElementById('log-content');
+            const logContentWrapper = document.getElementById('log-content-wrapper');
+
+            let activeLink = null;
+
+            fileLinks.forEach(link => {
+                link.addEventListener('click', async (event) => {
+                    event.preventDefault();
+
+                    const filename = link.dataset.filename;
+                    
+                    // Update active state visuals
+                    if (activeLink) {
+                        activeLink.classList.remove('bg-indigo-600', 'text-white');
+                    }
+                    link.classList.add('bg-indigo-600', 'text-white');
+                    activeLink = link;
+
+                    // Show loading state
+                    logTitle.textContent = `Loading: ${filename}...`;
+                    logContent.textContent = 'Fetching log data...';
+                    logContentWrapper.scrollTop = 0; // Scroll to top
+
+                    try {
+                        const response = await fetch(`/log/${filename}`);
+                        
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                        }
+
+                        const data = await response.json();
+
+                        if (data.error) {
+                             throw new Error(data.error);
+                        }
+                        
+                        logTitle.textContent = filename;
+                        logContent.textContent = data.content || 'Log file is empty or could not be read.';
+
+                    } catch (error) {
+                        console.error('Error fetching log:', error);
+                        logTitle.textContent = `Error loading ${filename}`;
+                        logContent.textContent = `An error occurred:\n\n${error.message}`;
+                        // Add error styling
+                        logContent.classList.add('text-red-400');
+                    }
+                });
+            });
+        });
+    </script>
+
+</body>
+</html>
