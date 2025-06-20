@@ -1,0 +1,24 @@
+{
+    "sources": [
+        {
+            "name": "auth.log",
+            "type": "file"
+        },
+        {
+            "name": "casaos.service",
+            "type": "journal"
+        },
+        {
+            "name": "cron.service",
+            "type": "journal"
+        },
+        {
+            "name": "dmesg",
+            "type": "file"
+        }
+    ],
+    "interval": 4,
+    "api_key": "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",
+    "webhook_url": "https://discord.com/api/webhooks/1385750521608146954/uj2Xs85AHYKPltb9FuDNTcWz65-ETPWodIeUd8R9YTgiZulMJwkAZtWqA_5zOBMUo6Tj",
+    "is_running": true
+}

@@ -16,7 +16,7 @@
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
         .sort-btn.active, .filter-btn.active { background-color: #4f46e5; color: white; }
         #resize-handle { cursor: ns-resize; }
-        #settings-modal.hidden, #toast-notification.hidden { display: none; }
+        #settings-modal.hidden, #log-selection-modal.hidden, #toast-notification.hidden { display: none; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200 flex flex-col h-screen">
@@ -102,47 +102,125 @@
 
     <!-- Settings Modal -->
     <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h3 class="text-xl font-semibold mb-4">Settings</h3>
-            <div>
-                <label for="api-key-input" class="block text-sm font-medium text-gray-300 mb-1">OpenAI API Key</label>
-                <input type="password" id="api-key-input" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="sk-...">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-2xl">
+            <h3 class="text-xl font-semibold mb-6">Settings</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Left Column: Credentials -->
+                <div class="space-y-6">
+                    <div>
+                        <label for="api-key-input" class="block text-sm font-medium text-gray-300 mb-1">OpenAI API Key</label>
+                        <input type="password" id="api-key-input" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 placeholder-gray-400" placeholder="sk-...">
+                    </div>
+                    <div>
+                        <label for="discord-webhook-input" class="block text-sm font-medium text-gray-300 mb-1">Discord Webhook URL</label>
+                        <div class="flex space-x-2">
+                            <input type="password" id="discord-webhook-input" class="flex-grow w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2" placeholder="https://discord.com/api/webhooks/...">
+                            <button id="test-discord-btn" class="px-4 py-2 rounded-md bg-sky-600 hover:bg-sky-500 transition-colors text-white disabled:opacity-50 disabled:cursor-wait">Test</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Right Column: Scheduler -->
+                <div class="space-y-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700 flex flex-col">
+                    <h4 class="font-semibold text-lg text-white">Scheduled Analysis</h4>
+                    <div id="scheduler-status" class="text-sm text-gray-400 p-2 rounded-md bg-gray-800">
+                        Loading status...
+                    </div>
+                    <div class="flex-grow">
+                        <button id="select-logs-btn" class="w-full mb-4 px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Select Logs for Schedule...</button>
+                        <span id="selected-log-count" class="text-sm text-gray-400 block text-center">0 logs selected</span>
+                    </div>
+                    <div>
+                        <label for="schedule-interval-input" class="block text-sm font-medium text-gray-300 mb-1">Run every (hours)</label>
+                        <input type="number" id="schedule-interval-input" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2" min="1" max="100" value="12">
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 pt-2">
+                         <button id="start-schedule-btn" class="px-4 py-2 rounded-md bg-green-600 hover:bg-green-500 transition-colors text-white">Start</button>
+                         <button id="stop-schedule-btn" class="px-4 py-2 rounded-md bg-red-600 hover:bg-red-500 transition-colors text-white">Stop</button>
+                         <button id="run-now-btn" class="px-4 py-2 rounded-md bg-amber-500 hover:bg-amber-400 transition-colors text-white">Run Now</button>
+                    </div>
+                </div>
             </div>
-            <div class="mt-6 flex justify-end space-x-3">
-                <button id="cancel-api-key-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
-                <button id="save-api-key-btn" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Save</button>
+            <div class="mt-8 flex justify-end">
+                <button id="save-settings-btn" class="px-6 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Save & Close</button>
             </div>
         </div>
     </div>
     
+    <!-- Log Selection Modal -->
+    <div id="log-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-xl h-3/4 flex flex-col">
+            <h3 class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
+            <div id="log-selection-list" class="flex-grow overflow-y-auto border border-gray-700 rounded-md p-2">
+                <!-- Log list will be populated by JS -->
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button id="cancel-log-selection-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
+                <button id="save-log-selection-btn" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Confirm Selections</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg"></div>
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
+        // --- ELEMENT SELECTORS ---
         const sourceListContainer = document.getElementById('source-list-container');
         const logTitle = document.getElementById('log-title');
         const logContent = document.getElementById('log-content');
         const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
         const truncationWarning = document.getElementById('truncation-warning');
+        const searchBox = document.getElementById('search-box');
+        const sortControls = document.getElementById('sort-controls');
+        const filterControls = document.getElementById('filter-controls');
         
+        // Settings Modal
         const settingsBtn = document.getElementById('settings-btn');
         const settingsModal = document.getElementById('settings-modal');
-        const saveApiKeyBtn = document.getElementById('save-api-key-btn');
-        const cancelApiKeyBtn = document.getElementById('cancel-api-key-btn');
+        const saveSettingsBtn = document.getElementById('save-settings-btn');
         const apiKeyInput = document.getElementById('api-key-input');
+        const discordWebhookInput = document.getElementById('discord-webhook-input');
+        const testDiscordBtn = document.getElementById('test-discord-btn');
         const toast = document.getElementById('toast-notification');
         
+        // Scheduler UI
+        const schedulerStatusDiv = document.getElementById('scheduler-status');
+        const scheduleIntervalInput = document.getElementById('schedule-interval-input');
+        const startScheduleBtn = document.getElementById('start-schedule-btn');
+        const stopScheduleBtn = document.getElementById('stop-schedule-btn');
+        const runNowBtn = document.getElementById('run-now-btn');
+        const selectLogsBtn = document.getElementById('select-logs-btn');
+        const selectedLogCountSpan = document.getElementById('selected-log-count');
+
+        // Log Selection Modal
+        const logSelectionModal = document.getElementById('log-selection-modal');
+        const logSelectionList = document.getElementById('log-selection-list');
+        const saveLogSelectionBtn = document.getElementById('save-log-selection-btn');
+        const cancelLogSelectionBtn = document.getElementById('cancel-log-selection-btn');
+        
+        // Panels & Resizer
         const aiViewPanel = document.getElementById('ai-view-panel');
         const aiContentWrapper = document.getElementById('ai-content-wrapper');
         const logViewPanel = document.getElementById('log-view-panel');
         const resizeHandle = document.getElementById('resize-handle');
-
-        const searchBox = document.getElementById('search-box');
-        const sortControls = document.getElementById('sort-controls');
-        const filterControls = document.getElementById('filter-controls');
-
+        
+        let currentLogName = "";
         let currentLogContent = "";
+        let scheduledSources = [];
+        
+        // --- API & DATA FETCHING ---
+        const fetchApi = async (endpoint, options = {}) => {
+            try {
+                const response = await fetch(endpoint, options);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'An unknown error occurred.');
+                return data;
+            } catch (error) {
+                showToast(error.message, 'error');
+                throw error;
+            }
+        };
 
         // --- CORE LOGIC ---
         sourceListContainer.addEventListener('click', async (event) => {
@@ -151,61 +229,51 @@
             event.preventDefault();
 
             const sourceItem = link.closest('.source-item');
-            const name = sourceItem.dataset.name;
+            currentLogName = sourceItem.dataset.name;
             const type = sourceItem.dataset.type;
 
-            logTitle.textContent = `Loading: ${name}...`;
+            logTitle.textContent = `Loading: ${currentLogName}...`;
             logContent.textContent = 'Fetching log data...';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
-            aiAnalyseBtn.disabled = true;
 
-            const url = type === 'file' ? `/log/${name}` : `/journal/${name}`;
+            const url = type === 'file' ? `/log/${currentLogName}` : `/journal/${currentLogName}`;
 
             try {
-                const response = await fetch(url);
-                const data = await response.json();
-                if (data.error) throw new Error(data.error);
-                
+                const data = await fetchApi(url);
                 currentLogContent = data.content;
-                logTitle.textContent = name;
+                logTitle.textContent = currentLogName;
                 logContent.textContent = currentLogContent || 'Log source is empty.';
                 
                 if (localStorage.getItem('openai_api_key') && currentLogContent) {
                      aiAnalyseBtn.classList.remove('hidden');
-                     aiAnalyseBtn.disabled = false;
-                     if (data.will_be_truncated) {
-                         truncationWarning.classList.remove('hidden');
-                     }
+                     if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
                 }
             } catch (error) {
-                logTitle.textContent = `Error loading ${name}`;
-                logContent.textContent = `An error occurred:\n\n${error.message}`;
+                logTitle.textContent = `Error loading ${currentLogName}`;
             }
         });
 
         aiAnalyseBtn.addEventListener('click', async () => {
             const apiKey = localStorage.getItem('openai_api_key');
-            if (!apiKey) {
-                showToast('API Key is missing. Please set it in Settings.');
-                return;
-            }
+            if (!apiKey) { showToast('API Key is missing.', 'error'); return; }
 
             aiAnalyseBtn.textContent = 'Analysing...';
             aiAnalyseBtn.disabled = true;
             showAiPanel();
-            aiContentWrapper.innerHTML = '<p>Contacting AI assistant... Please wait.</p>';
+            aiContentWrapper.innerHTML = '<p>Contacting AI assistant...</p>';
 
             try {
-                const response = await fetch('/analyse', {
+                const data = await fetchApi('/analyse', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ log_content: currentLogContent, api_key: apiKey })
+                    body: JSON.stringify({ 
+                        log_content: currentLogContent, log_name: currentLogName, api_key: apiKey,
+                        webhook_url: localStorage.getItem('discord_webhook_url')
+                    })
                 });
-                const data = await response.json();
-                if (data.error) throw new Error(data.error);
-                let formattedAnalysis = data.analysis.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/```([\s\S]*?)```/g, (match, p1) => `<pre class="bg-gray-900 p-3 rounded-md"><code>${p1.trim()}</code></pre>`).replace(/`([^`]+)`/g, '<code class="bg-gray-700 px-1 rounded-sm">$1</code>').replace(/\n/g, '<br>');
-                aiContentWrapper.innerHTML = formattedAnalysis;
+                aiContentWrapper.innerHTML = data.analysis.replace(/\n/g, '<br>');
+                if (data.discord_sent) showToast('Issue detected! Alert sent to Discord.', 'info');
             } catch (error) {
                 aiContentWrapper.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
             } finally {
@@ -214,83 +282,179 @@
             }
         });
 
-        // --- UI & UTILITY FUNCTIONS ---
-        const showToast = (message) => {
-            toast.textContent = message;
-            toast.classList.remove('hidden');
-            setTimeout(() => toast.classList.add('hidden'), 3000);
+        // --- SETTINGS & SCHEDULER LOGIC ---
+        const updateSchedulerStatus = async () => {
+            try {
+                const data = await fetchApi('/schedule/status');
+                scheduledSources = data.sources || [];
+                selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+
+                if (data.is_running) {
+                    const nextRun = new Date(data.next_run).toLocaleString();
+                    schedulerStatusDiv.innerHTML = `
+                        <p class="text-green-400 font-semibold">Status: Running</p>
+                        <p>Monitoring ${data.sources.length} logs every ${data.interval} hour(s).</p>
+                        <p>Next run: ${nextRun}</p>`;
+                    scheduleIntervalInput.value = data.interval;
+                } else {
+                    schedulerStatusDiv.innerHTML = `<p class="text-yellow-400 font-semibold">Status: Not Running</p>`;
+                }
+            } catch (error) {
+                schedulerStatusDiv.innerHTML = `<p class="text-red-400 font-semibold">Error fetching status.</p>`;
+            }
         };
 
-        const showAiPanel = () => {
-            aiViewPanel.classList.remove('hidden');
-            aiViewPanel.classList.add('flex');
-            resizeHandle.classList.remove('hidden');
-            logViewPanel.style.height = '50%';
-            aiViewPanel.style.height = '50%';
-        };
+        selectLogsBtn.addEventListener('click', () => {
+            logSelectionList.innerHTML = '';
+            const allSourceItems = document.querySelectorAll('#source-list-container .source-item');
+            allSourceItems.forEach(item => {
+                if (parseInt(item.dataset.size, 10) === 0 && item.dataset.type === 'file') return;
 
-        settingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
-        cancelApiKeyBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
-        saveApiKeyBtn.addEventListener('click', () => {
-            const key = apiKeyInput.value.trim();
-            localStorage.setItem('openai_api_key', key || '');
-            showToast(key ? 'API Key saved successfully!' : 'API Key removed.');
+                const name = item.dataset.name;
+                const type = item.dataset.type;
+                
+                const li = document.createElement('li');
+                li.className = 'flex items-center p-2 rounded-md hover:bg-gray-700';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500 mr-4';
+                checkbox.value = JSON.stringify({ name, type });
+                if (scheduledSources.some(s => s.name === name && s.type === type)) {
+                    checkbox.checked = true;
+                }
+                
+                const label = document.createElement('label');
+                label.textContent = name;
+                label.className = 'flex-grow cursor-pointer';
+                label.onclick = () => checkbox.click(); // Allow clicking label to toggle
+                
+                li.appendChild(checkbox);
+                li.appendChild(label);
+                logSelectionList.appendChild(li);
+            });
+            logSelectionModal.classList.remove('hidden');
+        });
+
+        saveLogSelectionBtn.addEventListener('click', () => {
+            scheduledSources = Array.from(logSelectionList.querySelectorAll('input:checked')).map(cb => JSON.parse(cb.value));
+            selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+            logSelectionModal.classList.add('hidden');
+        });
+
+        cancelLogSelectionBtn.addEventListener('click', () => logSelectionModal.classList.add('hidden'));
+
+        startScheduleBtn.addEventListener('click', async () => {
+            const interval = parseInt(scheduleIntervalInput.value);
+            const apiKey = apiKeyInput.value.trim();
+            const webhookUrl = discordWebhookInput.value.trim();
+
+            if (scheduledSources.length === 0) { showToast('Select at least one log to monitor.', 'error'); return; }
+            if (!interval || interval < 1) { showToast('Interval must be at least 1 hour.', 'error'); return; }
+            if (!apiKey || !webhookUrl) { showToast('OpenAI key and Discord webhook are required.', 'error'); return; }
+
+            try {
+                const data = await fetchApi('/schedule/start', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sources: scheduledSources, interval, api_key: apiKey, webhook_url: webhookUrl })
+                });
+                showToast(data.message);
+                updateSchedulerStatus();
+            } catch (error) { /* Handled */ }
+        });
+
+        stopScheduleBtn.addEventListener('click', async () => {
+            try {
+                const data = await fetchApi('/schedule/stop', { method: 'POST' });
+                showToast(data.message);
+                updateSchedulerStatus();
+            } catch (error) { /* Handled */ }
+        });
+        
+        runNowBtn.addEventListener('click', async () => {
+            if (scheduledSources.length === 0) { showToast('Please select logs for the schedule first.', 'error'); return; }
+            if (!apiKeyInput.value.trim() || !discordWebhookInput.value.trim()) { showToast('OpenAI key and Discord webhook must be set to run analysis.', 'error'); return; }
+
+            runNowBtn.disabled = true; runNowBtn.textContent = '...';
+            try {
+                const data = await fetchApi('/schedule/run_now', { method: 'POST' });
+                showToast(data.message, 'info');
+            } catch(error) { /* Handled */ }
+            finally { runNowBtn.disabled = false; runNowBtn.textContent = 'Run Now'; }
+        });
+
+        testDiscordBtn.addEventListener('click', async () => {
+            const webhookUrl = discordWebhookInput.value.trim();
+            if (!webhookUrl) { showToast('Enter a Discord webhook URL.', 'error'); return; }
+            testDiscordBtn.disabled = true; testDiscordBtn.textContent = '...';
+            try {
+                const data = await fetchApi('/test_discord', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ webhook_url: webhookUrl })
+                });
+                showToast(data.message);
+            } catch (error) { /* Handled */ } 
+            finally { testDiscordBtn.disabled = false; testDiscordBtn.textContent = 'Test'; }
+        });
+
+        settingsBtn.addEventListener('click', () => {
+            settingsModal.classList.remove('hidden');
+            updateSchedulerStatus();
+        });
+        saveSettingsBtn.addEventListener('click', () => {
+            localStorage.setItem('openai_api_key', apiKeyInput.value.trim() || '');
+            localStorage.setItem('discord_webhook_url', discordWebhookInput.value.trim() || '');
+            showToast('Credentials saved!');
             settingsModal.classList.add('hidden');
         });
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
-
-        // Resizer logic
-        let isResizing = false;
-        resizeHandle.addEventListener('mousedown', () => { isResizing = true; document.body.style.cursor = 'ns-resize'; document.body.style.userSelect = 'none'; });
-        document.addEventListener('mousemove', e => {
-            if (!isResizing) return;
-            const topPercent = (e.clientY - logViewPanel.parentElement.offsetTop) / logViewPanel.parentElement.offsetHeight * 100;
-            if (topPercent > 20 && topPercent < 80) {
-                logViewPanel.style.height = `${topPercent}%`;
-                aiViewPanel.style.height = `${100 - topPercent}%`;
-            }
-        });
-        document.addEventListener('mouseup', () => { isResizing = false; document.body.style.cursor = 'default'; document.body.style.userSelect = 'auto'; });
+        discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
         
-        // Sorting and filtering
+        // --- UI & UTILITY FUNCTIONS ---
+        const showToast = (message, type = 'success') => {
+            toast.textContent = message;
+            toast.className = 'fixed bottom-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg';
+            if (type === 'error') toast.classList.add('bg-red-500');
+            else if (type === 'info') toast.classList.add('bg-sky-500');
+            else toast.classList.add('bg-green-500');
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 4000);
+        };
+        const showAiPanel = () => {
+            aiViewPanel.classList.remove('hidden'); aiViewPanel.classList.add('flex');
+            resizeHandle.classList.remove('hidden'); logViewPanel.style.height = '50%';
+            aiViewPanel.style.height = '50%';
+        };
+        
+        // --- EVENT LISTENERS ---
         const runSortAndFilter = () => {
             const nameFilter = searchBox.value.toLowerCase();
             const typeFilter = filterControls.querySelector('.active').dataset.filter;
             const sortBy = sortControls.querySelector('.active').dataset.sort;
-            
-            const items = Array.from(sourceListContainer.querySelectorAll('.source-item'));
-            items.sort((a, b) => {
+            Array.from(sourceListContainer.querySelectorAll('.source-item'))
+            .sort((a, b) => {
                 if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
                 if (sortBy === 'size') return parseInt(b.dataset.size) - parseInt(a.dataset.size);
                 if (sortBy === 'date') return parseInt(b.dataset.modified) - parseInt(a.dataset.modified);
                 return 0;
             }).forEach(item => {
-                const name = item.dataset.name.toLowerCase();
-                const type = item.dataset.type;
-
-                const nameMatch = name.includes(nameFilter);
-                const typeMatch = (typeFilter === 'all') || (type === typeFilter);
-                
+                const nameMatch = item.dataset.name.toLowerCase().includes(nameFilter);
+                const typeMatch = (typeFilter === 'all') || (item.dataset.type === typeFilter);
                 item.style.display = (nameMatch && typeMatch) ? 'flex' : 'none';
                 sourceListContainer.appendChild(item);
             });
         };
-        searchBox.addEventListener('input', runSortAndFilter);
-        sortControls.addEventListener('click', e => {
-            if (e.target.matches('.sort-btn')) {
-                sortControls.querySelector('.active').classList.remove('active');
+        [searchBox, sortControls, filterControls].forEach(el => el.addEventListener('input', runSortAndFilter));
+        [sortControls, filterControls].forEach(el => el.addEventListener('click', e => {
+            if (e.target.matches('.sort-btn, .filter-btn')) {
+                el.querySelector('.active').classList.remove('active');
                 e.target.classList.add('active');
                 runSortAndFilter();
             }
-        });
-        filterControls.addEventListener('click', e => {
-             if (e.target.matches('.filter-btn')) {
-                filterControls.querySelector('.active').classList.remove('active');
-                e.target.classList.add('active');
-                runSortAndFilter();
-            }
-        });
+        }));
+        
         runSortAndFilter();
+        updateSchedulerStatus(); // Get initial status on load
     });
     document.querySelectorAll('.sort-btn, .filter-btn').forEach(btn => btn.classList.add('px-3', 'py-1', 'rounded-md', 'transition-colors', 'hover:bg-gray-600', 'border', 'border-gray-700'));
     </script>
