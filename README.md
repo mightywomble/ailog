@@ -14,7 +14,14 @@ Built with Flask and styled with Tailwind CSS, it offers a clean, responsive UI 
 <li>Intelligent Truncation: Automatically shortens oversized logs before sending for analysis to prevent API errors.
 <li>Modern UI: A beautiful and responsive interface built with Tailwind CSS.
 
-Installation & Setup on Ubuntu 24.04
+<h2><b>Todo</b></h2>
+<li> Work with Rsyslog</li>
+<li> Send alerts to Discord if errors are seen with the log file</li>
+<li> Add settings option for the Discord API</li>
+<li> Display how to config rsyslog to send logs to the server</li>
+<br>
+
+# Installation & Setup on Ubuntu 24.04 <br>
 This guide provides complete instructions for setting up the application and running it as a systemd service on a fresh Ubuntu 24.04 server.
 
 Prerequisites
