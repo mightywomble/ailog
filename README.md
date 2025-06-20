@@ -3,7 +3,8 @@ A simple, modern web application for viewing local log files from /var/log and j
 
 Built with Flask and styled with Tailwind CSS, it offers a clean, responsive UI that includes dynamic filtering, sorting, and on-the-fly decompression of .gz archives. Its standout feature is the one-click integration with the OpenAI API, allowing you to get an AI-powered summary, error analysis, and troubleshooting tips for your logs.
 
-
+<video src="demo-video.webm" controls="controls" style="max-width: 720px;">
+</video>
 
 <h2><b>Features</b></h2>
 <li>Unified Log Access: View traditional logs from /var/log and journalctl logs for systemd services in a single interface.
