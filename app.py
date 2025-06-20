@@ -3,16 +3,21 @@ from flask import Flask, render_template, jsonify, request
 import shlex
 import os
 import datetime
+import openai
 
 # Initialize the Flask application
 app = Flask(__name__)
+
+# --- OpenAI API Setup ---
+# It's crucial to set your OpenAI API key as an environment variable
+# for security. Run 'export OPENAI_API_KEY=your_key_here' in your terminal.
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # --- SECURITY WARNING ---
 # This application runs commands with 'sudo'. This is a significant security risk.
 # It is designed for use ONLY on a trusted, isolated development network where the
 # user running this app has pre-configured 'sudo nopasswd' access.
 # DO NOT EXPOSE THIS APPLICATION TO THE INTERNET or any untrusted network.
-# The filename handling is basic and relies on the user not being malicious.
 # ---
 
 LOG_DIRECTORY = '/var/log'
@@ -27,7 +32,6 @@ def format_bytes(size_bytes):
     while size_bytes >= power and n < len(power_labels) - 1:
         size_bytes /= power
         n += 1
-    # Format to one decimal place if it's not bytes
     if n > 0:
         return f"{size_bytes:.1f} {power_labels[n]}"
     else:
@@ -53,10 +57,7 @@ def format_relative_time(epoch_time):
 
 @app.route('/')
 def index():
-    """
-    Renders the main page.
-    It gets a list of files, their sizes, and modification times from /var/log.
-    """
+    """Renders the main page with log file data."""
     files_data = []
     error = None
     try:
@@ -68,7 +69,6 @@ def index():
 
         for filename in filenames:
             file_path = os.path.join(LOG_DIRECTORY, filename)
-            # Use 'stat' to get size (%s) and modification time as epoch (%Y)
             command_stat = f"sudo stat -c '%s %Y' {shlex.quote(file_path)}"
             result_stat = subprocess.run(command_stat, shell=True, capture_output=True, text=True, check=True)
             size_bytes, mod_time_epoch = map(int, result_stat.stdout.strip().split())
@@ -80,52 +80,54 @@ def index():
                 'modified_epoch': mod_time_epoch,
                 'modified_formatted': format_relative_time(mod_time_epoch)
             })
-
     except subprocess.CalledProcessError as e:
         error = f"Error processing log files: {e.stderr}"
     except Exception as e:
         error = f"An unexpected error occurred: {str(e)}"
         
-    return render_template('index.html', files=files_data, error=error)
+    return render_template('index.html', files=files_data, error=error, openai_configured=bool(openai.api_key))
 
 
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
-    """
-    API endpoint to get the content of a specific log file.
-    It can now optionally return the full log content.
-    """
+    """API endpoint to get the content of a specific log file."""
     if '/' in filename or '..' in filename:
         return jsonify({'error': 'Invalid filename.'}), 400
 
     file_path = os.path.join(LOG_DIRECTORY, filename)
     
-    # Check for 'full' query parameter
-    show_full_log = request.args.get('full', 'false').lower() == 'true'
+    try:
+        command = f"sudo tail -n 500 {shlex.quote(file_path)}"
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+        return jsonify({'content': result.stdout})
+    except Exception as e:
+        return jsonify({'error': f"Could not read log file: {str(e)}"}), 500
+
+@app.route('/analyse', methods=['POST'])
+def analyse_log():
+    """API endpoint to analyse log content using OpenAI."""
+    if not openai.api_key:
+        return jsonify({'error': 'OpenAI API key is not configured on the server.'}), 500
+
+    data = request.get_json()
+    if not data or 'log_content' not in data:
+        return jsonify({'error': 'Missing log_content in request.'}), 400
+
+    log_content = data['log_content']
+    prompt = "Analyse this log for any errors and create a summary report, troubleshooting tips and any other advice relating to any other issues found."
 
     try:
-        if show_full_log:
-            # Command to read the entire log file
-            command = f"sudo cat {shlex.quote(file_path)}"
-        else:
-            # Command to read the last 500 lines of the log file
-            command = f"sudo tail -n 500 {shlex.quote(file_path)}"
-        
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            check=True
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that analyses log files."},
+                {"role": "user", "content": f"{prompt}\n\n--- LOG CONTENT ---\n{log_content}"}
+            ]
         )
-        
-        return jsonify({'content': result.stdout})
-
-    except subprocess.CalledProcessError as e:
-        error_message = f"Could not read log file '{filename}'. Error: {e.stderr}"
-        return jsonify({'error': error_message}), 500
+        analysis = response.choices[0].message.content
+        return jsonify({'analysis': analysis})
     except Exception as e:
-        return jsonify({'error': f"An unexpected error occurred: {str(e)}"}), 500
+        return jsonify({'error': f'An error occurred with the OpenAI API: {str(e)}'}), 500
 
 
 if __name__ == '__main__':
