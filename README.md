@@ -3,24 +3,18 @@ A simple, modern web application for viewing local log files from /var/log and j
 
 Built with Flask and styled with Tailwind CSS, it offers a clean, responsive UI that includes dynamic filtering, sorting, and on-the-fly decompression of .gz archives. Its standout feature is the one-click integration with the OpenAI API, allowing you to get an AI-powered summary, error analysis, and troubleshooting tips for your logs.
 
-Features
-Unified Log Access: View traditional logs from /var/log and journalctl logs for systemd services in a single interface.
 
-Log Type Filtering: Easily filter the view to show only syslog files, only journald services, or all sources combined.
 
-AI-Powered Analysis: Send log contents to the OpenAI API for a detailed analysis with a single click.
-
-Gzip Decompression: Automatically decompresses and displays .gz log archives on the fly.
-
-Dynamic Filtering: Instantly search and filter the combined log source list.
-
-Smart Sorting: Sort logs by name, size, or modification date.
-
-Secure API Key Storage: API key is managed via a settings menu and stored in the browser's local storage.
-
-Intelligent Truncation: Automatically shortens oversized logs before sending for analysis to prevent API errors.
-
-Modern UI: A beautiful and responsive interface built with Tailwind CSS.
+<h2><b>Features</b></h2>
+<li>Unified Log Access: View traditional logs from /var/log and journalctl logs for systemd services in a single interface.
+<li>Log Type Filtering: Easily filter the view to show only syslog files, only journald services, or all sources combined.
+<li>AI-Powered Analysis: Send log contents to the OpenAI API for a detailed analysis with a single click.
+<li>Gzip Decompression: Automatically decompresses and displays .gz log archives on the fly.
+<li>Dynamic Filtering: Instantly search and filter the combined log source list.
+<li>Smart Sorting: Sort logs by name, size, or modification date.
+<li>Secure API Key Storage: API key is managed via a settings menu and stored in the browser's local storage.
+<li>Intelligent Truncation: Automatically shortens oversized logs before sending for analysis to prevent API errors.
+<li>Modern UI: A beautiful and responsive interface built with Tailwind CSS.
 
 Installation & Setup on Ubuntu 24.04
 This guide provides complete instructions for setting up the application and running it as a systemd service on a fresh Ubuntu 24.04 server.
@@ -33,8 +27,8 @@ A non-root user with sudo privileges. We will use the username david in this gui
 Step 1: Install System Dependencies
 First, update your package list and install Python, pip, and the virtual environment module.
 
-sudo apt update
-sudo apt install python3-pip python3.12-venv -y
+sudo apt update<br>
+sudo apt install python3-pip python3.12-venv -y<br>
 
 Step 2: Set Up Project Directory and Clone Repo
 Create a directory for the application and clone the project repository into it.
