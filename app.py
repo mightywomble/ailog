@@ -8,11 +8,6 @@ import openai
 # Initialize the Flask application
 app = Flask(__name__)
 
-# --- OpenAI API Setup ---
-# It's crucial to set your OpenAI API key as an environment variable
-# for security. Run 'export OPENAI_API_KEY=your_key_here' in your terminal.
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
 # --- SECURITY WARNING ---
 # This application runs commands with 'sudo'. This is a significant security risk.
 # It is designed for use ONLY on a trusted, isolated development network where the
@@ -85,7 +80,8 @@ def index():
     except Exception as e:
         error = f"An unexpected error occurred: {str(e)}"
         
-    return render_template('index.html', files=files_data, error=error, openai_configured=bool(openai.api_key))
+    # The openai_configured flag is no longer needed here
+    return render_template('index.html', files=files_data, error=error)
 
 
 @app.route('/log/<path:filename>')
@@ -106,18 +102,25 @@ def get_log_content(filename):
 @app.route('/analyse', methods=['POST'])
 def analyse_log():
     """API endpoint to analyse log content using OpenAI."""
-    if not openai.api_key:
-        return jsonify({'error': 'OpenAI API key is not configured on the server.'}), 500
-
     data = request.get_json()
-    if not data or 'log_content' not in data:
+    if not data:
+        return jsonify({'error': 'Invalid request.'}), 400
+        
+    log_content = data.get('log_content')
+    api_key = data.get('api_key')
+
+    if not api_key:
+        return jsonify({'error': 'OpenAI API key not provided. Please set it in the settings menu.'}), 400
+    if not log_content:
         return jsonify({'error': 'Missing log_content in request.'}), 400
 
-    log_content = data['log_content']
     prompt = "Analyse this log for any errors and create a summary report, troubleshooting tips and any other advice relating to any other issues found."
 
     try:
-        response = openai.chat.completions.create(
+        # Set the API key for this specific request
+        client = openai.OpenAI(api_key=api_key)
+        
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that analyses log files."},
@@ -126,6 +129,8 @@ def analyse_log():
         )
         analysis = response.choices[0].message.content
         return jsonify({'analysis': analysis})
+    except openai.AuthenticationError:
+        return jsonify({'error': 'Invalid OpenAI API key. Please check the key in the settings menu.'}), 401
     except Exception as e:
         return jsonify({'error': f'An error occurred with the OpenAI API: {str(e)}'}), 500
 
