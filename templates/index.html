@@ -176,6 +176,10 @@
         const searchBox = document.getElementById('search-box');
         const sortControls = document.getElementById('sort-controls');
         const filterControls = document.getElementById('filter-controls');
+        const aiContentWrapper = document.getElementById('ai-content-wrapper');
+        const aiViewPanel = document.getElementById('ai-view-panel');
+        const resizeHandle = document.getElementById('resize-handle');
+        const logViewPanel = document.getElementById('log-view-panel');
         
         // Host Management
         const hostSelector = document.getElementById('host-selector');
@@ -200,6 +204,8 @@
         const testDiscordBtn = document.getElementById('test-discord-btn');
         const toast = document.getElementById('toast-notification');
         
+        let currentLogName = "";
+        let currentLogContent = "";
         let currentEventSource = null;
         
         // --- API & DATA FETCHING ---
@@ -328,7 +334,7 @@
             event.preventDefault();
 
             const sourceItem = link.closest('.source-item');
-            const currentLogName = sourceItem.dataset.name;
+            currentLogName = sourceItem.dataset.name;
             const type = sourceItem.dataset.type;
             const selectedHost = hostSelector.value;
 
@@ -345,6 +351,7 @@
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error);
                 
+                currentLogContent = data.content;
                 logTitle.textContent = `${currentLogName} on ${selectedHost}`;
                 logContent.textContent = data.content || 'Log source is empty.';
                 
@@ -356,6 +363,50 @@
                 logTitle.textContent = `Error loading ${currentLogName}`;
                 logContent.textContent = error.message;
                 showToast(error.message, 'error');
+            }
+        });
+        
+        // --- FIXED: AI Analyse button event listener ---
+        aiAnalyseBtn.addEventListener('click', async () => {
+            const apiKey = localStorage.getItem('openai_api_key');
+            if (!apiKey) {
+                showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
+                return;
+            }
+            if (!currentLogContent) {
+                showToast('No log content to analyse.', 'error');
+                return;
+            }
+
+            aiAnalyseBtn.textContent = 'Analysing...';
+            aiAnalyseBtn.disabled = true;
+            aiViewPanel.classList.remove('hidden');
+            aiViewPanel.classList.add('flex');
+            resizeHandle.classList.remove('hidden');
+            logViewPanel.style.height = '50%';
+            aiViewPanel.style.height = '50%';
+            aiContentWrapper.innerHTML = '<p>Contacting AI assistant...</p>';
+
+            try {
+                const data = await fetchApi('/analyse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        log_content: currentLogContent, 
+                        log_name: currentLogName, 
+                        api_key: apiKey,
+                        webhook_url: localStorage.getItem('discord_webhook_url')
+                    })
+                });
+                aiContentWrapper.innerHTML = data.analysis.replace(/\n/g, '<br>');
+                if (data.discord_sent) {
+                    showToast('Issue detected! Alert sent to Discord.', 'info');
+                }
+            } catch (error) {
+                aiContentWrapper.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
+            } finally {
+                aiAnalyseBtn.textContent = 'AI Analyse';
+                aiAnalyseBtn.disabled = false;
             }
         });
 
