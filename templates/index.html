@@ -153,7 +153,7 @@
     <!-- Log Selection Modal -->
     <div id="log-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
         <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-xl h-3/4 flex flex-col">
-            <h3 class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
+            <h3 id="log-selection-title" class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
             <div id="log-selection-list" class="flex-grow overflow-y-auto border border-gray-700 rounded-md p-2"></div>
             <div class="mt-6 flex justify-end space-x-3">
                 <button id="cancel-log-selection-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
@@ -204,8 +204,25 @@
         const testDiscordBtn = document.getElementById('test-discord-btn');
         const toast = document.getElementById('toast-notification');
         
+        // Scheduler UI
+        const schedulerStatusDiv = document.getElementById('scheduler-status');
+        const scheduleIntervalInput = document.getElementById('schedule-interval-input');
+        const startScheduleBtn = document.getElementById('start-schedule-btn');
+        const stopScheduleBtn = document.getElementById('stop-schedule-btn');
+        const runNowBtn = document.getElementById('run-now-btn');
+        const selectLogsBtn = document.getElementById('select-logs-btn');
+        const selectedLogCountSpan = document.getElementById('selected-log-count');
+
+        // Log Selection Modal
+        const logSelectionModal = document.getElementById('log-selection-modal');
+        const logSelectionTitle = document.getElementById('log-selection-title');
+        const logSelectionList = document.getElementById('log-selection-list');
+        const saveLogSelectionBtn = document.getElementById('save-log-selection-btn');
+        const cancelLogSelectionBtn = document.getElementById('cancel-log-selection-btn');
+
         let currentLogName = "";
         let currentLogContent = "";
+        let scheduledSources = [];
         let currentEventSource = null;
         
         // --- API & DATA FETCHING ---
@@ -225,61 +242,51 @@
         // --- UNIFIED STREAMING LOGIC ---
         const fetchSourcesForHost = () => {
             const selectedHost = hostSelector.value;
-            // CORRECTED: Use a single endpoint that the backend provides
             const url = selectedHost === 'local' ? '/sources/local' : `/sources/remote/${selectedHost}`;
 
             if (currentEventSource) {
                 currentEventSource.close();
             }
 
-            // Reset UI for loading
             sourceListContainer.innerHTML = '';
             logTitle.textContent = `Fetching logs from ${selectedHost}...`;
             logContent.textContent = '';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
-
             progressContainer.classList.remove('hidden');
             progressBar.style.width = '0%';
             progressMessage.textContent = 'Initializing connection...';
             
-            let journalItems = []; // Hold journal items until the end
+            let journalItems = []; 
             
             currentEventSource = new EventSource(url);
 
             currentEventSource.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-
                 switch(data.status) {
                     case 'progress':
                         progressBar.style.width = `${data.progress}%`;
                         progressMessage.textContent = data.message;
-                        // Show the journal indicator when it's being fetched
                         if (data.message.includes('journal')) {
                             journalLoadingIndicator.classList.remove('hidden');
                         }
                         break;
                     case 'source':
-                        // Separate files and journals
                         if (data.data.type === 'file') {
-                            appendSourceToList(data.data); // Add files immediately
+                            appendSourceToList(data.data);
                         } else {
-                            journalItems.push(data.data); // Collect journals
+                            journalItems.push(data.data);
                         }
                         break;
                     case 'complete':
-                        // Now that the stream is done, add all collected journal items
                         journalItems.forEach(appendSourceToList);
-                        
                         progressBar.style.width = `100%`;
                         progressMessage.textContent = data.message;
                         journalLoadingIndicator.classList.add('hidden');
-                        
                         if (sourceListContainer.children.length === 0) {
                             sourceListContainer.innerHTML = '<li class="p-4 text-center text-gray-500">No log sources found on host.</li>';
                         }
-                        
-                        runSortAndFilter(); // Sort the complete list
+                        runSortAndFilter();
                         setTimeout(() => progressContainer.classList.add('hidden'), 1500);
                         currentEventSource.close();
                         break;
@@ -366,7 +373,6 @@
             }
         });
         
-        // --- FIXED: AI Analyse button event listener ---
         aiAnalyseBtn.addEventListener('click', async () => {
             const apiKey = localStorage.getItem('openai_api_key');
             if (!apiKey) {
@@ -466,7 +472,142 @@
             }
         });
         
-        // --- SETTINGS & OTHER UI LOGIC ---
+        // --- FIXED: SCHEDULER & SETTINGS UI LOGIC ---
+        const updateSchedulerStatus = async () => {
+            try {
+                const data = await fetchApi('/schedule/status');
+                scheduledSources = data.sources || [];
+                selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+
+                if (data.is_running) {
+                    const nextRun = new Date(data.next_run).toLocaleString();
+                    schedulerStatusDiv.innerHTML = `
+                        <p class="text-green-400 font-semibold">Status: Running</p>
+                        <p>Monitoring ${data.sources.length} logs every ${data.interval} hour(s).</p>
+                        <p>Next run: ${nextRun}</p>`;
+                    scheduleIntervalInput.value = data.interval;
+                } else {
+                    schedulerStatusDiv.innerHTML = `<p class="text-yellow-400 font-semibold">Status: Not Running</p>`;
+                }
+            } catch (error) {
+                schedulerStatusDiv.innerHTML = `<p class="text-red-400 font-semibold">Error fetching status.</p>`;
+            }
+        };
+        
+        selectLogsBtn.addEventListener('click', () => {
+            const selectedHostText = hostSelector.options[hostSelector.selectedIndex].text;
+            logSelectionTitle.textContent = `Select Logs to Monitor on ${selectedHostText}`;
+            logSelectionList.innerHTML = '';
+            
+            const allSourceItems = document.querySelectorAll('#source-list-container .source-item');
+            if (allSourceItems.length === 0) {
+                showToast("No logs loaded to select from. Please select a host first.", "error");
+                return;
+            }
+            
+            allSourceItems.forEach(item => {
+                // Skip empty log files for scheduling
+                if (parseInt(item.dataset.size, 10) === 0 && item.dataset.type === 'file') return;
+
+                const name = item.dataset.name;
+                const type = item.dataset.type;
+                
+                const li = document.createElement('li');
+                li.className = 'flex items-center p-2 rounded-md hover:bg-gray-700';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500 mr-4';
+                
+                // The value now includes the hostname for context
+                checkbox.value = JSON.stringify({ name, type, host: hostSelector.value });
+                
+                // Check against existing scheduled sources
+                if (scheduledSources.some(s => s.name === name && s.type === type && s.host === hostSelector.value)) {
+                    checkbox.checked = true;
+                }
+                
+                const label = document.createElement('label');
+                label.textContent = name; // The label in the UI doesn't need the hostname, the title does that
+                label.className = 'flex-grow cursor-pointer';
+                label.onclick = () => checkbox.click(); 
+                
+                li.appendChild(checkbox);
+                li.appendChild(label);
+                logSelectionList.appendChild(li);
+            });
+            logSelectionModal.classList.remove('hidden');
+        });
+
+        saveLogSelectionBtn.addEventListener('click', () => {
+            const currentHost = hostSelector.value;
+            // Filter out selections from other hosts before adding new ones
+            const otherHostSources = scheduledSources.filter(s => s.host !== currentHost);
+            const thisHostSources = Array.from(logSelectionList.querySelectorAll('input:checked')).map(cb => JSON.parse(cb.value));
+            
+            scheduledSources = [...otherHostSources, ...thisHostSources];
+
+            selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+            logSelectionModal.classList.add('hidden');
+        });
+
+        cancelLogSelectionBtn.addEventListener('click', () => logSelectionModal.classList.add('hidden'));
+
+        startScheduleBtn.addEventListener('click', async () => {
+            const interval = parseInt(scheduleIntervalInput.value);
+            const apiKey = apiKeyInput.value.trim();
+            const webhookUrl = discordWebhookInput.value.trim();
+
+            if (scheduledSources.length === 0) { showToast('Select at least one log to monitor.', 'error'); return; }
+            if (!interval || interval < 1) { showToast('Interval must be at least 1 hour.', 'error'); return; }
+            if (!apiKey || !webhookUrl) { showToast('OpenAI key and Discord webhook are required.', 'error'); return; }
+            
+            showToast("Note: The scheduler backend currently only supports 'localhost'. This UI is for demonstration.", "info");
+
+            try {
+                const data = await fetchApi('/schedule/start', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sources: scheduledSources, interval, api_key: apiKey, webhook_url: webhookUrl })
+                });
+                showToast(data.message);
+                updateSchedulerStatus();
+            } catch (error) { /* Handled by fetchApi */ }
+        });
+
+        stopScheduleBtn.addEventListener('click', async () => {
+            try {
+                const data = await fetchApi('/schedule/stop', { method: 'POST' });
+                showToast(data.message);
+                updateSchedulerStatus();
+            } catch (error) { /* Handled by fetchApi */ }
+        });
+        
+        runNowBtn.addEventListener('click', async () => {
+            if (scheduledSources.length === 0) { showToast('Please select logs for the schedule first.', 'error'); return; }
+            if (!apiKeyInput.value.trim() || !discordWebhookInput.value.trim()) { showToast('OpenAI key and Discord webhook must be set to run analysis.', 'error'); return; }
+
+            runNowBtn.disabled = true; runNowBtn.textContent = '...';
+            try {
+                const data = await fetchApi('/schedule/run_now', { method: 'POST' });
+                showToast(data.message, 'info');
+            } catch(error) { /* Handled by fetchApi */ }
+            finally { runNowBtn.disabled = false; runNowBtn.textContent = 'Run Now'; }
+        });
+
+        testDiscordBtn.addEventListener('click', async () => {
+            const webhookUrl = discordWebhookInput.value.trim();
+            if (!webhookUrl) { showToast('Enter a Discord webhook URL.', 'error'); return; }
+            testDiscordBtn.disabled = true; testDiscordBtn.textContent = '...';
+            try {
+                await fetchApi('/test_discord', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ webhook_url: webhookUrl })
+                });
+                showToast('Test message sent successfully!');
+            } catch (error) { /* Handled by fetchApi */ } 
+            finally { testDiscordBtn.disabled = false; testDiscordBtn.textContent = 'Test'; }
+        });
+        
         const showToast = (message, type = 'success') => {
             toast.textContent = message;
             toast.className = 'fixed bottom-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg';
@@ -504,6 +645,7 @@
         settingsBtn.addEventListener('click', () => {
             settingsModal.classList.remove('hidden');
             populateHostLists();
+            updateSchedulerStatus(); // Refresh status when modal opens
         });
         closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
         saveSettingsBtn.addEventListener('click', () => {
