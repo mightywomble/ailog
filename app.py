@@ -31,95 +31,101 @@ def load_hosts():
             json.dump({}, f)
         return {}
     try:
-        with open(HOSTS_FILE, 'r') as f:
+        # Explicitly open with utf-8 encoding to handle potential BOMs etc.
+        with open(HOSTS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
+    except FileNotFoundError:
         return {}
+    except json.JSONDecodeError as e:
+        # The crucial change: propagate the JSON error instead of hiding it.
+        # This allows the Flask route to catch it and return a proper JSON error response.
+        raise ValueError(f"Error decoding '{HOSTS_FILE}'. Please check for syntax errors or invalid characters. Details: {e}")
 
 def save_hosts(hosts):
     """Saves the remote hosts configuration to a JSON file."""
     with open(HOSTS_FILE, 'w') as f:
         json.dump(hosts, f, indent=4)
 
-def get_ssh_prefix(hostname):
-    """Constructs the SSH command prefix for a given hostname."""
-    # Treat 'local' and 'localhost' as the local machine by returning an empty string.
+def get_ssh_prefix_args(hostname):
+    """
+    Constructs the SSH command prefix as a list of arguments.
+    Raises ValueError if the host is not configured.
+    """
+    # Treat 'local' and 'localhost' as the local machine by returning an empty list.
     if not hostname or hostname in ['localhost', 'local']:
-        return ""
-    hosts = load_hosts()
+        return []
+    hosts = load_hosts() # This can now raise ValueError for corrupt JSON
     host_info = hosts.get(hostname)
     # Check if host_info exists and has a 'user' key.
     if not host_info or not host_info.get('user'):
-        # Return an invalid command to ensure failure if host is not configured properly
-        # This prevents accidental command execution on the local machine.
-        return "echo 'Error: Host not configured properly. Please check settings.' && exit 1 #"
+        # Raise an exception that will be caught by the route's error handler.
+        # This ensures a proper JSON error response is sent.
+        raise ValueError(f"Host '{hostname}' is not configured. Please add it in Settings.")
     
     user = host_info['user']
-    # Securely create the SSH prefix using shlex.quote for user and hostname.
-    return f"ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no {shlex.quote(user)}@{shlex.quote(hostname)}"
+    # Build a list of arguments for SSH. No need for shlex.quote with shell=False.
+    return [
+        "ssh",
+        "-o", "ConnectTimeout=10",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "BatchMode=yes", # Prevents password prompts
+        f"{user}@{hostname}"
+    ]
 
 
 # --- CORE LOGIC (Refactored for Remote Execution) ---
 
+def execute_command(hostname, command_str):
+    """
+    Executes a command either locally or remotely via SSH.
+    Returns the subprocess result object.
+    """
+    ssh_prefix_args = get_ssh_prefix_args(hostname)
+    if ssh_prefix_args:
+        # For remote commands, we build a list of arguments and use shell=False.
+        # This is safer as it avoids shell injection issues.
+        # The remote command is passed as a single argument to ssh.
+        cmd_list = ssh_prefix_args + [command_str]
+        return subprocess.run(cmd_list, shell=False, capture_output=True, text=True, check=True, timeout=20)
+    else:
+        # For local commands, using shell=True is simpler for commands involving sudo.
+        return subprocess.run(command_str, shell=True, capture_output=True, text=True, check=True, timeout=20)
+
 def get_log_sources_from_host(hostname='localhost'):
     """
     Fetches the list of syslog files and journald units from a host.
-    If hostname is 'localhost' or 'local', it targets the local machine.
-    Otherwise, it uses SSH to connect to the remote host.
     """
     all_sources = []
-    ssh_prefix = get_ssh_prefix(hostname)
-
-    # Command to get log files, their sizes, and modification times
-    # -p adds a slash to directories, which we filter out.
-    cmd_ls_remote = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
-    full_cmd_ls = f"{ssh_prefix} '{cmd_ls_remote}'" if ssh_prefix else cmd_ls_remote
     
-    try:
-        res_ls = subprocess.run(full_cmd_ls, shell=True, capture_output=True, text=True, check=True, timeout=20)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        stderr = e.stderr if hasattr(e, 'stderr') else 'Timeout'
-        raise ConnectionError(f"Failed to list logs on '{hostname}'. STDERR: {stderr}")
-
+    # Command to list log files
+    cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
+    res_ls = execute_command(hostname, cmd_ls)
     filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
-    
+
     for filename in filenames:
         try:
-            # Command to get stats for each file (size in bytes, modification time as epoch)
-            cmd_stat_remote = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
-            full_cmd_stat = f"{ssh_prefix} '{cmd_stat_remote}'" if ssh_prefix else cmd_stat_remote
-            
-            res_stat = subprocess.run(full_cmd_stat, shell=True, capture_output=True, text=True, check=True, timeout=10)
+            # Command to get file stats
+            cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
+            res_stat = execute_command(hostname, cmd_stat)
             size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
-            
             all_sources.append({
-                'type': 'file',
-                'name': filename,
-                'size_bytes': size_bytes,
-                'size_formatted': format_bytes(size_bytes),
-                'modified_epoch': mod_time_epoch,
+                'type': 'file', 'name': filename, 'size_bytes': size_bytes,
+                'size_formatted': format_bytes(size_bytes), 'modified_epoch': mod_time_epoch,
                 'modified_formatted': format_relative_time(mod_time_epoch)
             })
         except (subprocess.CalledProcessError, ValueError, subprocess.TimeoutExpired) as e:
-            # Ignore files that we can't stat (e.g., permissions error on remote, timeout)
             print(f"Could not stat file '{filename}' on '{hostname}': {e}")
             continue
 
-    # Command to get all unique journald units
-    cmd_journal_remote = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq"
-    full_cmd_journal = f"{ssh_prefix} '{cmd_journal_remote}'" if ssh_prefix else cmd_journal_remote
-    
     try:
-        res_journal = subprocess.run(full_cmd_journal, shell=True, capture_output=True, text=True, check=True, timeout=20)
+        # Command to list journald units
+        cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq"
+        res_journal = execute_command(hostname, cmd_journal)
         journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
         for unit in journal_units:
             all_sources.append({
-                'type': 'journal',
-                'name': unit,
-                'size_bytes': 0, 
-                'size_formatted': 'N/A',
-                'modified_epoch': 0, 
-                'modified_formatted': 'Journald Service'
+                'type': 'journal', 'name': unit, 'size_bytes': 0, 
+                'size_formatted': 'N/A', 'modified_epoch': 0, 'modified_formatted': 'Journald Service'
             })
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         print(f"Could not fetch journald units from '{hostname}': {e}")
@@ -162,13 +168,28 @@ def index():
     """Renders the main page."""
     return render_template('index.html')
 
-@app.route('/sources/<hostname>')
-def get_sources(hostname):
-    """API endpoint to get log sources from the specified host."""
+@app.route('/sources/local')
+def get_local_sources():
+    """API endpoint to get log sources from the local host."""
     try:
+        sources = get_log_sources_from_host('local')
+        return jsonify(sources)
+    except Exception as e:
+        print(f"ERROR: An exception occurred while fetching sources for 'local': {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/sources/remote/<hostname>')
+def get_remote_sources(hostname):
+    """API endpoint to get log sources from a remote host."""
+    try:
+        if '/' in hostname or '..' in hostname:
+            return jsonify({'error': 'Invalid hostname format.'}), 400
         sources = get_log_sources_from_host(hostname)
         return jsonify(sources)
     except Exception as e:
+        # This broad exception handler is crucial for returning JSON errors
+        # instead of default Flask HTML error pages.
+        print(f"ERROR: An exception occurred while fetching sources for '{hostname}': {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/log/<path:filename>')
@@ -180,13 +201,9 @@ def get_log_content(filename):
     hostname = request.args.get('host', 'localhost')
     if '/' in filename or '..' in filename: return jsonify({'error': 'Invalid filename.'}), 400
     
-    file_path = os.path.join(LOG_DIRECTORY, filename)
-    ssh_prefix = get_ssh_prefix(hostname)
-    
     try:
-        remote_cmd = f"sudo zcat {shlex.quote(file_path)} 2>/dev/null | tail -n 500" if filename.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(file_path)}"
-        command = f"{ssh_prefix} '{remote_cmd}'" if ssh_prefix else remote_cmd
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True, timeout=20)
+        command_str = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, filename))} 2>/dev/null | tail -n 500" if filename.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
+        result = execute_command(hostname, command_str)
         return jsonify({'content': result.stdout, 'will_be_truncated': len(result.stdout) > MAX_CHAR_COUNT})
     except Exception as e: 
         return jsonify({'error': f"Could not read log file '{filename}' on '{hostname}': {e}"}), 500
@@ -200,12 +217,9 @@ def get_journal_content(unit):
     hostname = request.args.get('host', 'localhost')
     if not unit or '/' in unit or '..' in unit: return jsonify({'error': 'Invalid unit name.'}), 400
 
-    ssh_prefix = get_ssh_prefix(hostname)
-
     try:
-        remote_cmd = f"sudo journalctl -u {shlex.quote(unit)} -n 500 --no-pager"
-        command = f"{ssh_prefix} '{remote_cmd}'" if ssh_prefix else remote_cmd
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True, timeout=20)
+        command_str = f"sudo journalctl -u {shlex.quote(unit)} -n 500 --no-pager"
+        result = execute_command(hostname, command_str)
         return jsonify({'content': result.stdout, 'will_be_truncated': len(result.stdout) > MAX_CHAR_COUNT})
     except Exception as e: 
         return jsonify({'error': f"Could not read journal for unit '{unit}' on '{hostname}': {e}"}), 500
@@ -227,8 +241,13 @@ def manage_hosts():
         return jsonify({'message': f"Host '{hostname}' added successfully."})
     
     # GET request
-    hosts = load_hosts()
-    return jsonify(hosts)
+    try:
+        hosts = load_hosts()
+        return jsonify(hosts)
+    except Exception as e:
+        print(f"ERROR: An exception occurred while loading hosts: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/hosts/delete', methods=['POST'])
 def delete_host():
