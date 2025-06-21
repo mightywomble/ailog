@@ -15,24 +15,28 @@
         ::-webkit-scrollbar-track { background: #1f2937; }
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
         .sort-btn.active, .filter-btn.active { background-color: #4f46e5; color: white; }
-        #resize-handle { cursor: ns-resize; }
-        #settings-modal.hidden, #log-selection-modal.hidden, #toast-notification.hidden { display: none; }
+        #settings-modal.hidden, #log-selection-modal.hidden, #host-modal.hidden, #toast-notification.hidden { display: none; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200 flex flex-col h-screen">
 
-    <header class="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-4 shadow-lg flex items-center justify-between">
-        <h1 class="text-xl font-bold text-white">Local Log Viewer</h1>
+    <header class="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-4 shadow-lg flex items-center justify-between flex-wrap gap-2">
+        <h1 class="text-xl font-bold text-white">Log Viewer</h1>
+        <div class="flex items-center space-x-4">
+            <label for="host-selector" class="text-sm font-medium text-gray-400">Host:</label>
+            <select id="host-selector" class="bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="local">Localhost</option>
+            </select>
+        </div>
         <div class="flex items-center space-x-4">
             <button id="settings-btn" class="text-gray-400 hover:text-white transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
-            <div class="bg-red-900/50 border border-red-700 text-red-200 px-3 py-1 rounded-full text-xs font-mono">SUDO MODE ENABLED</div>
+            <div id="sudo-mode-indicator" class="bg-red-900/50 border border-red-700 text-red-200 px-3 py-1 rounded-full text-xs font-mono">SUDO MODE ENABLED</div>
         </div>
     </header>
 
     <div class="flex flex-1 overflow-hidden">
-        <!-- Left Panel -->
         <aside class="w-1/3 md:w-1/4 lg:w-1/5 bg-gray-800 border-r border-gray-700 flex flex-col">
             <div class="p-4 border-b border-gray-700 space-y-3">
                 <input type="text" id="search-box" placeholder="Filter by name..." class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -45,38 +49,23 @@
             <div class="p-2 border-b border-gray-700">
                 <div id="sort-controls" class="flex items-center justify-between text-xs">
                     <span class="px-2 text-gray-400">Sort by:</span>
-                    <div class="flex space-x-1">
-                        <button class="sort-btn active" data-sort="name">Name</button>
-                        <button class="sort-btn" data-sort="size">Size</button>
-                        <button class="sort-btn" data-sort="date">Date</button>
-                    </div>
+                    <div class="flex space-x-1"><button class="sort-btn active" data-sort="name">Name</button><button class="sort-btn" data-sort="size">Size</button><button class="sort-btn" data-sort="date">Date</button></div>
                 </div>
             </div>
+            <div id="progress-container" class="p-4 hidden">
+                <p id="progress-message" class="text-xs text-gray-400 mb-1 truncate">Loading logs...</p>
+                <div class="w-full bg-gray-700 rounded-full h-2">
+                    <div id="progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+            <div id="journal-loading-indicator" class="p-4 text-center hidden">
+                <p class="text-xs text-amber-400 animate-pulse">Loading journal services...</p>
+            </div>
             <nav class="flex-1 overflow-y-auto p-2">
-                <ul id="source-list-container">
-                    {% for source in sources %}
-                    <li class="source-item" data-name="{{ source.name }}" data-type="{{ source.type }}" data-size="{{ source.size_bytes }}" data-modified="{{ source.modified_epoch }}">
-                        <a href="#" class="log-link flex items-center w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 focus:bg-indigo-600 focus:text-white transition-all">
-                            <div class="flex-shrink-0 mr-3">
-                                {% if source.type == 'file' %}
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                {% else %}
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>
-                                {% endif %}
-                            </div>
-                            <div class="flex-grow overflow-hidden">
-                                <span class="font-medium truncate block">{{ source.name }}</span>
-                                <span class="text-xs text-gray-500">{{ source.modified_formatted }}</span>
-                            </div>
-                            <span class="text-xs font-mono text-gray-400 ml-2 flex-shrink-0">{{ source.size_formatted }}</span>
-                        </a>
-                    </li>
-                    {% endfor %}
-                </ul>
+                <ul id="source-list-container"></ul>
             </nav>
         </aside>
 
-        <!-- Right Panel -->
         <main class="flex-1 flex flex-col bg-gray-900 overflow-hidden">
             <div id="log-view-panel" class="flex-1 flex flex-col overflow-hidden">
                 <div class="p-4 border-b border-gray-700 bg-gray-800/30 flex justify-between items-center">
@@ -86,15 +75,11 @@
                         <button id="ai-analyse-btn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">AI Analyse</button>
                     </div>
                 </div>
-                <div id="log-content-wrapper" class="flex-1 p-4 overflow-auto bg-black/20">
-                    <pre><code id="log-content" class="text-sm text-gray-300">Log content will appear here...</code></pre>
-                </div>
+                <div id="log-content-wrapper" class="flex-1 p-4 overflow-auto bg-black/20"><pre><code id="log-content" class="text-sm text-gray-300">Log content will appear here...</code></pre></div>
             </div>
             <div id="resize-handle" class="w-full h-2 bg-gray-700 hover:bg-indigo-500 transition-colors duration-200 hidden"></div>
             <div id="ai-view-panel" class="hidden flex-1 flex-col overflow-hidden">
-                 <div class="p-4 border-b border-gray-700 bg-gray-800/30">
-                    <h2 class="text-lg font-semibold text-green-400">AI Analysis</h2>
-                </div>
+                <div class="p-4 border-b border-gray-700 bg-gray-800/30"><h2 class="text-lg font-semibold text-green-400">AI Analysis</h2></div>
                 <div id="ai-content-wrapper" class="flex-1 p-4 overflow-auto prose prose-invert max-w-none"></div>
             </div>
         </main>
@@ -102,11 +87,15 @@
 
     <!-- Settings Modal -->
     <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-2xl">
-            <h3 class="text-xl font-semibold mb-6">Settings</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Left Column: Credentials -->
-                <div class="space-y-6">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-semibold">Settings</h3>
+                <button id="close-settings-btn" class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Credentials Column -->
+                <div class="space-y-6 bg-gray-900/50 p-4 rounded-lg border border-gray-700">
+                    <h4 class="font-semibold text-lg text-white border-b border-gray-700 pb-2">Credentials</h4>
                     <div>
                         <label for="api-key-input" class="block text-sm font-medium text-gray-300 mb-1">OpenAI API Key</label>
                         <input type="password" id="api-key-input" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 placeholder-gray-400" placeholder="sk-...">
@@ -119,12 +108,19 @@
                         </div>
                     </div>
                 </div>
-                <!-- Right Column: Scheduler -->
+                <!-- Hosts Column -->
                 <div class="space-y-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700 flex flex-col">
-                    <h4 class="font-semibold text-lg text-white">Scheduled Analysis</h4>
-                    <div id="scheduler-status" class="text-sm text-gray-400 p-2 rounded-md bg-gray-800">
-                        Loading status...
+                    <div class="flex justify-between items-center border-b border-gray-700 pb-2">
+                         <h4 class="font-semibold text-lg text-white">Remote Hosts</h4>
+                         <button id="add-new-host-btn" class="px-3 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white text-sm">Add New</button>
                     </div>
+                    <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                </div>
+                <!-- Scheduler Column -->
+                <div class="space-y-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700 flex flex-col">
+                    <h4 class="font-semibold text-lg text-white border-b border-gray-700 pb-2">Scheduled Analysis</h4>
+                    <p class="text-xs text-gray-400">Scheduled analysis can now run on any configured host.</p>
+                    <div id="scheduler-status" class="text-sm text-gray-400 p-2 rounded-md bg-gray-800">Loading status...</div>
                     <div class="flex-grow">
                         <button id="select-logs-btn" class="w-full mb-4 px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Select Logs for Schedule...</button>
                         <span id="selected-log-count" class="text-sm text-gray-400 block text-center">0 logs selected</span>
@@ -140,27 +136,58 @@
                     </div>
                 </div>
             </div>
-            <div class="mt-8 flex justify-end">
-                <button id="save-settings-btn" class="px-6 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Save & Close</button>
+             <div class="mt-8 flex justify-end">
+                <button id="save-credentials-btn" class="px-6 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Save Credentials & Close</button>
             </div>
         </div>
     </div>
     
-    <!-- Log Selection Modal -->
+    <!-- Add/Edit Host Modal -->
+    <div id="host-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-lg">
+             <h3 id="host-modal-title" class="text-xl font-semibold mb-6">Add New Host</h3>
+             <form id="host-form" class="space-y-4">
+                 <input type="hidden" id="host-id-input">
+                 <div>
+                     <label for="host-friendly-name-input" class="block text-sm font-medium text-gray-300">Friendly Name</label>
+                     <input type="text" id="host-friendly-name-input" class="mt-1 w-full bg-gray-700 border-gray-600 rounded px-3 py-2" required>
+                 </div>
+                 <div>
+                     <label for="host-ip-input" class="block text-sm font-medium text-gray-300">IP Address or Hostname</label>
+                     <input type="text" id="host-ip-input" class="mt-1 w-full bg-gray-700 border-gray-600 rounded px-3 py-2" required>
+                 </div>
+                 <div>
+                     <label for="host-user-input" class="block text-sm font-medium text-gray-300">SSH User</label>
+                     <input type="text" id="host-user-input" class="mt-1 w-full bg-gray-700 border-gray-600 rounded px-3 py-2" required>
+                 </div>
+                 <div>
+                     <label for="host-description-input" class="block text-sm font-medium text-gray-300">Description</label>
+                     <textarea id="host-description-input" rows="2" class="mt-1 w-full bg-gray-700 border-gray-600 rounded px-3 py-2"></textarea>
+                 </div>
+                 
+                 <div id="host-test-status" class="text-sm p-2 rounded-md hidden"></div>
+
+                 <div class="flex justify-between items-center pt-4">
+                    <button type="button" id="host-modal-cancel-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500">Cancel</button>
+                    <div id="host-form-actions" class="flex items-center space-x-2">
+                        <button type="button" id="host-test-btn" class="px-4 py-2 rounded-md bg-yellow-500 hover:bg-yellow-400 text-black">Test Connection</button>
+                        <button type="submit" id="host-save-btn" class="px-4 py-2 rounded-md bg-green-600 hover:bg-green-500 hidden">Save Host</button>
+                    </div>
+                 </div>
+             </form>
+        </div>
+    </div>
+
     <div id="log-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
         <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-xl h-3/4 flex flex-col">
-            <h3 class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
-            <div id="log-selection-list" class="flex-grow overflow-y-auto border border-gray-700 rounded-md p-2">
-                <!-- Log list will be populated by JS -->
-            </div>
+            <h3 id="log-selection-title" class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
+            <div id="log-selection-list" class="flex-grow overflow-y-auto border border-gray-700 rounded-md p-2"></div>
             <div class="mt-6 flex justify-end space-x-3">
                 <button id="cancel-log-selection-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
                 <button id="save-log-selection-btn" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Confirm Selections</button>
             </div>
         </div>
     </div>
-
-    <!-- Toast Notification -->
     <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg"></div>
 
     <script>
@@ -174,17 +201,41 @@
         const searchBox = document.getElementById('search-box');
         const sortControls = document.getElementById('sort-controls');
         const filterControls = document.getElementById('filter-controls');
+        const aiContentWrapper = document.getElementById('ai-content-wrapper');
+        const aiViewPanel = document.getElementById('ai-view-panel');
+        const resizeHandle = document.getElementById('resize-handle');
+        const logViewPanel = document.getElementById('log-view-panel');
         
-        // Settings Modal
+        const hostSelector = document.getElementById('host-selector');
         const settingsBtn = document.getElementById('settings-btn');
+        const closeSettingsBtn = document.getElementById('close-settings-btn');
         const settingsModal = document.getElementById('settings-modal');
-        const saveSettingsBtn = document.getElementById('save-settings-btn');
+        const hostListDiv = document.getElementById('host-list');
+        const addNewHostBtn = document.getElementById('add-new-host-btn');
+        
+        const hostModal = document.getElementById('host-modal');
+        const hostModalTitle = document.getElementById('host-modal-title');
+        const hostForm = document.getElementById('host-form');
+        const hostIdInput = document.getElementById('host-id-input');
+        const hostFriendlyNameInput = document.getElementById('host-friendly-name-input');
+        const hostIpInput = document.getElementById('host-ip-input');
+        const hostUserInput = document.getElementById('host-user-input');
+        const hostDescriptionInput = document.getElementById('host-description-input');
+        const hostTestStatus = document.getElementById('host-test-status');
+        const hostTestBtn = document.getElementById('host-test-btn');
+        const hostSaveBtn = document.getElementById('host-save-btn');
+        const hostModalCancelBtn = document.getElementById('host-modal-cancel-btn');
+        
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressMessage = document.getElementById('progress-message');
+        const journalLoadingIndicator = document.getElementById('journal-loading-indicator');
+        
         const apiKeyInput = document.getElementById('api-key-input');
         const discordWebhookInput = document.getElementById('discord-webhook-input');
         const testDiscordBtn = document.getElementById('test-discord-btn');
-        const toast = document.getElementById('toast-notification');
+        const saveCredentialsBtn = document.getElementById('save-credentials-btn');
         
-        // Scheduler UI
         const schedulerStatusDiv = document.getElementById('scheduler-status');
         const scheduleIntervalInput = document.getElementById('schedule-interval-input');
         const startScheduleBtn = document.getElementById('start-schedule-btn');
@@ -193,36 +244,316 @@
         const selectLogsBtn = document.getElementById('select-logs-btn');
         const selectedLogCountSpan = document.getElementById('selected-log-count');
 
-        // Log Selection Modal
         const logSelectionModal = document.getElementById('log-selection-modal');
+        const logSelectionTitle = document.getElementById('log-selection-title');
         const logSelectionList = document.getElementById('log-selection-list');
         const saveLogSelectionBtn = document.getElementById('save-log-selection-btn');
         const cancelLogSelectionBtn = document.getElementById('cancel-log-selection-btn');
         
-        // Panels & Resizer
-        const aiViewPanel = document.getElementById('ai-view-panel');
-        const aiContentWrapper = document.getElementById('ai-content-wrapper');
-        const logViewPanel = document.getElementById('log-view-panel');
-        const resizeHandle = document.getElementById('resize-handle');
+        const toast = document.getElementById('toast-notification');
         
         let currentLogName = "";
         let currentLogContent = "";
         let scheduledSources = [];
+        let currentEventSource = null;
+
+        // --- UTILITY FUNCTIONS ---
+        const showToast = (message, type = 'success') => {
+            toast.textContent = message;
+            toast.className = 'fixed bottom-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg';
+            if (type === 'error') toast.classList.add('bg-red-500');
+            else if (type === 'info') toast.classList.add('bg-sky-500');
+            else toast.classList.add('bg-green-500');
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 4000);
+        };
         
-        // --- API & DATA FETCHING ---
         const fetchApi = async (endpoint, options = {}) => {
             try {
                 const response = await fetch(endpoint, options);
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'An unknown error occurred.');
-                return data;
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({error: 'An unknown server error occurred.'}));
+                    throw new Error(errorData.error);
+                }
+                return response.json();
             } catch (error) {
+                console.error("API Error:", error);
                 showToast(error.message, 'error');
                 throw error;
             }
         };
+        
+        const runSortAndFilter = () => {
+            const nameFilter = searchBox.value.toLowerCase();
+            const typeFilter = filterControls.querySelector('.active').dataset.filter;
+            const sortBy = sortControls.querySelector('.active').dataset.sort;
+            const items = Array.from(sourceListContainer.querySelectorAll('.source-item'));
+            items.sort((a, b) => {
+                if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
+                if (sortBy === 'size') return parseInt(b.dataset.size) - parseInt(a.dataset.size);
+                if (sortBy === 'date') return parseInt(b.dataset.modified) - parseInt(a.dataset.modified);
+                return 0;
+            }).forEach(item => {
+                const nameMatch = item.dataset.name.toLowerCase().includes(nameFilter);
+                const typeMatch = (typeFilter === 'all') || (item.dataset.type === typeFilter);
+                item.style.display = (nameMatch && typeMatch) ? '' : 'none';
+                sourceListContainer.appendChild(item);
+            });
+        };
 
-        // --- CORE LOGIC ---
+        // --- CORE APP LOGIC ---
+        const fetchSourcesForHost = () => {
+            const selectedHost = hostSelector.value;
+            const url = selectedHost === 'local' ? '/sources/local' : `/sources/remote/${selectedHost}`;
+
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+
+            sourceListContainer.innerHTML = '';
+            logTitle.textContent = `Fetching logs from ${hostSelector.options[hostSelector.selectedIndex].text}...`;
+            logContent.textContent = '';
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressMessage.textContent = 'Initializing connection...';
+            
+            let journalItems = [];
+            currentEventSource = new EventSource(url);
+
+            currentEventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                switch(data.status) {
+                    case 'progress':
+                        progressBar.style.width = `${data.progress}%`;
+                        progressMessage.textContent = data.message;
+                        if (data.message.includes('journal')) {
+                            journalLoadingIndicator.classList.remove('hidden');
+                        }
+                        break;
+                    case 'source':
+                        if (data.data.type === 'file') appendSourceToList(data.data);
+                        else journalItems.push(data.data);
+                        break;
+                    case 'complete':
+                        journalItems.forEach(appendSourceToList);
+                        progressBar.style.width = `100%`;
+                        progressMessage.textContent = 'Done!';
+                        journalLoadingIndicator.classList.add('hidden');
+
+                        const selectedHostName = hostSelector.options[hostSelector.selectedIndex].text;
+                        if (sourceListContainer.children.length === 0) {
+                            sourceListContainer.innerHTML = '<li class="p-4 text-center text-gray-500">No log sources found on host.</li>';
+                            logTitle.textContent = `No logs found on ${selectedHostName}.`;
+                        } else {
+                            logTitle.textContent = `All logs pulled from ${selectedHostName}. Select a log to view.`;
+                        }
+                        
+                        runSortAndFilter();
+                        setTimeout(() => progressContainer.classList.add('hidden'), 1500);
+                        currentEventSource.close();
+                        break;
+                    case 'error':
+                        showToast(data.message, 'error');
+                        progressContainer.classList.add('hidden');
+                        journalLoadingIndicator.classList.add('hidden');
+                        sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${data.message}</li>`;
+                        currentEventSource.close();
+                        break;
+                }
+            };
+
+            currentEventSource.onerror = (err) => {
+                console.error("EventSource failed:", err);
+                showToast('Connection to server failed. Check if the backend is running.', 'error');
+                progressContainer.classList.add('hidden');
+                journalLoadingIndicator.classList.add('hidden');
+                if (currentEventSource) currentEventSource.close();
+            };
+        };
+
+        const appendSourceToList = (source) => {
+            const li = document.createElement('li');
+            li.className = 'source-item';
+            li.dataset.name = source.name;
+            li.dataset.type = source.type;
+            li.dataset.size = source.size_bytes;
+            li.dataset.modified = source.modified_epoch;
+            li.innerHTML = `
+                <a href="#" class="log-link flex items-center w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 focus:bg-indigo-600 focus:text-white transition-all">
+                    <div class="flex-shrink-0 mr-3">
+                        ${source.type === 'file' 
+                            ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`
+                            : `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>`}
+                    </div>
+                    <div class="flex-grow overflow-hidden">
+                        <span class="font-medium truncate block">${source.name}</span>
+                        <span class="text-xs text-gray-500">${source.modified_formatted}</span>
+                    </div>
+                    <span class="text-xs font-mono text-gray-400 ml-2 flex-shrink-0">${source.size_formatted}</span>
+                </a>
+            `;
+            sourceListContainer.appendChild(li);
+        };
+        
+        // --- HOST MANAGEMENT ---
+        const openHostModal = (host = null) => {
+            hostForm.reset();
+            hostTestStatus.classList.add('hidden');
+            hostSaveBtn.classList.add('hidden');
+            hostTestBtn.classList.remove('hidden');
+            hostTestBtn.disabled = false;
+            hostTestBtn.textContent = 'Test Connection';
+
+            if (host) { // Edit mode
+                hostModalTitle.textContent = 'Edit Host';
+                hostIdInput.value = host.id;
+                hostFriendlyNameInput.value = host.friendly_name;
+                hostIpInput.value = host.ip;
+                hostUserInput.value = host.user;
+                hostDescriptionInput.value = host.description;
+                hostSaveBtn.textContent = 'Save Changes';
+            } else { // Add mode
+                hostModalTitle.textContent = 'Add New Host';
+                hostIdInput.value = '';
+                hostSaveBtn.textContent = 'Add Host';
+            }
+            settingsModal.classList.add('hidden');
+            hostModal.classList.remove('hidden');
+        };
+
+        const populateHostList = async () => {
+            try {
+                const hosts = await fetchApi('/hosts');
+                hostListDiv.innerHTML = '';
+                if (Object.keys(hosts).length === 0) {
+                     hostListDiv.innerHTML = `<p class="text-sm text-gray-500 text-center">No remote hosts configured.</p>`;
+                }
+                for (const [id, host] of Object.entries(hosts)) {
+                    const div = document.createElement('div');
+                    div.className = 'bg-gray-800 p-3 rounded-lg';
+                    div.innerHTML = `
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-white">${host.friendly_name}</span>
+                            <div class="flex space-x-2">
+                                <button class="edit-host-btn p-1 rounded hover:bg-gray-700" data-host-id="${id}" title="Edit"><svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg></button>
+                                <button class="delete-host-btn p-1 rounded hover:bg-gray-700" data-host-id="${id}" title="Delete"><svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-400 mt-1">${host.description || 'No description'}</p>
+                        <p class="text-xs text-gray-500 font-mono mt-2">${host.user}@${host.ip}</p>
+                    `;
+                    hostListDiv.appendChild(div);
+                }
+            } catch (error) {
+                 hostListDiv.innerHTML = `<p class="text-red-400">Could not load hosts.</p>`;
+            }
+        };
+        
+        const populateHostSelector = async () => {
+            try {
+                const hosts = await fetchApi('/hosts');
+                const selectedValue = hostSelector.value;
+                hostSelector.innerHTML = '<option value="local">Localhost</option>';
+                for (const [id, host] of Object.entries(hosts)) {
+                    const option = new Option(host.friendly_name, id)
+                    hostSelector.add(option);
+                }
+                hostSelector.value = selectedValue;
+            } catch(error) {}
+        };
+
+        // --- EVENT LISTENERS ---
+        hostSelector.addEventListener('change', fetchSourcesForHost);
+
+        settingsBtn.addEventListener('click', () => {
+             settingsModal.classList.remove('hidden');
+             populateHostList();
+             updateSchedulerStatus();
+        });
+        closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+        addNewHostBtn.addEventListener('click', () => openHostModal());
+        hostModalCancelBtn.addEventListener('click', () => {
+            hostModal.classList.add('hidden');
+            settingsModal.classList.remove('hidden');
+        });
+        
+        hostListDiv.addEventListener('click', async (e) => {
+            const button = e.target.closest('button');
+            if (!button) return;
+            const hostId = button.dataset.hostId;
+            if (button.classList.contains('edit-host-btn')) {
+                const hosts = await fetchApi('/hosts');
+                const hostData = hosts[hostId];
+                if (hostData) openHostModal({ id: hostId, ...hostData });
+            }
+            if (button.classList.contains('delete-host-btn')) {
+                if (confirm('Are you sure you want to delete this host?')) {
+                    await fetchApi(`/hosts/delete/${hostId}`, { method: 'DELETE' });
+                    showToast('Host deleted.');
+                    populateHostList();
+                    populateHostSelector();
+                }
+            }
+        });
+
+        hostTestBtn.addEventListener('click', async () => {
+            hostTestStatus.classList.remove('hidden');
+            hostTestStatus.textContent = 'Testing...';
+            hostTestStatus.className = 'text-sm p-2 rounded-md bg-gray-700 text-yellow-400';
+            hostSaveBtn.classList.add('hidden');
+            hostTestBtn.disabled = true;
+            try {
+                const res = await fetchApi('/hosts/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: hostIpInput.value, user: hostUserInput.value })
+                });
+                if (res.success) {
+                    hostTestStatus.textContent = res.message;
+                    hostTestStatus.className = 'text-sm p-2 rounded-md bg-green-800 text-green-300';
+                    hostSaveBtn.classList.remove('hidden');
+                    hostTestBtn.classList.add('hidden');
+                } else {
+                     throw new Error(res.error);
+                }
+            } catch (error) {
+                hostTestStatus.textContent = `Test Failed: ${error.message}`;
+                hostTestStatus.className = 'text-sm p-2 rounded-md bg-red-800 text-red-300';
+                hostTestBtn.disabled = false;
+                hostTestBtn.textContent = 'Retry Test';
+            }
+        });
+
+        hostForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const hostId = hostIdInput.value;
+            const hostData = {
+                friendly_name: hostFriendlyNameInput.value,
+                ip: hostIpInput.value,
+                user: hostUserInput.value,
+                description: hostDescriptionInput.value,
+            };
+            const url = hostId ? `/hosts/update/${hostId}` : '/hosts/add';
+            const method = hostId ? 'PUT' : 'POST';
+            try {
+                await fetchApi(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(hostData) });
+                showToast(`Host ${hostId ? 'updated' : 'added'} successfully.`);
+                hostModal.classList.add('hidden');
+                settingsModal.classList.remove('hidden');
+                populateHostList();
+                populateHostSelector();
+            } catch(error) {}
+        });
+        
+        saveCredentialsBtn.addEventListener('click', () => {
+            localStorage.setItem('openai_api_key', apiKeyInput.value.trim() || '');
+            localStorage.setItem('discord_webhook_url', discordWebhookInput.value.trim() || '');
+            showToast('Credentials saved!');
+            settingsModal.classList.add('hidden');
+        });
+
         sourceListContainer.addEventListener('click', async (event) => {
             const link = event.target.closest('.log-link');
             if (!link) return;
@@ -231,46 +562,59 @@
             const sourceItem = link.closest('.source-item');
             currentLogName = sourceItem.dataset.name;
             const type = sourceItem.dataset.type;
+            const selectedHost = hostSelector.value;
+            const selectedHostName = hostSelector.options[hostSelector.selectedIndex].text;
 
             logTitle.textContent = `Loading: ${currentLogName}...`;
             logContent.textContent = 'Fetching log data...';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
 
-            const url = type === 'file' ? `/log/${currentLogName}` : `/journal/${currentLogName}`;
+            const hostParam = selectedHost === 'local' ? '' : `?host=${selectedHost}`;
+            const url = type === 'file' ? `/log/${encodeURIComponent(currentLogName)}${hostParam}` : `/journal/${encodeURIComponent(currentLogName)}${hostParam}`;
 
             try {
-                const data = await fetchApi(url);
-                currentLogContent = data.content;
-                logTitle.textContent = currentLogName;
-                logContent.textContent = currentLogContent || 'Log source is empty.';
+                const response = await fetch(url);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
                 
-                if (localStorage.getItem('openai_api_key') && currentLogContent) {
+                currentLogContent = data.content;
+                logTitle.textContent = `${currentLogName} on ${selectedHostName}`;
+                logContent.textContent = data.content || 'Log source is empty.';
+                
+                if (localStorage.getItem('openai_api_key') && data.content) {
                      aiAnalyseBtn.classList.remove('hidden');
                      if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
                 }
             } catch (error) {
                 logTitle.textContent = `Error loading ${currentLogName}`;
+                logContent.textContent = error.message;
+                showToast(error.message, 'error');
             }
         });
 
         aiAnalyseBtn.addEventListener('click', async () => {
             const apiKey = localStorage.getItem('openai_api_key');
-            if (!apiKey) { showToast('API Key is missing.', 'error'); return; }
+            if (!apiKey) {
+                showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
+                return;
+            }
+            if (!currentLogContent) {
+                showToast('No log content to analyse.', 'error');
+                return;
+            }
 
             aiAnalyseBtn.textContent = 'Analysing...';
             aiAnalyseBtn.disabled = true;
-            showAiPanel();
+            aiViewPanel.classList.remove('hidden');
+            aiViewPanel.classList.add('flex');
             aiContentWrapper.innerHTML = '<p>Contacting AI assistant...</p>';
 
             try {
                 const data = await fetchApi('/analyse', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        log_content: currentLogContent, log_name: currentLogName, api_key: apiKey,
-                        webhook_url: localStorage.getItem('discord_webhook_url')
-                    })
+                    body: JSON.stringify({ log_content: currentLogContent, log_name: currentLogName, api_key: apiKey, webhook_url: localStorage.getItem('discord_webhook_url') })
                 });
                 aiContentWrapper.innerHTML = data.analysis.replace(/\n/g, '<br>');
                 if (data.discord_sent) showToast('Issue detected! Alert sent to Discord.', 'info');
@@ -281,8 +625,7 @@
                 aiAnalyseBtn.disabled = false;
             }
         });
-
-        // --- SETTINGS & SCHEDULER LOGIC ---
+        
         const updateSchedulerStatus = async () => {
             try {
                 const data = await fetchApi('/schedule/status');
@@ -291,10 +634,7 @@
 
                 if (data.is_running) {
                     const nextRun = new Date(data.next_run).toLocaleString();
-                    schedulerStatusDiv.innerHTML = `
-                        <p class="text-green-400 font-semibold">Status: Running</p>
-                        <p>Monitoring ${data.sources.length} logs every ${data.interval} hour(s).</p>
-                        <p>Next run: ${nextRun}</p>`;
+                    schedulerStatusDiv.innerHTML = `<p class="text-green-400 font-semibold">Status: Running</p><p>Monitoring ${data.sources.length} logs every ${data.interval} hour(s).</p><p>Next run: ${nextRun}</p>`;
                     scheduleIntervalInput.value = data.interval;
                 } else {
                     schedulerStatusDiv.innerHTML = `<p class="text-yellow-400 font-semibold">Status: Not Running</p>`;
@@ -303,10 +643,18 @@
                 schedulerStatusDiv.innerHTML = `<p class="text-red-400 font-semibold">Error fetching status.</p>`;
             }
         };
-
+        
         selectLogsBtn.addEventListener('click', () => {
+            const selectedHostText = hostSelector.options[hostSelector.selectedIndex].text;
+            logSelectionTitle.textContent = `Select Logs to Monitor on ${selectedHostText}`;
             logSelectionList.innerHTML = '';
+            
             const allSourceItems = document.querySelectorAll('#source-list-container .source-item');
+            if (allSourceItems.length === 0) {
+                showToast("No logs loaded to select from. Please select a host first.", "error");
+                return;
+            }
+            
             allSourceItems.forEach(item => {
                 if (parseInt(item.dataset.size, 10) === 0 && item.dataset.type === 'file') return;
 
@@ -319,15 +667,16 @@
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
                 checkbox.className = 'h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500 mr-4';
-                checkbox.value = JSON.stringify({ name, type });
-                if (scheduledSources.some(s => s.name === name && s.type === type)) {
+                checkbox.value = JSON.stringify({ name, type, host: hostSelector.value });
+                
+                if (scheduledSources.some(s => s.name === name && s.type === type && s.host === hostSelector.value)) {
                     checkbox.checked = true;
                 }
                 
                 const label = document.createElement('label');
                 label.textContent = name;
                 label.className = 'flex-grow cursor-pointer';
-                label.onclick = () => checkbox.click(); // Allow clicking label to toggle
+                label.onclick = () => checkbox.click(); 
                 
                 li.appendChild(checkbox);
                 li.appendChild(label);
@@ -337,7 +686,10 @@
         });
 
         saveLogSelectionBtn.addEventListener('click', () => {
-            scheduledSources = Array.from(logSelectionList.querySelectorAll('input:checked')).map(cb => JSON.parse(cb.value));
+            const currentHost = hostSelector.value;
+            const otherHostSources = scheduledSources.filter(s => s.host !== currentHost);
+            const thisHostSources = Array.from(logSelectionList.querySelectorAll('input:checked')).map(cb => JSON.parse(cb.value));
+            scheduledSources = [...otherHostSources, ...thisHostSources];
             selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
             logSelectionModal.classList.add('hidden');
         });
@@ -360,7 +712,7 @@
                 });
                 showToast(data.message);
                 updateSchedulerStatus();
-            } catch (error) { /* Handled */ }
+            } catch (error) {}
         });
 
         stopScheduleBtn.addEventListener('click', async () => {
@@ -368,18 +720,17 @@
                 const data = await fetchApi('/schedule/stop', { method: 'POST' });
                 showToast(data.message);
                 updateSchedulerStatus();
-            } catch (error) { /* Handled */ }
+            } catch (error) {}
         });
         
         runNowBtn.addEventListener('click', async () => {
             if (scheduledSources.length === 0) { showToast('Please select logs for the schedule first.', 'error'); return; }
             if (!apiKeyInput.value.trim() || !discordWebhookInput.value.trim()) { showToast('OpenAI key and Discord webhook must be set to run analysis.', 'error'); return; }
-
             runNowBtn.disabled = true; runNowBtn.textContent = '...';
             try {
-                const data = await fetchApi('/schedule/run_now', { method: 'POST' });
-                showToast(data.message, 'info');
-            } catch(error) { /* Handled */ }
+                await fetchApi('/schedule/run_now', { method: 'POST' });
+                showToast('Immediate analysis triggered.');
+            } catch(error) {}
             finally { runNowBtn.disabled = false; runNowBtn.textContent = 'Run Now'; }
         });
 
@@ -388,75 +739,31 @@
             if (!webhookUrl) { showToast('Enter a Discord webhook URL.', 'error'); return; }
             testDiscordBtn.disabled = true; testDiscordBtn.textContent = '...';
             try {
-                const data = await fetchApi('/test_discord', {
+                await fetchApi('/test_discord', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ webhook_url: webhookUrl })
                 });
-                showToast(data.message);
-            } catch (error) { /* Handled */ } 
+                showToast('Test message sent successfully!');
+            } catch (error) {} 
             finally { testDiscordBtn.disabled = false; testDiscordBtn.textContent = 'Test'; }
         });
 
-        settingsBtn.addEventListener('click', () => {
-            settingsModal.classList.remove('hidden');
-            updateSchedulerStatus();
+        [searchBox, filterControls, sortControls].forEach(el => {
+            el.addEventListener('input', runSortAndFilter);
+            el.addEventListener('click', e => {
+                if (e.target.matches('.filter-btn, .sort-btn')) {
+                    el.querySelector('.active').classList.remove('active');
+                    e.target.classList.add('active');
+                    runSortAndFilter();
+                }
+            });
         });
-        saveSettingsBtn.addEventListener('click', () => {
-            localStorage.setItem('openai_api_key', apiKeyInput.value.trim() || '');
-            localStorage.setItem('discord_webhook_url', discordWebhookInput.value.trim() || '');
-            showToast('Credentials saved!');
-            settingsModal.classList.add('hidden');
-        });
+
+        // --- INITIALIZATION ---
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
         discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
-        
-        // --- UI & UTILITY FUNCTIONS ---
-        const showToast = (message, type = 'success') => {
-            toast.textContent = message;
-            toast.className = 'fixed bottom-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg';
-            if (type === 'error') toast.classList.add('bg-red-500');
-            else if (type === 'info') toast.classList.add('bg-sky-500');
-            else toast.classList.add('bg-green-500');
-            toast.classList.remove('hidden');
-            setTimeout(() => toast.classList.add('hidden'), 4000);
-        };
-        const showAiPanel = () => {
-            aiViewPanel.classList.remove('hidden'); aiViewPanel.classList.add('flex');
-            resizeHandle.classList.remove('hidden'); logViewPanel.style.height = '50%';
-            aiViewPanel.style.height = '50%';
-        };
-        
-        // --- EVENT LISTENERS ---
-        const runSortAndFilter = () => {
-            const nameFilter = searchBox.value.toLowerCase();
-            const typeFilter = filterControls.querySelector('.active').dataset.filter;
-            const sortBy = sortControls.querySelector('.active').dataset.sort;
-            Array.from(sourceListContainer.querySelectorAll('.source-item'))
-            .sort((a, b) => {
-                if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
-                if (sortBy === 'size') return parseInt(b.dataset.size) - parseInt(a.dataset.size);
-                if (sortBy === 'date') return parseInt(b.dataset.modified) - parseInt(a.dataset.modified);
-                return 0;
-            }).forEach(item => {
-                const nameMatch = item.dataset.name.toLowerCase().includes(nameFilter);
-                const typeMatch = (typeFilter === 'all') || (item.dataset.type === typeFilter);
-                item.style.display = (nameMatch && typeMatch) ? 'flex' : 'none';
-                sourceListContainer.appendChild(item);
-            });
-        };
-        [searchBox, sortControls, filterControls].forEach(el => el.addEventListener('input', runSortAndFilter));
-        [sortControls, filterControls].forEach(el => el.addEventListener('click', e => {
-            if (e.target.matches('.sort-btn, .filter-btn')) {
-                el.querySelector('.active').classList.remove('active');
-                e.target.classList.add('active');
-                runSortAndFilter();
-            }
-        }));
-        
-        runSortAndFilter();
-        updateSchedulerStatus(); // Get initial status on load
+        populateHostSelector().then(fetchSourcesForHost);
     });
-    document.querySelectorAll('.sort-btn, .filter-btn').forEach(btn => btn.classList.add('px-3', 'py-1', 'rounded-md', 'transition-colors', 'hover:bg-gray-600', 'border', 'border-gray-700'));
     </script>
 </body>
 </html>
