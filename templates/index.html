@@ -339,11 +339,17 @@
                     case 'complete':
                         journalItems.forEach(appendSourceToList);
                         progressBar.style.width = `100%`;
-                        progressMessage.textContent = data.message;
+                        progressMessage.textContent = 'Done!';
                         journalLoadingIndicator.classList.add('hidden');
+
+                        const selectedHostName = hostSelector.options[hostSelector.selectedIndex].text;
                         if (sourceListContainer.children.length === 0) {
                             sourceListContainer.innerHTML = '<li class="p-4 text-center text-gray-500">No log sources found on host.</li>';
+                            logTitle.textContent = `No logs found on ${selectedHostName}.`;
+                        } else {
+                            logTitle.textContent = `All logs pulled from ${selectedHostName}. Select a log to view.`;
                         }
+                        
                         runSortAndFilter();
                         setTimeout(() => progressContainer.classList.add('hidden'), 1500);
                         currentEventSource.close();
@@ -723,6 +729,7 @@
             runNowBtn.disabled = true; runNowBtn.textContent = '...';
             try {
                 await fetchApi('/schedule/run_now', { method: 'POST' });
+                showToast('Immediate analysis triggered.');
             } catch(error) {}
             finally { runNowBtn.disabled = false; runNowBtn.textContent = 'Run Now'; }
         });
