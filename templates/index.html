@@ -17,15 +17,12 @@
         .sort-btn.active, .filter-btn.active { background-color: #4f46e5; color: white; }
         #resize-handle { cursor: ns-resize; }
         #settings-modal.hidden, #log-selection-modal.hidden, #toast-notification.hidden, #add-host-modal.hidden { display: none; }
-        .spinner { border-top-color: #4f46e5; animation: spin 1s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200 flex flex-col h-screen">
 
     <header class="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-4 shadow-lg flex items-center justify-between flex-wrap gap-2">
         <h1 class="text-xl font-bold text-white">Log Viewer</h1>
-        <!-- NEW: Host Selector -->
         <div class="flex items-center space-x-4">
             <label for="host-selector" class="text-sm font-medium text-gray-400">Host:</label>
             <select id="host-selector" class="bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -56,18 +53,25 @@
                     <div class="flex space-x-1"><button class="sort-btn active" data-sort="name">Name</button><button class="sort-btn" data-sort="size">Size</button><button class="sort-btn" data-sort="date">Date</button></div>
                 </div>
             </div>
+            <!-- Progress Bar for file logs -->
+            <div id="progress-container" class="p-4 hidden">
+                <p id="progress-message" class="text-xs text-gray-400 mb-1 truncate">Loading logs...</p>
+                <div class="w-full bg-gray-700 rounded-full h-2">
+                    <div id="progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+             <!-- Journal loading indicator remains for UX -->
+            <div id="journal-loading-indicator" class="p-4 text-center hidden">
+                <p class="text-xs text-amber-400 animate-pulse">Loading journal services...</p>
+            </div>
             <nav class="flex-1 overflow-y-auto p-2">
                 <ul id="source-list-container">
                     <!-- Log sources will be populated by JS -->
                 </ul>
-                <!-- NEW: Loading Spinner -->
-                <div id="source-list-loader" class="hidden items-center justify-center p-8">
-                    <div class="spinner h-8 w-8 rounded-full border-4 border-gray-600"></div>
-                </div>
             </nav>
         </aside>
 
-        <!-- Right Panel (Unchanged) -->
+        <!-- Right Panel -->
         <main class="flex-1 flex flex-col bg-gray-900 overflow-hidden">
             <div id="log-view-panel" class="flex-1 flex flex-col overflow-hidden">
                 <div class="p-4 border-b border-gray-700 bg-gray-800/30 flex justify-between items-center">
@@ -87,15 +91,14 @@
         </main>
     </div>
 
-    <!-- MODIFIED: Settings Modal with Remote Hosts section -->
+    <!-- Settings Modal -->
     <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
         <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-6">
                 <h3 class="text-xl font-semibold">Settings</h3>
-                <button id="close-settings-btn" class="text-gray-400 hover:text-white">&times;</button>
+                <button id="close-settings-btn" class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- Left Column: Credentials -->
                 <div class="space-y-6 lg:col-span-1">
                     <h4 class="font-semibold text-lg text-white border-b border-gray-700 pb-2">Credentials</h4>
                     <div>
@@ -111,7 +114,6 @@
                     </div>
                 </div>
                 
-                <!-- Center Column: Remote Hosts -->
                 <div class="space-y-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700 flex flex-col lg:col-span-1">
                     <h4 class="font-semibold text-lg text-white border-b border-gray-700 pb-2">Remote Hosts</h4>
                     <p class="text-xs text-gray-400">Requires passwordless SSH key access from the server to the remote host.</p>
@@ -123,9 +125,9 @@
                     </form>
                 </div>
                 
-                <!-- Right Column: Scheduler -->
                 <div class="space-y-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700 flex flex-col lg:col-span-1">
                     <h4 class="font-semibold text-lg text-white border-b border-gray-700 pb-2">Scheduled Analysis</h4>
+                    <p class="text-xs text-gray-400">Note: Scheduler only runs on Localhost.</p>
                     <div id="scheduler-status" class="text-sm text-gray-400 p-2 rounded-md bg-gray-800">Loading status...</div>
                     <div class="flex-grow">
                         <button id="select-logs-btn" class="w-full mb-4 px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Select Logs for Schedule...</button>
@@ -148,7 +150,7 @@
         </div>
     </div>
     
-    <!-- Log Selection Modal (Unchanged) -->
+    <!-- Log Selection Modal -->
     <div id="log-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
         <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-xl h-3/4 flex flex-col">
             <h3 class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
@@ -160,14 +162,13 @@
         </div>
     </div>
 
-    <!-- Toast Notification (Unchanged) -->
+    <!-- Toast Notification -->
     <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg"></div>
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
         // --- ELEMENT SELECTORS ---
         const sourceListContainer = document.getElementById('source-list-container');
-        const sourceListLoader = document.getElementById('source-list-loader');
         const logTitle = document.getElementById('log-title');
         const logContent = document.getElementById('log-content');
         const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
@@ -183,7 +184,13 @@
         const hostnameInput = document.getElementById('hostname-input');
         const hostuserInput = document.getElementById('hostuser-input');
         
-        // Settings Modal
+        // Progress Indicators
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressMessage = document.getElementById('progress-message');
+        const journalLoadingIndicator = document.getElementById('journal-loading-indicator');
+        
+        // Settings Modal & Other UI...
         const settingsBtn = document.getElementById('settings-btn');
         const settingsModal = document.getElementById('settings-modal');
         const saveSettingsBtn = document.getElementById('save-settings-btn');
@@ -193,35 +200,12 @@
         const testDiscordBtn = document.getElementById('test-discord-btn');
         const toast = document.getElementById('toast-notification');
         
-        // Scheduler UI, Panels & Resizer, etc. (Selectors are the same)
-        const schedulerStatusDiv = document.getElementById('scheduler-status');
-        const scheduleIntervalInput = document.getElementById('schedule-interval-input');
-        const startScheduleBtn = document.getElementById('start-schedule-btn');
-        const stopScheduleBtn = document.getElementById('stop-schedule-btn');
-        const runNowBtn = document.getElementById('run-now-btn');
-        const selectLogsBtn = document.getElementById('select-logs-btn');
-        const selectedLogCountSpan = document.getElementById('selected-log-count');
-        const logSelectionModal = document.getElementById('log-selection-modal');
-        const logSelectionList = document.getElementById('log-selection-list');
-        const saveLogSelectionBtn = document.getElementById('save-log-selection-btn');
-        const cancelLogSelectionBtn = document.getElementById('cancel-log-selection-btn');
-        const aiViewPanel = document.getElementById('ai-view-panel');
-        const aiContentWrapper = document.getElementById('ai-content-wrapper');
-        const logViewPanel = document.getElementById('log-view-panel');
-        const resizeHandle = document.getElementById('resize-handle');
-        
-        let currentLogName = "";
-        let currentLogContent = "";
-        let scheduledSources = [];
+        let currentEventSource = null;
         
         // --- API & DATA FETCHING ---
-        const fetchApi = async (endpoint, options = {}, isJson = true) => {
+        const fetchApi = async (endpoint, options = {}) => {
             try {
                 const response = await fetch(endpoint, options);
-                if (!isJson) {
-                    if (!response.ok) throw new Error(`Network response was not ok: ${response.statusText}`);
-                    return response.text();
-                }
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || 'An unknown error occurred.');
                 return data;
@@ -232,61 +216,110 @@
             }
         };
 
-        // --- NEW & REVISED CORE LOGIC ---
-        const populateSourceList = (sources) => {
-            sourceListContainer.innerHTML = '';
-            if (!sources || sources.length === 0) {
-                sourceListContainer.innerHTML = '<li class="p-4 text-center text-gray-500">No log sources found.</li>';
-                return;
-            }
-            sources.forEach(source => {
-                const li = document.createElement('li');
-                li.className = 'source-item';
-                li.dataset.name = source.name;
-                li.dataset.type = source.type;
-                li.dataset.size = source.size_bytes;
-                li.dataset.modified = source.modified_epoch;
-                li.innerHTML = `
-                    <a href="#" class="log-link flex items-center w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 focus:bg-indigo-600 focus:text-white transition-all">
-                        <div class="flex-shrink-0 mr-3">
-                            ${source.type === 'file' 
-                                ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`
-                                : `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>`}
-                        </div>
-                        <div class="flex-grow overflow-hidden">
-                            <span class="font-medium truncate block">${source.name}</span>
-                            <span class="text-xs text-gray-500">${source.modified_formatted}</span>
-                        </div>
-                        <span class="text-xs font-mono text-gray-400 ml-2 flex-shrink-0">${source.size_formatted}</span>
-                    </a>
-                `;
-                sourceListContainer.appendChild(li);
-            });
-            runSortAndFilter();
-        };
-        
-        const fetchSourcesForHost = async () => {
+        // --- UNIFIED STREAMING LOGIC ---
+        const fetchSourcesForHost = () => {
             const selectedHost = hostSelector.value;
+            // CORRECTED: Use a single endpoint that the backend provides
             const url = selectedHost === 'local' ? '/sources/local' : `/sources/remote/${selectedHost}`;
-            
-            sourceListLoader.style.display = 'flex';
+
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+
+            // Reset UI for loading
             sourceListContainer.innerHTML = '';
             logTitle.textContent = `Fetching logs from ${selectedHost}...`;
             logContent.textContent = '';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
 
-            try {
-                const sources = await fetchApi(url);
-                populateSourceList(sources);
-            } catch (error) {
-                sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${error.message}</li>`;
-            } finally {
-                sourceListLoader.style.display = 'none';
-                logTitle.textContent = 'Select a log source';
-            }
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressMessage.textContent = 'Initializing connection...';
+            
+            let journalItems = []; // Hold journal items until the end
+            
+            currentEventSource = new EventSource(url);
+
+            currentEventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                switch(data.status) {
+                    case 'progress':
+                        progressBar.style.width = `${data.progress}%`;
+                        progressMessage.textContent = data.message;
+                        // Show the journal indicator when it's being fetched
+                        if (data.message.includes('journal')) {
+                            journalLoadingIndicator.classList.remove('hidden');
+                        }
+                        break;
+                    case 'source':
+                        // Separate files and journals
+                        if (data.data.type === 'file') {
+                            appendSourceToList(data.data); // Add files immediately
+                        } else {
+                            journalItems.push(data.data); // Collect journals
+                        }
+                        break;
+                    case 'complete':
+                        // Now that the stream is done, add all collected journal items
+                        journalItems.forEach(appendSourceToList);
+                        
+                        progressBar.style.width = `100%`;
+                        progressMessage.textContent = data.message;
+                        journalLoadingIndicator.classList.add('hidden');
+                        
+                        if (sourceListContainer.children.length === 0) {
+                            sourceListContainer.innerHTML = '<li class="p-4 text-center text-gray-500">No log sources found on host.</li>';
+                        }
+                        
+                        runSortAndFilter(); // Sort the complete list
+                        setTimeout(() => progressContainer.classList.add('hidden'), 1500);
+                        currentEventSource.close();
+                        break;
+                    case 'error':
+                        showToast(data.message, 'error');
+                        progressContainer.classList.add('hidden');
+                        journalLoadingIndicator.classList.add('hidden');
+                        sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${data.message}</li>`;
+                        currentEventSource.close();
+                        break;
+                }
+            };
+
+            currentEventSource.onerror = (err) => {
+                console.error("EventSource failed:", err);
+                showToast('Connection to server failed. Check if the backend is running.', 'error');
+                progressContainer.classList.add('hidden');
+                journalLoadingIndicator.classList.add('hidden');
+                currentEventSource.close();
+            };
         };
 
+        const appendSourceToList = (source) => {
+            const li = document.createElement('li');
+            li.className = 'source-item';
+            li.dataset.name = source.name;
+            li.dataset.type = source.type;
+            li.dataset.size = source.size_bytes;
+            li.dataset.modified = source.modified_epoch;
+            li.innerHTML = `
+                <a href="#" class="log-link flex items-center w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 focus:bg-indigo-600 focus:text-white transition-all">
+                    <div class="flex-shrink-0 mr-3">
+                        ${source.type === 'file' 
+                            ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`
+                            : `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>`}
+                    </div>
+                    <div class="flex-grow overflow-hidden">
+                        <span class="font-medium truncate block">${source.name}</span>
+                        <span class="text-xs text-gray-500">${source.modified_formatted}</span>
+                    </div>
+                    <span class="text-xs font-mono text-gray-400 ml-2 flex-shrink-0">${source.size_formatted}</span>
+                </a>
+            `;
+            sourceListContainer.appendChild(li);
+        };
+        
         hostSelector.addEventListener('change', fetchSourcesForHost);
 
         sourceListContainer.addEventListener('click', async (event) => {
@@ -295,7 +328,7 @@
             event.preventDefault();
 
             const sourceItem = link.closest('.source-item');
-            currentLogName = sourceItem.dataset.name;
+            const currentLogName = sourceItem.dataset.name;
             const type = sourceItem.dataset.type;
             const selectedHost = hostSelector.value;
 
@@ -305,36 +338,36 @@
             truncationWarning.classList.add('hidden');
 
             const hostParam = selectedHost === 'local' ? '' : `?host=${selectedHost}`;
-            const url = type === 'file' ? `/log/${currentLogName}${hostParam}` : `/journal/${currentLogName}${hostParam}`;
+            const url = type === 'file' ? `/log/${encodeURIComponent(currentLogName)}${hostParam}` : `/journal/${encodeURIComponent(currentLogName)}${hostParam}`;
 
             try {
-                const data = await fetchApi(url);
-                currentLogContent = data.content;
-                logTitle.textContent = `${currentLogName} on ${selectedHost}`;
-                logContent.textContent = currentLogContent || 'Log source is empty.';
+                const response = await fetch(url);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
                 
-                if (localStorage.getItem('openai_api_key') && currentLogContent) {
+                logTitle.textContent = `${currentLogName} on ${selectedHost}`;
+                logContent.textContent = data.content || 'Log source is empty.';
+                
+                if (localStorage.getItem('openai_api_key') && data.content) {
                      aiAnalyseBtn.classList.remove('hidden');
                      if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
                 }
             } catch (error) {
                 logTitle.textContent = `Error loading ${currentLogName}`;
+                logContent.textContent = error.message;
+                showToast(error.message, 'error');
             }
         });
-        
-        // AI Analysis click handler is unchanged, as it uses `currentLogContent` which is already fetched.
 
         // --- HOST MANAGEMENT LOGIC ---
         const populateHostLists = async () => {
             try {
                 const hosts = await fetchApi('/hosts');
-                // Main dropdown
                 hostSelector.innerHTML = '<option value="local">Localhost</option>';
                 Object.keys(hosts).forEach(hostname => {
                     const option = new Option(hostname, hostname);
                     hostSelector.add(option);
                 });
-                // Settings modal list
                 hostListDiv.innerHTML = '';
                 Object.entries(hosts).forEach(([hostname, info]) => {
                     const div = document.createElement('div');
@@ -370,23 +403,56 @@
                 const hostname = e.target.dataset.hostname;
                 if (confirm(`Are you sure you want to delete host "${hostname}"?`)) {
                     try {
-                        const data = await fetchApi('/hosts/delete', {
+                        await fetchApi('/hosts/delete', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ hostname })
                         });
-                        showToast(data.message);
+                        showToast(`Host '${hostname}' deleted.`);
                         populateHostLists();
                     } catch (error) { /* Handled */ }
                 }
             }
         });
         
-        // --- SETTINGS MODAL & SCHEDULER (Minor changes for opening/closing) ---
+        // --- SETTINGS & OTHER UI LOGIC ---
+        const showToast = (message, type = 'success') => {
+            toast.textContent = message;
+            toast.className = 'fixed bottom-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg';
+            if (type === 'error') toast.classList.add('bg-red-500');
+            else if (type === 'info') toast.classList.add('bg-sky-500');
+            else toast.classList.add('bg-green-500');
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 4000);
+        };
+        const runSortAndFilter = () => {
+            const nameFilter = searchBox.value.toLowerCase();
+            const typeFilter = filterControls.querySelector('.active').dataset.filter;
+            const sortBy = sortControls.querySelector('.active').dataset.sort;
+            const items = Array.from(sourceListContainer.querySelectorAll('.source-item'));
+            items.sort((a, b) => {
+                if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
+                if (sortBy === 'size') return parseInt(b.dataset.size) - parseInt(a.dataset.size);
+                if (sortBy === 'date') return parseInt(b.dataset.modified) - parseInt(a.dataset.modified);
+                return 0;
+            }).forEach(item => {
+                const nameMatch = item.dataset.name.toLowerCase().includes(nameFilter);
+                const typeMatch = (typeFilter === 'all') || (item.dataset.type === typeFilter);
+                item.style.display = (nameMatch && typeMatch) ? '' : 'none';
+                sourceListContainer.appendChild(item);
+            });
+        };
+        [searchBox, sortControls, filterControls].forEach(el => el.addEventListener('input', runSortAndFilter));
+        [sortControls, filterControls].forEach(el => el.addEventListener('click', e => {
+            if (e.target.matches('.sort-btn, .filter-btn')) {
+                el.querySelector('.active').classList.remove('active');
+                e.target.classList.add('active');
+                runSortAndFilter();
+            }
+        }));
         settingsBtn.addEventListener('click', () => {
             settingsModal.classList.remove('hidden');
             populateHostLists();
-            // updateSchedulerStatus(); // This can be uncommented if scheduler is used
         });
         closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
         saveSettingsBtn.addEventListener('click', () => {
@@ -398,67 +464,11 @@
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
         discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
         
-        // Utility and other functions (toast, AI panel, sorting, etc.) are unchanged and can be pasted back in
-        const showToast = (message, type = 'success') => { /* ... same implementation ... */ };
-        const showAiPanel = () => { /* ... same implementation ... */ };
-        const runSortAndFilter = () => { /* ... same implementation ... */ };
-        // All scheduler button listeners, etc. are the same
-        
         // --- INITIAL LOAD ---
         populateHostLists();
-        fetchSourcesForHost(); // Initial fetch for localhost
-    });
-
-    // --- Helper JS (unchanged) ---
-    // (This part contains the same implementation for showToast, showAiPanel, runSortAndFilter, scheduler functions, etc.)
-    // For brevity, it's omitted here but should be copied from your original file or the logic above.
-    // Example:
-    const showToast = (message, type = 'success') => {
-        const toast = document.getElementById('toast-notification');
-        toast.textContent = message;
-        toast.className = 'fixed bottom-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg';
-        if (type === 'error') toast.classList.add('bg-red-500');
-        else if (type === 'info') toast.classList.add('bg-sky-500');
-        else toast.classList.add('bg-green-500');
-        toast.classList.remove('hidden');
-        setTimeout(() => toast.classList.add('hidden'), 4000);
-    };
-
-    const runSortAndFilter = () => {
-        const searchBox = document.getElementById('search-box');
-        const sourceListContainer = document.getElementById('source-list-container');
-        const filterControls = document.getElementById('filter-controls');
-        const sortControls = document.getElementById('sort-controls');
-        const nameFilter = searchBox.value.toLowerCase();
-        const typeFilter = filterControls.querySelector('.active').dataset.filter;
-        const sortBy = sortControls.querySelector('.active').dataset.sort;
-        Array.from(sourceListContainer.querySelectorAll('.source-item'))
-        .sort((a, b) => {
-            if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
-            if (sortBy === 'size') return parseInt(b.dataset.size) - parseInt(a.dataset.size);
-            if (sortBy === 'date') return parseInt(b.dataset.modified) - parseInt(a.dataset.modified);
-            return 0;
-        }).forEach(item => {
-            const nameMatch = item.dataset.name.toLowerCase().includes(nameFilter);
-            const typeMatch = (typeFilter === 'all') || (item.dataset.type === typeFilter);
-            item.style.display = (nameMatch && typeMatch) ? 'flex' : 'none';
-            sourceListContainer.appendChild(item);
-        });
-    };
-    
-    // Add event listeners for sorting/filtering
-    document.getElementById('search-box').addEventListener('input', runSortAndFilter);
-    ['sort-controls', 'filter-controls'].forEach(id => {
-        document.getElementById(id).addEventListener('click', e => {
-            if (e.target.matches('.sort-btn, .filter-btn')) {
-                document.getElementById(id).querySelector('.active').classList.remove('active');
-                e.target.classList.add('active');
-                runSortAndFilter();
-            }
-        });
+        fetchSourcesForHost();
     });
     document.querySelectorAll('.sort-btn, .filter-btn').forEach(btn => btn.classList.add('px-3', 'py-1', 'rounded-md', 'transition-colors', 'hover:bg-gray-600', 'border', 'border-gray-700'));
-
     </script>
 </body>
 </html>

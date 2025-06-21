@@ -1,5 +1,5 @@
 import subprocess
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, Response, stream_with_context
 import shlex
 import os
 import datetime
@@ -26,19 +26,15 @@ HOSTS_FILE = 'hosts.json'
 def load_hosts():
     """Loads the remote hosts configuration from a JSON file."""
     if not os.path.exists(HOSTS_FILE):
-        # If the file doesn't exist, create it with an empty object
         with open(HOSTS_FILE, 'w') as f:
             json.dump({}, f)
         return {}
     try:
-        # Explicitly open with utf-8 encoding to handle potential BOMs etc.
         with open(HOSTS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError as e:
-        # The crucial change: propagate the JSON error instead of hiding it.
-        # This allows the Flask route to catch it and return a proper JSON error response.
         raise ValueError(f"Error decoding '{HOSTS_FILE}'. Please check for syntax errors or invalid characters. Details: {e}")
 
 def save_hosts(hosts):
@@ -51,27 +47,18 @@ def get_ssh_prefix_args(hostname):
     Constructs the SSH command prefix as a list of arguments.
     Raises ValueError if the host is not configured.
     """
-    # Treat 'local' and 'localhost' as the local machine by returning an empty list.
     if not hostname or hostname in ['localhost', 'local']:
         return []
-    hosts = load_hosts() # This can now raise ValueError for corrupt JSON
+    hosts = load_hosts()
     host_info = hosts.get(hostname)
-    # Check if host_info exists and has a 'user' key.
     if not host_info or not host_info.get('user'):
-        # Raise an exception that will be caught by the route's error handler.
-        # This ensures a proper JSON error response is sent.
         raise ValueError(f"Host '{hostname}' is not configured. Please add it in Settings.")
     
     user = host_info['user']
-    # Build a list of arguments for SSH. No need for shlex.quote with shell=False.
     return [
-        "ssh",
-        "-o", "ConnectTimeout=10",
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "BatchMode=yes", # Prevents password prompts
-        f"{user}@{hostname}"
+        "ssh", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no",
+        "-o", "BatchMode=yes", f"{user}@{hostname}"
     ]
-
 
 # --- CORE LOGIC (Refactored for Remote Execution) ---
 
@@ -81,56 +68,64 @@ def execute_command(hostname, command_str):
     Returns the subprocess result object.
     """
     ssh_prefix_args = get_ssh_prefix_args(hostname)
-    if ssh_prefix_args:
-        # For remote commands, we build a list of arguments and use shell=False.
-        # This is safer as it avoids shell injection issues.
-        # The remote command is passed as a single argument to ssh.
-        cmd_list = ssh_prefix_args + [command_str]
-        return subprocess.run(cmd_list, shell=False, capture_output=True, text=True, check=True, timeout=20)
-    else:
-        # For local commands, using shell=True is simpler for commands involving sudo.
-        return subprocess.run(command_str, shell=True, capture_output=True, text=True, check=True, timeout=20)
+    cmd_list = ssh_prefix_args + [command_str] if ssh_prefix_args else [command_str]
+    shell_mode = not bool(ssh_prefix_args)
+    return subprocess.run(cmd_list, shell=shell_mode, capture_output=True, text=True, check=True, timeout=20)
 
-def get_log_sources_from_host(hostname='localhost'):
+def get_log_sources_from_host_stream(hostname='localhost'):
     """
-    Fetches the list of syslog files and journald units from a host.
+    Fetches log sources from a host, yielding progress updates as a Server-Sent Events (SSE) stream.
     """
-    all_sources = []
-    
-    # Command to list log files
-    cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
-    res_ls = execute_command(hostname, cmd_ls)
-    filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
-
-    for filename in filenames:
-        try:
-            # Command to get file stats
-            cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
-            res_stat = execute_command(hostname, cmd_stat)
-            size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
-            all_sources.append({
-                'type': 'file', 'name': filename, 'size_bytes': size_bytes,
-                'size_formatted': format_bytes(size_bytes), 'modified_epoch': mod_time_epoch,
-                'modified_formatted': format_relative_time(mod_time_epoch)
-            })
-        except (subprocess.CalledProcessError, ValueError, subprocess.TimeoutExpired) as e:
-            print(f"Could not stat file '{filename}' on '{hostname}': {e}")
-            continue
+    def generate_event(data):
+        return f"data: {json.dumps(data)}\n\n"
 
     try:
-        # Command to list journald units
-        cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq"
-        res_journal = execute_command(hostname, cmd_journal)
-        journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
-        for unit in journal_units:
-            all_sources.append({
-                'type': 'journal', 'name': unit, 'size_bytes': 0, 
-                'size_formatted': 'N/A', 'modified_epoch': 0, 'modified_formatted': 'Journald Service'
-            })
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        print(f"Could not fetch journald units from '{hostname}': {e}")
+        # Step 1: List log files
+        yield generate_event({'status': 'progress', 'message': 'Listing log files...', 'progress': 5})
+        cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
+        res_ls = execute_command(hostname, cmd_ls)
+        filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
+        total_files = len(filenames)
+        yield generate_event({'status': 'progress', 'message': f'Found {total_files} potential log files.', 'progress': 10})
 
-    return all_sources
+        # Step 2: Stat each file and stream results
+        for i, filename in enumerate(filenames):
+            progress = 10 + int((i / total_files) * 80) if total_files > 0 else 90
+            yield generate_event({'status': 'progress', 'message': f'Checking: {filename}', 'progress': progress})
+            try:
+                cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
+                res_stat = execute_command(hostname, cmd_stat)
+                size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
+                source_data = {
+                    'type': 'file', 'name': filename, 'size_bytes': size_bytes,
+                    'size_formatted': format_bytes(size_bytes), 'modified_epoch': mod_time_epoch,
+                    'modified_formatted': format_relative_time(mod_time_epoch)
+                }
+                yield generate_event({'status': 'source', 'data': source_data})
+            except (subprocess.CalledProcessError, ValueError, subprocess.TimeoutExpired) as e:
+                print(f"Could not stat file '{filename}' on '{hostname}': {e}")
+                continue
+        
+        # Step 3: Fetch journald units
+        yield generate_event({'status': 'progress', 'message': 'Fetching journald services...', 'progress': 95})
+        try:
+            cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq"
+            res_journal = execute_command(hostname, cmd_journal)
+            journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
+            for unit in journal_units:
+                source_data = {
+                    'type': 'journal', 'name': unit, 'size_bytes': 0, 'size_formatted': 'N/A',
+                    'modified_epoch': 0, 'modified_formatted': 'Journald Service'
+                }
+                yield generate_event({'status': 'source', 'data': source_data})
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            print(f"Could not fetch journald units from '{hostname}': {e}")
+        
+        yield generate_event({'status': 'complete', 'message': 'Done!'})
+
+    except Exception as e:
+        yield generate_event({'status': 'error', 'message': str(e)})
+
 
 # --- HELPER FUNCTIONS (Unchanged) ---
 def format_bytes(size_bytes):
@@ -165,42 +160,22 @@ def send_discord_notification(webhook_url, log_name, analysis_text):
 # --- FLASK ROUTES ---
 @app.route('/')
 def index():
-    """Renders the main page."""
     return render_template('index.html')
 
 @app.route('/sources/local')
 def get_local_sources():
-    """API endpoint to get log sources from the local host."""
-    try:
-        sources = get_log_sources_from_host('local')
-        return jsonify(sources)
-    except Exception as e:
-        print(f"ERROR: An exception occurred while fetching sources for 'local': {e}")
-        return jsonify({'error': str(e)}), 500
+    return Response(stream_with_context(get_log_sources_from_host_stream('local')), mimetype='text/event-stream')
 
 @app.route('/sources/remote/<hostname>')
 def get_remote_sources(hostname):
-    """API endpoint to get log sources from a remote host."""
-    try:
-        if '/' in hostname or '..' in hostname:
-            return jsonify({'error': 'Invalid hostname format.'}), 400
-        sources = get_log_sources_from_host(hostname)
-        return jsonify(sources)
-    except Exception as e:
-        # This broad exception handler is crucial for returning JSON errors
-        # instead of default Flask HTML error pages.
-        print(f"ERROR: An exception occurred while fetching sources for '{hostname}': {e}")
-        return jsonify({'error': str(e)}), 500
+    if '/' in hostname or '..' in hostname:
+        return Response(f"data: {json.dumps({'status': 'error', 'message': 'Invalid hostname format.'})}\n\n", mimetype='text/event-stream')
+    return Response(stream_with_context(get_log_sources_from_host_stream(hostname)), mimetype='text/event-stream')
 
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
-    """
-    Gets content for a specific log file.
-    Accepts a 'host' query parameter for remote fetching.
-    """
     hostname = request.args.get('host', 'localhost')
     if '/' in filename or '..' in filename: return jsonify({'error': 'Invalid filename.'}), 400
-    
     try:
         command_str = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, filename))} 2>/dev/null | tail -n 500" if filename.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
         result = execute_command(hostname, command_str)
@@ -210,13 +185,8 @@ def get_log_content(filename):
 
 @app.route('/journal/<path:unit>')
 def get_journal_content(unit):
-    """
-    Gets content for a specific journald unit.
-    Accepts a 'host' query parameter for remote fetching.
-    """
     hostname = request.args.get('host', 'localhost')
     if not unit or '/' in unit or '..' in unit: return jsonify({'error': 'Invalid unit name.'}), 400
-
     try:
         command_str = f"sudo journalctl -u {shlex.quote(unit)} -n 500 --no-pager"
         result = execute_command(hostname, command_str)
@@ -224,39 +194,26 @@ def get_journal_content(unit):
     except Exception as e: 
         return jsonify({'error': f"Could not read journal for unit '{unit}' on '{hostname}': {e}"}), 500
 
-# --- NEW ROUTES FOR HOST MANAGEMENT ---
+# --- HOST MANAGEMENT ROUTES ---
 @app.route('/hosts', methods=['GET', 'POST'])
 def manage_hosts():
-    """Endpoint to get the list of hosts or add a new one."""
     if request.method == 'POST':
         data = request.get_json()
-        hostname = data.get('hostname')
-        user = data.get('user')
-        if not hostname or not user:
-            return jsonify({'error': 'Hostname and user are required.'}), 400
-        
+        hostname, user = data.get('hostname'), data.get('user')
+        if not all([hostname, user]): return jsonify({'error': 'Hostname and user are required.'}), 400
         hosts = load_hosts()
         hosts[hostname] = {'user': user}
         save_hosts(hosts)
         return jsonify({'message': f"Host '{hostname}' added successfully."})
-    
-    # GET request
     try:
-        hosts = load_hosts()
-        return jsonify(hosts)
+        return jsonify(load_hosts())
     except Exception as e:
-        print(f"ERROR: An exception occurred while loading hosts: {e}")
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/hosts/delete', methods=['POST'])
 def delete_host():
-    """Endpoint to delete a host."""
-    data = request.get_json()
-    hostname = data.get('hostname')
-    if not hostname:
-        return jsonify({'error': 'Hostname is required.'}), 400
-
+    hostname = request.get_json().get('hostname')
+    if not hostname: return jsonify({'error': 'Hostname is required.'}), 400
     hosts = load_hosts()
     if hostname in hosts:
         del hosts[hostname]
@@ -264,11 +221,10 @@ def delete_host():
         return jsonify({'message': f"Host '{hostname}' deleted."})
     return jsonify({'error': 'Host not found.'}), 404
 
-# --- ANALYSIS, SCHEDULER & OTHER ROUTES (Largely Unchanged) ---
+# --- ANALYSIS & SCHEDULER ROUTES (Unchanged) ---
 @app.route('/test_discord', methods=['POST'])
 def test_discord():
-    data = request.get_json()
-    webhook_url = data.get('webhook_url')
+    webhook_url = request.get_json().get('webhook_url')
     if not webhook_url: return jsonify({'error': 'Webhook URL is missing.'}), 400
     payload = json.dumps({'content': '✅ Test message from Log Viewer.'})
     try:
@@ -284,11 +240,9 @@ def analyse_log():
     webhook_url = data.get('webhook_url') 
     if not api_key: return jsonify({'error': 'OpenAI API key not provided.'}), 400
     if not log_content: return jsonify({'error': 'Missing log_content.'}), 400
-    
     truncated_content = log_content
     if len(log_content) > MAX_CHAR_COUNT:
         truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
-    
     try:
         client = openai.OpenAI(api_key=api_key)
         response = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": "You are a helpful assistant that analyses log files."}, {"role": "user", "content": f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"}])
@@ -300,72 +254,45 @@ def analyse_log():
         return jsonify({'analysis': analysis, 'discord_sent': discord_sent})
     except Exception as e: return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
 
-# --- SCHEDULER (Unchanged but included for completeness) ---
 def save_config(config):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=4)
+    with open(CONFIG_FILE, 'w') as f: json.dump(config, f, indent=4)
 def load_config():
     if not os.path.exists(CONFIG_FILE): return {}
     with open(CONFIG_FILE, 'r') as f:
         try: return json.load(f)
         except json.JSONDecodeError: return {}
-
 def _do_analysis_task():
-    """Contains the core logic for analyzing logs. Can be called on-demand or by the scheduler."""
     print("--- Commencing scheduled log analysis task ---")
     config = load_config()
-    api_key = config.get('api_key')
-    webhook_url = config.get('webhook_url')
-    sources_to_check = config.get('sources', [])
-
-    if not all([api_key, webhook_url, sources_to_check]):
-        print("Scheduled analysis aborted: Missing API key, webhook, or sources in config.")
+    api_key, webhook_url, sources = config.get('api_key'), config.get('webhook_url'), config.get('sources', [])
+    if not all([api_key, webhook_url, sources]):
+        print("Scheduled analysis aborted: Missing config.")
         return
-
-    for source in sources_to_check:
-        log_name = source.get('name')
-        log_type = source.get('type')
-        # NOTE: Scheduled tasks currently only support localhost.
+    for source in sources:
+        log_name, log_type = source.get('name'), source.get('type')
         print(f"Analyzing {log_type}: {log_name} on localhost")
-
         try:
-            if log_type == 'file':
-                command = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))} 2>/dev/null | tail -n 500" if log_name.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))}"
-            else: # journal
-                command = f"sudo journalctl -u {shlex.quote(log_name)} -n 500 --no-pager"
-            
+            command = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))} 2>/dev/null | tail -n 500" if log_name.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))}"
+            if log_type != 'file': command = f"sudo journalctl -u {shlex.quote(log_name)} -n 500 --no-pager"
             result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
             log_content = result.stdout
             if not log_content: continue
-
-            if len(log_content) > MAX_CHAR_COUNT:
-                log_content = f"[--- Log truncated... ---]\n" + log_content[-MAX_CHAR_COUNT:]
-
+            if len(log_content) > MAX_CHAR_COUNT: log_content = f"[--- Log truncated... ---]\n" + log_content[-MAX_CHAR_COUNT:]
             client = openai.OpenAI(api_key=api_key)
             prompt = "Analyse this log for any errors and create a summary report, troubleshooting tips and any other advice relating to any other issues found."
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that analyses log files for potential issues."},
-                    {"role": "user", "content": f"{prompt}\n\n--- LOG for {log_name} ---\n{log_content}"}
-                ]
-            )
+            response = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": "You are a helpful assistant that analyses log files for potential issues."}, {"role": "user", "content": f"{prompt}\n\n--- LOG for {log_name} ---\n{log_content}"}])
             analysis = response.choices[0].message.content
-
             if any(keyword in analysis.lower() for keyword in DISCORD_ALERT_KEYWORDS):
                 print(f"Issue found in {log_name}. Sending alert to Discord.")
                 send_discord_notification(webhook_url, log_name, analysis)
-        
         except Exception as e:
             print(f"Error during scheduled analysis of {log_name}: {e}")
-
 def perform_scheduled_analysis():
     config = load_config()
     if not config.get('is_running'):
         print("Scheduler is paused. Skipping scheduled run.")
         return
     _do_analysis_task()
-
 @app.route('/schedule/start', methods=['POST'])
 def start_schedule():
     config = request.get_json()
@@ -376,7 +303,6 @@ def start_schedule():
     if scheduler.get_job('scheduled_analysis'): scheduler.remove_job('scheduled_analysis')
     scheduler.add_job(perform_scheduled_analysis, 'interval', hours=interval, id='scheduled_analysis', replace_existing=True)
     return jsonify({'message': 'Scheduled analysis started.'})
-
 @app.route('/schedule/stop', methods=['POST'])
 def stop_schedule():
     if scheduler.get_job('scheduled_analysis'): scheduler.remove_job('scheduled_analysis')
@@ -384,19 +310,15 @@ def stop_schedule():
     config['is_running'] = False
     save_config(config)
     return jsonify({'message': 'Scheduled analysis stopped.'})
-
 @app.route('/schedule/run_now', methods=['POST'])
 def run_now():
     config = load_config()
     if not all([config.get('api_key'), config.get('webhook_url'), config.get('sources')]):
          return jsonify({'error': 'Cannot run. Configure API key, webhook, and select logs first.'}), 400
-    
     thread = threading.Thread(target=_do_analysis_task)
     thread.daemon = True
     thread.start()
-    
     return jsonify({'message': 'Immediate analysis triggered. Alerts will be sent for any issues found.'})
-
 @app.route('/schedule/status', methods=['GET'])
 def schedule_status():
     config = load_config()
@@ -405,7 +327,6 @@ def schedule_status():
     if job and config.get('is_running'):
         status.update({'is_running': True, 'next_run': job.next_run_time.isoformat() if job.next_run_time else None})
     return jsonify(status)
-
 # --- STARTUP & SHUTDOWN ---
 def startup_scheduler():
     config = load_config()
@@ -413,7 +334,6 @@ def startup_scheduler():
         print("Restarting previously active schedule.")
         interval = config.get('interval', 1)
         scheduler.add_job(perform_scheduled_analysis, 'interval', hours=interval, id='scheduled_analysis', replace_existing=True)
-
 if __name__ == '__main__':
     scheduler.start()
     startup_scheduler()
