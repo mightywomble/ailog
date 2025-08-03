@@ -867,8 +867,47 @@
             
             try {
                 updateLogSelectionProgress('Fetching logs from all hosts...', 10);
-                const data = await fetchApi('/sources/table');
-                updateLogSelectionProgress(`Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts`, 50);
+                
+                // Use Server-Sent Events for streaming progress
+                const eventSource = new EventSource('/sources/table/stream');
+                let finalData = null;
+                
+                const streamPromise = new Promise((resolve, reject) => {
+                    eventSource.onmessage = function(event) {
+                        try {
+                            const data = JSON.parse(event.data);
+                            
+                            if (data.status === 'progress') {
+                                updateLogSelectionProgress(data.message, data.progress || 0);
+                            } else if (data.status === 'complete') {
+                                finalData = data.data;
+                                eventSource.close();
+                                resolve(finalData);
+                            } else if (data.status === 'error') {
+                                eventSource.close();
+                                reject(new Error(data.message));
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE data:', e);
+                        }
+                    };
+                    
+                    eventSource.onerror = function(event) {
+                        eventSource.close();
+                        reject(new Error('Connection error while fetching logs'));
+                    };
+                    
+                    // Timeout after 60 seconds
+                    setTimeout(() => {
+                        if (eventSource.readyState !== EventSource.CLOSED) {
+                            eventSource.close();
+                            reject(new Error('Timeout while fetching logs'));
+                        }
+                    }, 60000);
+                });
+                
+                const data = await streamPromise;
+                updateLogSelectionProgress(`Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts`, 95);
                 
                 if (data.failed_hosts && data.failed_hosts.length > 0) {
                     data.failed_hosts.forEach(host => {

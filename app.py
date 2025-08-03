@@ -137,6 +137,10 @@ def send_discord_notification(webhook_url, log_name, host_id, analysis_text):
 def index():
     return render_template('index.html')
 
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204  # No content response for favicon
+
 @app.route('/sources/local')
 def get_local_sources():
     return Response(stream_with_context(get_log_sources_from_host_stream('local')), mimetype='text/event-stream')
@@ -273,15 +277,24 @@ def get_all_host_sources():
         future_to_host = {executor.submit(fetch_sources_from_host, host_id, host_name, failed_hosts): (host_id, host_name) 
                          for host_id, host_name in all_hostnames}
         
-        # Wait for completion with overall timeout
-        for future in as_completed(future_to_host, timeout=30):
-            host_id, host_name = future_to_host[future]
-            try:
-                host_sources = future.result(timeout=5)  # Individual result timeout
-                all_sources.extend(host_sources)
-            except Exception as exc:
-                print(f"Host {host_name} generated an exception: {exc}")
-                failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': str(exc)})
+        # Wait for completion with overall timeout and proper error handling
+        try:
+            for future in as_completed(future_to_host, timeout=25):  # Reduced timeout
+                host_id, host_name = future_to_host[future]
+                try:
+                    host_sources = future.result(timeout=3)  # Shorter individual timeout
+                    all_sources.extend(host_sources)
+                except Exception as exc:
+                    print(f"Host {host_name} generated an exception: {exc}")
+                    failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': str(exc)})
+        except Exception as timeout_exc:
+            print(f"Overall timeout or error in all sources: {timeout_exc}")
+            # Handle any remaining unfinished futures
+            for future, (host_id, host_name) in future_to_host.items():
+                if not future.done():
+                    print(f"Marking {host_name} as failed due to timeout")
+                    failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': 'Connection timed out'})
+                    future.cancel()
 
     print(f"Total sources collected: {len(all_sources)} from {len(all_hostnames) - len(failed_hosts)} hosts")
     if failed_hosts:
