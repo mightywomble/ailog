@@ -45,6 +45,10 @@
                     <button class="filter-btn" data-filter="file">Syslog</button>
                     <button class="filter-btn" data-filter="journal">Journal</button>
                 </div>
+                <div class="flex gap-2">
+                    <button id="list-view-btn" class="flex-1 px-3 py-2 text-xs bg-indigo-600 text-white rounded transition-colors">List View</button>
+                    <button id="table-view-btn" class="flex-1 px-3 py-2 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors">Table View</button>
+                </div>
             </div>
             <div class="p-2 border-b border-gray-700">
                 <div id="sort-controls" class="flex items-center justify-between text-xs">
@@ -252,12 +256,17 @@
         const saveLogSelectionBtn = document.getElementById('save-log-selection-btn');
         const cancelLogSelectionBtn = document.getElementById('cancel-log-selection-btn');
         
+        const listViewBtn = document.getElementById('list-view-btn');
+        const tableViewBtn = document.getElementById('table-view-btn');
+        
         const toast = document.getElementById('toast-notification');
         
         let currentLogName = "";
         let currentLogContent = "";
         let scheduledSources = [];
         let currentEventSource = null;
+        let currentViewMode = 'list';
+        let tableData = null;
 
         // --- UTILITY FUNCTIONS ---
         const showToast = (message, type = 'success') => {
@@ -317,6 +326,156 @@
                 item.style.display = (nameMatch && typeMatch) ? '' : 'none';
                 sourceListContainer.appendChild(item);
             });
+        };
+
+        // --- TABLE VIEW FUNCTIONS ---
+        const fetchTableView = async () => {
+            sourceListContainer.innerHTML = '';
+            logTitle.textContent = 'Loading logs from all hosts...';
+            logContent.textContent = '';
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressMessage.textContent = 'Fetching logs from all hosts...';
+            progressLogs.innerHTML = '';
+
+            try {
+                const data = await fetchApi('/sources/table');
+                tableData = data;
+                renderTableView(data);
+                
+                progressBar.style.width = '100%';
+                progressMessage.textContent = 'Table view loaded!';
+                logTitle.textContent = `Table View - ${data.logs.length} logs across ${data.successful_hosts} hosts`;
+                
+                setTimeout(() => progressContainer.classList.add('hidden'), 1500);
+            } catch (error) {
+                sourceListContainer.innerHTML = `<li class="p-4 text-red-400">Failed to load table view: ${error.message}</li>`;
+                progressContainer.classList.add('hidden');
+            }
+        };
+
+        const renderTableView = (data) => {
+            sourceListContainer.innerHTML = '';
+            
+            if (data.failed_hosts && data.failed_hosts.length > 0) {
+                const warningLi = document.createElement('li');
+                warningLi.className = 'mb-2 p-2 bg-yellow-900/30 border border-yellow-600 rounded text-yellow-200 text-xs';
+                warningLi.innerHTML = `⚠️ ${data.failed_hosts.length} host(s) failed to connect`;
+                sourceListContainer.appendChild(warningLi);
+            }
+            
+            if (data.logs.length === 0) {
+                const noLogsLi = document.createElement('li');
+                noLogsLi.className = 'p-4 text-center text-gray-500';
+                noLogsLi.textContent = 'No logs found on any accessible hosts.';
+                sourceListContainer.appendChild(noLogsLi);
+                return;
+            }
+            
+            data.logs.forEach(log => {
+                const li = document.createElement('li');
+                li.className = 'log-table-item mb-2 bg-gray-700/50 rounded-lg p-3 border border-gray-600';
+                
+                const logHeader = document.createElement('div');
+                logHeader.className = 'flex items-center justify-between mb-2';
+                
+                const logTitle = document.createElement('span');
+                logTitle.className = 'font-medium text-white truncate flex-grow';
+                logTitle.textContent = log.name;
+                
+                const logType = document.createElement('span');
+                logType.className = `text-xs px-2 py-1 rounded ${
+                    log.type === 'file' ? 'bg-blue-600 text-blue-100' : 'bg-purple-600 text-purple-100'
+                }`;
+                logType.textContent = log.type;
+                
+                logHeader.appendChild(logTitle);
+                logHeader.appendChild(logType);
+                
+                const hostsContainer = document.createElement('div');
+                hostsContainer.className = 'flex flex-wrap gap-1';
+                
+                data.hosts.forEach(host => {
+                    const hostBadge = document.createElement('button');
+                    const hasLog = log.hosts[host.host_id];
+                    
+                    if (hasLog) {
+                        hostBadge.className = 'px-2 py-1 text-xs rounded bg-green-600 hover:bg-green-500 text-white transition-colors cursor-pointer';
+                        hostBadge.title = `${hasLog.size_formatted} - ${hasLog.modified_formatted}`;
+                        hostBadge.textContent = host.host_name;
+                        
+                        hostBadge.onclick = () => {
+                            loadLogContent(log.name, log.type, host.host_id, host.host_name);
+                        };
+                    } else {
+                        hostBadge.className = 'px-2 py-1 text-xs rounded bg-gray-600 text-gray-400 cursor-not-allowed';
+                        hostBadge.textContent = host.host_name;
+                        hostBadge.disabled = true;
+                    }
+                    
+                    hostsContainer.appendChild(hostBadge);
+                });
+                
+                li.appendChild(logHeader);
+                li.appendChild(hostsContainer);
+                sourceListContainer.appendChild(li);
+            });
+        };
+
+        const loadLogContent = async (logName, logType, hostId, hostName) => {
+            currentLogName = logName;
+            logTitle.textContent = `Loading: ${logName} from ${hostName}...`;
+            logContent.textContent = 'Fetching log data...';
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+
+            const hostParam = hostId === 'local' ? '' : `?host=${hostId}`;
+            const url = logType === 'file' ? `/log/${encodeURIComponent(logName)}${hostParam}` : `/journal/${encodeURIComponent(logName)}${hostParam}`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+                
+                currentLogContent = data.content;
+                logTitle.textContent = `${logName} on ${hostName}`;
+                logContent.textContent = data.content || 'Log source is empty.';
+                
+                if (localStorage.getItem('openai_api_key') && data.content) {
+                     aiAnalyseBtn.classList.remove('hidden');
+                     if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                }
+            } catch (error) {
+                logTitle.textContent = `Error loading ${logName}`;
+                logContent.textContent = error.message;
+                showToast(error.message, 'error');
+            }
+        };
+
+        const switchViewMode = (mode) => {
+            currentViewMode = mode;
+            
+            if (mode === 'list') {
+                listViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-indigo-600 text-white rounded transition-colors';
+                tableViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors';
+                
+                // Hide host selector in list mode
+                hostSelector.style.display = 'block';
+                hostSelector.parentElement.style.display = 'flex';
+                
+                fetchSourcesForHost();
+            } else {
+                listViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors';
+                tableViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-indigo-600 text-white rounded transition-colors';
+                
+                // Show host selector as disabled in table mode
+                hostSelector.style.display = 'none';
+                hostSelector.parentElement.style.display = 'none';
+                
+                fetchTableView();
+            }
         };
 
         // --- CORE APP LOGIC ---
@@ -832,6 +991,10 @@
                 }
             });
         });
+
+        // --- VIEW MODE LISTENERS ---
+        listViewBtn.addEventListener('click', () => switchViewMode('list'));
+        tableViewBtn.addEventListener('click', () => switchViewMode('table'));
 
         // --- INITIALIZATION ---
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';

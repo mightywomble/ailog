@@ -293,6 +293,89 @@ def get_all_host_sources():
     
     return jsonify(response_data)
 
+@app.route('/sources/table', methods=['GET'])
+def get_log_table_view():
+    """Get logs organized in a table format: log names as rows, hosts as columns"""
+    current_time = time.time()
+    
+    # Check cache first
+    cache_key = 'table_view'
+    if cache_key in _host_sources_cache:
+        cached_data, timestamp = _host_sources_cache[cache_key]
+        if current_time - timestamp < _cache_timeout:
+            print("Returning cached table view")
+            return jsonify(cached_data)
+    
+    all_sources = []
+    failed_hosts = []
+    hosts = load_hosts()
+    all_hostnames = [('local', 'Localhost')] + [(host_id, host_data['friendly_name']) for host_id, host_data in hosts.items()]
+
+    # Use ThreadPoolExecutor with timeout for concurrent processing
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_host = {executor.submit(fetch_sources_from_host, host_id, host_name, failed_hosts): (host_id, host_name) 
+                         for host_id, host_name in all_hostnames}
+        
+        # Wait for completion with overall timeout
+        for future in as_completed(future_to_host, timeout=30):
+            host_id, host_name = future_to_host[future]
+            try:
+                host_sources = future.result(timeout=5)
+                all_sources.extend(host_sources)
+            except Exception as exc:
+                print(f"Host {host_name} generated an exception: {exc}")
+                failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': str(exc)})
+
+    # Create log-to-hosts mapping
+    log_matrix = {}
+    host_list = []
+    
+    # Build host list
+    for host_id, host_name in all_hostnames:
+        if not any(f['host_id'] == host_id for f in failed_hosts):
+            host_list.append({'host_id': host_id, 'host_name': host_name})
+    
+    # Build log matrix
+    for source in all_sources:
+        log_key = f"{source['name']}|{source['type']}"
+        if log_key not in log_matrix:
+            log_matrix[log_key] = {
+                'name': source['name'],
+                'type': source['type'],
+                'hosts': {},
+                'size_info': source.get('size_formatted', 'N/A'),
+                'modified_info': source.get('modified_formatted', 'N/A')
+            }
+        
+        # Add host information for this log
+        log_matrix[log_key]['hosts'][source['host']] = {
+            'host_id': source['host'],
+            'host_name': source['host_name'],
+            'size_bytes': source.get('size_bytes', 0),
+            'size_formatted': source.get('size_formatted', 'N/A'),
+            'modified_epoch': source.get('modified_epoch', 0),
+            'modified_formatted': source.get('modified_formatted', 'N/A')
+        }
+    
+    # Convert to list format for frontend
+    logs_table = list(log_matrix.values())
+    
+    # Sort logs by name
+    logs_table.sort(key=lambda x: x['name'].lower())
+    
+    response_data = {
+        'logs': logs_table,
+        'hosts': host_list,
+        'failed_hosts': failed_hosts,
+        'total_hosts': len(all_hostnames),
+        'successful_hosts': len(host_list)
+    }
+    
+    # Cache the result
+    _host_sources_cache[cache_key] = (response_data, current_time)
+    
+    return jsonify(response_data)
+
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
     hostname = request.args.get('host', 'local')
