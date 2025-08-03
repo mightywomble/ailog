@@ -833,7 +833,7 @@
             logSelectionModal.classList.remove('hidden');
             
             try {
-                const data = await fetchApi('/sources/all');
+                const data = await fetchApi('/sources/table');
                 logSelectionList.innerHTML = '';
                 
                 // Show summary information
