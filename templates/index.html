@@ -899,7 +899,7 @@
                     data.hosts.forEach(host => {
                         const source = hosts[host.host_id];
                         if (source) {
-                            const checked = scheduledSources.some(s => s.name === source.name f&& s.type === source.type f&& s.host === source.host) ? 'checked' : '';
+                            const checked = scheduledSources.some(s => s.name === source.name && s.type === source.type && s.host === source.host) ? 'checked' : '';
                             rowHTML += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400"><input type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500" value='${JSON.stringify({ name: source.name, type: source.type, host: source.host })}' ${checked}/></td>`;
                         } else {
                             rowHTML += '<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">-</td>';
@@ -913,6 +913,8 @@
                 table.appendChild(tbody);
                 tableContainer.appendChild(table);
                 logSelectionList.appendChild(tableContainer);
+            } catch (error) {
+                logSelectionList.innerHTML = '<div class="text-center p-4 text-red-400">Failed to load logs from hosts.</div>';
             }
         });
 
