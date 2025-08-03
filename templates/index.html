@@ -853,13 +853,8 @@
                     logSelectionList.appendChild(warningDiv);
                 }
                 
-                if (data.sources.length === 0) {
+                if (data.logs.length === 0) {
                     logSelectionList.innerHTML += '<div class="text-center p-4 text-gray-500">No logs found on any accessible hosts.</div>';
-                    return;
-                }
-                
-                if (data.sources.length === 0) {
-                    logSelectionList.innerHTML = '\u003cdiv class="text-center p-4 text-gray-500"\u003eNo logs found on any accessible hosts.\u003c/div\u003e';
                     return;
                 }
 
@@ -883,24 +878,17 @@
                 const tbody = document.createElement('tbody');
                 tbody.className = 'bg-gray-800 divide-y divide-gray-700';
 
-                const logsByName = {};
-                data.sources.forEach(source => {
-                    const logKey = `${source.name}|${source.type}`;
-                    if (!logsByName[logKey]) logsByName[logKey] = {};
-                    logsByName[logKey][source.host] = source;
-                });
-
-                Object.entries(logsByName).forEach(([logKey, hosts]) => {
-                    const logName = logKey.split('|')[0];
+                // Process the logs data (which is already in the correct format from /sources/table)
+                data.logs.forEach(log => {
                     const row = document.createElement('tr');
                     
-                    let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${logName}</td>`;
+                    let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${log.name}</td>`;
                     
                     data.hosts.forEach(host => {
-                        const source = hosts[host.host_id];
-                        if (source) {
-                            const checked = scheduledSources.some(s => s.name === source.name && s.type === source.type && s.host === source.host) ? 'checked' : '';
-                            rowHTML += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400"><input type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500" value='${JSON.stringify({ name: source.name, type: source.type, host: source.host })}' ${checked}/></td>`;
+                        const hostData = log.hosts[host.host_id];
+                        if (hostData) {
+                            const checked = scheduledSources.some(s => s.name === log.name && s.type === log.type && s.host === host.host_id) ? 'checked' : '';
+                            rowHTML += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400"><input type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500" value='${JSON.stringify({ name: log.name, type: log.type, host: host.host_id })}' ${checked}/></td>`;
                         } else {
                             rowHTML += '<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">-</td>';
                         }
