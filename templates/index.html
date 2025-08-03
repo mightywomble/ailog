@@ -52,11 +52,12 @@
                     <div class="flex space-x-1"><button class="sort-btn active" data-sort="name">Name</button><button class="sort-btn" data-sort="size">Size</button><button class="sort-btn" data-sort="date">Date</button></div>
                 </div>
             </div>
-            <div id="progress-container" class="p-4 hidden">
+            <div id="progress-container" class="p-4 hidden max-h-48 overflow-y-auto">
                 <p id="progress-message" class="text-xs text-gray-400 mb-1 truncate">Loading logs...</p>
-                <div class="w-full bg-gray-700 rounded-full h-2">
+                <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
                     <div id="progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
                 </div>
+                <div id="progress-logs" class="space-y-1 text-xs font-mono"></div>
             </div>
             <div id="journal-loading-indicator" class="p-4 text-center hidden">
                 <p class="text-xs text-amber-400 animate-pulse">Loading journal services...</p>
@@ -229,6 +230,7 @@
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progress-bar');
         const progressMessage = document.getElementById('progress-message');
+        const progressLogs = document.getElementById('progress-logs');
         const journalLoadingIndicator = document.getElementById('journal-loading-indicator');
         
         const apiKeyInput = document.getElementById('api-key-input');
@@ -269,17 +271,33 @@
         };
         
         const fetchApi = async (endpoint, options = {}) => {
+            // Set default timeout of 60 seconds for API calls
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
+            
             try {
-                const response = await fetch(endpoint, options);
+                const response = await fetch(endpoint, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({error: 'An unknown server error occurred.'}));
                     throw new Error(errorData.error);
                 }
                 return response.json();
             } catch (error) {
-                console.error("API Error:", error);
-                showToast(error.message, 'error');
-                throw error;
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    console.error("Request timed out:", endpoint);
+                    showToast('Request timed out. Please try again.', 'error');
+                    throw new Error('Request timed out');
+                } else {
+                    console.error("API Error:", error);
+                    showToast(error.message, 'error');
+                    throw error;
+                }
             }
         };
         
@@ -318,6 +336,7 @@
             progressContainer.classList.remove('hidden');
             progressBar.style.width = '0%';
             progressMessage.textContent = 'Initializing connection...';
+            progressLogs.innerHTML = ''; // Clear previous logs
             
             let journalItems = [];
             currentEventSource = new EventSource(url);
@@ -328,9 +347,14 @@
                     case 'progress':
                         progressBar.style.width = `${data.progress}%`;
                         progressMessage.textContent = data.message;
-                        if (data.message.includes('journal')) {
-                            journalLoadingIndicator.classList.remove('hidden');
-                        }
+                        
+                        // Append log to dedicated logs area
+                        const logEntry = document.createElement('div');
+                        logEntry.className = 'text-xs text-gray-400';
+                        logEntry.textContent = data.message;
+                        
+                        progressLogs.appendChild(logEntry);
+                        progressContainer.scrollTop = progressContainer.scrollHeight;
                         break;
                     case 'source':
                         if (data.data.type === 'file') appendSourceToList(data.data);

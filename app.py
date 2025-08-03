@@ -10,6 +10,9 @@ import atexit
 from apscheduler.schedulers.background import BackgroundScheduler
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from functools import lru_cache
 
 # --- INITIALIZATION ---
 app = Flask(__name__)
@@ -45,7 +48,7 @@ def get_ssh_prefix_args(user, ip):
     ]
 
 # --- CORE LOGIC (Refactored for Remote Execution) ---
-def execute_command(hostname, command_str):
+def execute_command(hostname, command_str, timeout=10):
     ssh_prefix_args = []
     if hostname != 'local':
         hosts = load_hosts()
@@ -57,7 +60,7 @@ def execute_command(hostname, command_str):
     cmd_list = ssh_prefix_args + [command_str] if ssh_prefix_args else [command_str]
     # Use shell=False for remote commands for security, shell=True for local for simplicity with sudo
     shell_mode = not bool(ssh_prefix_args)
-    return subprocess.run(cmd_list, shell=shell_mode, capture_output=True, text=True, check=True, timeout=20)
+    return subprocess.run(cmd_list, shell=shell_mode, capture_output=True, text=True, check=True, timeout=timeout)
 
 def get_log_sources_from_host_stream(hostname='local'):
     def generate_event(data):
@@ -136,29 +139,57 @@ def get_local_sources():
 def get_remote_sources(hostname):
     return Response(stream_with_context(get_log_sources_from_host_stream(hostname)), mimetype='text/event-stream')
 
-@app.route('/sources/all', methods=['GET'])
-def get_all_host_sources():
-    """Get a simplified list of log sources from all configured hosts for selection purposes"""
-    all_sources = []
-    failed_hosts = []
-    hosts = load_hosts()
-    all_hostnames = [('local', 'Localhost')] + [(host_id, host_data['friendly_name']) for host_id, host_data in hosts.items()]
+# Cache for host sources to avoid repeated queries
+_host_sources_cache = {}
+_cache_timeout = 60  # Cache for 60 seconds
+
+def fetch_sources_from_host(host_id, host_name, failed_hosts):
+    """Fetch log sources from a single host with proper error handling"""
+    host_sources = []
+    print(f"Fetching logs from host '{host_id}' ({host_name})")
     
-    for host_id, host_name in all_hostnames:
-        try:
-            print(f"Fetching logs from host '{host_id}' ({host_name})")
-            # Get syslog files
-            cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
-            res_ls = execute_command(host_id, cmd_ls)
-            filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
+    try:
+        # Use shorter timeout for bulk operations
+        cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
+        res_ls = execute_command(host_id, cmd_ls, timeout=8)
+        filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
+
+        # Process files but limit to avoid timeout - sort by modification time and get recent ones
+        if len(filenames) > 10:
+            # Get file stats for sorting by modification time
+            file_stats = []
+            for filename in filenames[:20]:  # Check first 20 files quickly
+                try:
+                    cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
+                    res_stat = execute_command(host_id, cmd_stat, timeout=3)  # Very short timeout
+                    size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
+                    if size_bytes > 0:
+                        file_stats.append((filename, size_bytes, mod_time_epoch))
+                except Exception:
+                    continue
             
+            # Sort by modification time (newest first) and take top 10
+            file_stats.sort(key=lambda x: x[2], reverse=True)
+            for filename, size_bytes, mod_time_epoch in file_stats[:10]:
+                host_sources.append({
+                    'name': filename,
+                    'type': 'file',
+                    'host': host_id,
+                    'host_name': host_name,
+                    'size_bytes': size_bytes,
+                    'size_formatted': format_bytes(size_bytes),
+                    'modified_epoch': mod_time_epoch,
+                    'modified_formatted': format_relative_time(mod_time_epoch)
+                })
+        else:
+            # Process all files if there are few
             for filename in filenames:
                 try:
                     cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
-                    res_stat = execute_command(host_id, cmd_stat)
+                    res_stat = execute_command(host_id, cmd_stat, timeout=5)
                     size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
-                    if size_bytes > 0:  # Only include non-empty files
-                        all_sources.append({
+                    if size_bytes > 0:
+                        host_sources.append({
                             'name': filename,
                             'type': 'file',
                             'host': host_id,
@@ -171,43 +202,96 @@ def get_all_host_sources():
                 except Exception as e:
                     print(f"Could not stat file '{filename}' on '{host_id}': {e}")
                     continue
-            
-            # Get journald services
-            try:
-                cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq"
-                res_journal = execute_command(host_id, cmd_journal)
-                journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
-                for unit in journal_units:
-                    all_sources.append({
-                        'name': unit,
-                        'type': 'journal',
-                        'host': host_id,
-                        'host_name': host_name,
-                        'size_bytes': 0,
-                        'size_formatted': 'N/A',
-                        'modified_epoch': 0,
-                        'modified_formatted': 'Journald Service'
-                    })
-            except Exception as e:
-                print(f"Could not fetch journald units from '{host_id}': {e}")
-                
-            print(f"Successfully fetched {len([s for s in all_sources if s['host'] == host_id])} log sources from '{host_id}'")
-                
+
+        # Get journald services with timeout
+        try:
+            cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq | head -15"  # Limit results
+            res_journal = execute_command(host_id, cmd_journal, timeout=8)
+            journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
+            for unit in journal_units:
+                host_sources.append({
+                    'name': unit,
+                    'type': 'journal',
+                    'host': host_id,
+                    'host_name': host_name,
+                    'size_bytes': 0,
+                    'size_formatted': 'N/A',
+                    'modified_epoch': 0,
+                    'modified_formatted': 'Journald Service'
+                })
         except Exception as e:
-            print(f"Could not connect to host '{host_id}': {e}")
-            failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': str(e)})
-            continue
+            print(f"Could not fetch journald units from '{host_id}': {e}")
+
+        print(f"Successfully fetched {len(host_sources)} log sources from '{host_id}'")
+
+    except Exception as e:
+        error_msg = str(e)
+        if 'timeout' in error_msg.lower():
+            error_msg = "Connection timed out"
+        elif 'connection refused' in error_msg.lower():
+            error_msg = "Connection refused"
+        elif 'no route to host' in error_msg.lower():
+            error_msg = "No route to host"
+        print(f"Could not connect to host '{host_id}': {error_msg}")
+        failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': error_msg})
+
+    return host_sources
+
+@app.route('/sources/clear-cache', methods=['POST'])
+def clear_sources_cache():
+    """Clear the host sources cache"""
+    global _host_sources_cache
+    _host_sources_cache.clear()
+    return jsonify({'message': 'Cache cleared successfully'})
+
+@app.route('/sources/all', methods=['GET'])
+def get_all_host_sources():
+    """Get a simplified list of log sources from all configured hosts for selection purposes"""
+    current_time = time.time()
     
+    # Check cache first
+    cache_key = 'all_sources'
+    if cache_key in _host_sources_cache:
+        cached_data, timestamp = _host_sources_cache[cache_key]
+        if current_time - timestamp < _cache_timeout:
+            print("Returning cached host sources")
+            return jsonify(cached_data)
+    
+    all_sources = []
+    failed_hosts = []
+    hosts = load_hosts()
+    all_hostnames = [('local', 'Localhost')] + [(host_id, host_data['friendly_name']) for host_id, host_data in hosts.items()]
+
+    # Use ThreadPoolExecutor with timeout for concurrent processing
+    with ThreadPoolExecutor(max_workers=3) as executor:  # Reduced workers to avoid overwhelming
+        future_to_host = {executor.submit(fetch_sources_from_host, host_id, host_name, failed_hosts): (host_id, host_name) 
+                         for host_id, host_name in all_hostnames}
+        
+        # Wait for completion with overall timeout
+        for future in as_completed(future_to_host, timeout=30):
+            host_id, host_name = future_to_host[future]
+            try:
+                host_sources = future.result(timeout=5)  # Individual result timeout
+                all_sources.extend(host_sources)
+            except Exception as exc:
+                print(f"Host {host_name} generated an exception: {exc}")
+                failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': str(exc)})
+
     print(f"Total sources collected: {len(all_sources)} from {len(all_hostnames) - len(failed_hosts)} hosts")
     if failed_hosts:
         print(f"Failed hosts: {failed_hosts}")
-    
-    return jsonify({
+
+    response_data = {
         'sources': all_sources,
         'failed_hosts': failed_hosts,
         'total_hosts': len(all_hostnames),
         'successful_hosts': len(all_hostnames) - len(failed_hosts)
-    })
+    }
+    
+    # Cache the result
+    _host_sources_cache[cache_key] = (response_data, current_time)
+    
+    return jsonify(response_data)
 
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
