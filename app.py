@@ -140,11 +140,13 @@ def get_remote_sources(hostname):
 def get_all_host_sources():
     """Get a simplified list of log sources from all configured hosts for selection purposes"""
     all_sources = []
+    failed_hosts = []
     hosts = load_hosts()
     all_hostnames = [('local', 'Localhost')] + [(host_id, host_data['friendly_name']) for host_id, host_data in hosts.items()]
     
     for host_id, host_name in all_hostnames:
         try:
+            print(f"Fetching logs from host '{host_id}' ({host_name})")
             # Get syslog files
             cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
             res_ls = execute_command(host_id, cmd_ls)
@@ -189,11 +191,23 @@ def get_all_host_sources():
             except Exception as e:
                 print(f"Could not fetch journald units from '{host_id}': {e}")
                 
+            print(f"Successfully fetched {len([s for s in all_sources if s['host'] == host_id])} log sources from '{host_id}'")
+                
         except Exception as e:
             print(f"Could not connect to host '{host_id}': {e}")
+            failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': str(e)})
             continue
     
-    return jsonify({'sources': all_sources})
+    print(f"Total sources collected: {len(all_sources)} from {len(all_hostnames) - len(failed_hosts)} hosts")
+    if failed_hosts:
+        print(f"Failed hosts: {failed_hosts}")
+    
+    return jsonify({
+        'sources': all_sources,
+        'failed_hosts': failed_hosts,
+        'total_hosts': len(all_hostnames),
+        'successful_hosts': len(all_hostnames) - len(failed_hosts)
+    })
 
 @app.route('/log/<path:filename>')
 def get_log_content(filename):

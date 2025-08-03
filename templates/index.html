@@ -653,8 +653,25 @@
                 const data = await fetchApi('/sources/all');
                 logSelectionList.innerHTML = '';
                 
+                // Show summary information
+                if (data.failed_hosts && data.failed_hosts.length > 0) {
+                    const warningDiv = document.createElement('div');
+                    warningDiv.className = 'mb-4 p-3 bg-yellow-900/30 border border-yellow-600 rounded-md text-yellow-200';
+                    warningDiv.innerHTML = `
+                        <h4 class="font-semibold mb-2">⚠️ Host Connection Issues</h4>
+                        <p class="text-sm mb-2">Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts.</p>
+                        <details class="text-xs">
+                            <summary class="cursor-pointer hover:text-yellow-100">Show failed hosts...</summary>
+                            <ul class="mt-2 ml-4 list-disc">
+                                ${data.failed_hosts.map(h => `<li>${h.host_name}: ${h.error}</li>`).join('')}
+                            </ul>
+                        </details>
+                    `;
+                    logSelectionList.appendChild(warningDiv);
+                }
+                
                 if (data.sources.length === 0) {
-                    logSelectionList.innerHTML = '<div class="text-center p-4 text-gray-500">No logs found on any configured hosts.</div>';
+                    logSelectionList.innerHTML += '<div class="text-center p-4 text-gray-500">No logs found on any accessible hosts.</div>';
                     return;
                 }
                 
