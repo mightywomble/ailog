@@ -422,18 +422,23 @@ def get_log_table_view_stream():
             
             yield generate_event({'status': 'progress', 'message': f'Found {total_hosts} hosts to scan', 'progress': 10})
             
+            print(f"Starting streaming table scan for {total_hosts} hosts: {all_hostnames}")
+            
             # Process hosts sequentially for better progress tracking
             for i, (host_id, host_name) in enumerate(all_hostnames):
                 host_progress = 10 + int((i / total_hosts) * 80)
                 yield generate_event({'status': 'progress', 'message': f'Connecting to {host_name}...', 'progress': host_progress})
+                print(f"Processing host {i+1}/{total_hosts}: {host_name} ({host_id})")
                 
                 try:
                     # Fetch sources from this host with detailed logging
                     host_sources = fetch_sources_from_host_detailed(host_id, host_name, generate_event, host_progress)
                     all_sources.extend(host_sources)
+                    print(f"Successfully fetched {len(host_sources)} sources from {host_name}")
                     yield generate_event({'status': 'progress', 'message': f'✅ {host_name}: Found {len(host_sources)} log sources', 'progress': host_progress + int(80/total_hosts)})
                 except Exception as e:
                     error_msg = str(e)
+                    print(f"Error fetching from {host_name}: {error_msg}")
                     if 'timeout' in error_msg.lower():
                         error_msg = "Connection timed out"
                     elif 'connection refused' in error_msg.lower():
@@ -444,6 +449,7 @@ def get_log_table_view_stream():
                     failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': error_msg})
                     yield generate_event({'status': 'progress', 'message': f'❌ {host_name}: {error_msg}', 'progress': host_progress + int(80/total_hosts)})
             
+            print(f"Completed host scanning. Collected {len(all_sources)} sources total, {len(failed_hosts)} hosts failed")
             yield generate_event({'status': 'progress', 'message': 'Building log matrix...', 'progress': 90})
             
             # Create log-to-hosts mapping
@@ -491,9 +497,13 @@ def get_log_table_view_stream():
                 'successful_hosts': len(host_list)
             }
             
+            print(f"Final response data: {len(response_data['logs'])} logs, {response_data['successful_hosts']}/{response_data['total_hosts']} hosts successful")
             yield generate_event({'status': 'complete', 'data': response_data, 'progress': 100})
             
         except Exception as e:
+            print(f"Critical error in streaming table view: {str(e)}")
+            import traceback
+            traceback.print_exc()
             yield generate_event({'status': 'error', 'message': str(e)})
     
     return Response(stream_with_context(generate_table_events()), mimetype='text/event-stream')

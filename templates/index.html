@@ -1076,48 +1076,88 @@
             logSelectionProgressDetails.innerHTML = '';
             updateLogSelectionProgress('Initializing scan of all configured hosts...', 5);
             
+            console.log('Starting log selection modal - connecting to /sources/table/stream');
+            
+            let collectedData = null;
+            let hasError = false;
+            
             try {
                 updateLogSelectionProgress('Fetching logs from all hosts...', 10);
                 
                 // Use Server-Sent Events for streaming progress
                 const eventSource = new EventSource('/sources/table/stream');
-                let finalData = null;
+                console.log('EventSource created, connection state:', eventSource.readyState);
                 
                 const streamPromise = new Promise((resolve, reject) => {
+                    let messageCount = 0;
+                    
+                    eventSource.onopen = function(event) {
+                        console.log('EventSource connection opened');
+                    };
+                    
                     eventSource.onmessage = function(event) {
+                        messageCount++;
+                        console.log(`SSE Message #${messageCount}:`, event.data);
+                        
                         try {
                             const data = JSON.parse(event.data);
                             
                             if (data.status === 'progress') {
                                 updateLogSelectionProgress(data.message, data.progress || 0);
                             } else if (data.status === 'complete') {
-                                finalData = data.data;
+                                console.log('SSE Complete - final data:', data.data);
+                                collectedData = data.data;
                                 eventSource.close();
-                                resolve(finalData);
+                                resolve(data.data);
                             } else if (data.status === 'error') {
+                                console.error('SSE Error status received:', data.message);
                                 eventSource.close();
-                                reject(new Error(data.message));
+                                hasError = true;
+                                // Don't reject immediately - we might have partial data
+                                if (collectedData) {
+                                    resolve(collectedData);
+                                } else {
+                                    reject(new Error(data.message));
+                                }
                             }
                         } catch (e) {
-                            console.error('Error parsing SSE data:', e);
+                            console.error('Error parsing SSE data:', e, 'Raw data:', event.data);
                         }
                     };
                     
                     eventSource.onerror = function(event) {
+                        console.error('EventSource error:', event);
+                        console.log('EventSource readyState:', eventSource.readyState);
                         eventSource.close();
-                        reject(new Error('Connection error while fetching logs'));
+                        
+                        // If we have partial data, use it
+                        if (collectedData) {
+                            console.log('Using partial data despite connection error:', collectedData);
+                            resolve(collectedData);
+                        } else {
+                            reject(new Error('Connection error while fetching logs'));
+                        }
                     };
                     
                     // Timeout after 60 seconds
                     setTimeout(() => {
                         if (eventSource.readyState !== EventSource.CLOSED) {
+                            console.log('SSE timeout reached, current state:', eventSource.readyState);
                             eventSource.close();
-                            reject(new Error('Timeout while fetching logs'));
+                            
+                            // If we have partial data, use it
+                            if (collectedData) {
+                                console.log('Using partial data due to timeout:', collectedData);
+                                resolve(collectedData);
+                            } else {
+                                reject(new Error('Timeout while fetching logs'));
+                            }
                         }
                     }, 60000);
                 });
                 
                 const data = await streamPromise;
+                console.log('Stream promise resolved with data:', data);
                 updateLogSelectionProgress(`Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts`, 95);
                 
                 if (data.failed_hosts && data.failed_hosts.length > 0) {
