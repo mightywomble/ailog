@@ -136,6 +136,65 @@ def get_local_sources():
 def get_remote_sources(hostname):
     return Response(stream_with_context(get_log_sources_from_host_stream(hostname)), mimetype='text/event-stream')
 
+@app.route('/sources/all', methods=['GET'])
+def get_all_host_sources():
+    """Get a simplified list of log sources from all configured hosts for selection purposes"""
+    all_sources = []
+    hosts = load_hosts()
+    all_hostnames = [('local', 'Localhost')] + [(host_id, host_data['friendly_name']) for host_id, host_data in hosts.items()]
+    
+    for host_id, host_name in all_hostnames:
+        try:
+            # Get syslog files
+            cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
+            res_ls = execute_command(host_id, cmd_ls)
+            filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
+            
+            for filename in filenames:
+                try:
+                    cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
+                    res_stat = execute_command(host_id, cmd_stat)
+                    size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
+                    if size_bytes > 0:  # Only include non-empty files
+                        all_sources.append({
+                            'name': filename,
+                            'type': 'file',
+                            'host': host_id,
+                            'host_name': host_name,
+                            'size_bytes': size_bytes,
+                            'size_formatted': format_bytes(size_bytes),
+                            'modified_epoch': mod_time_epoch,
+                            'modified_formatted': format_relative_time(mod_time_epoch)
+                        })
+                except Exception as e:
+                    print(f"Could not stat file '{filename}' on '{host_id}': {e}")
+                    continue
+            
+            # Get journald services
+            try:
+                cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq"
+                res_journal = execute_command(host_id, cmd_journal)
+                journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
+                for unit in journal_units:
+                    all_sources.append({
+                        'name': unit,
+                        'type': 'journal',
+                        'host': host_id,
+                        'host_name': host_name,
+                        'size_bytes': 0,
+                        'size_formatted': 'N/A',
+                        'modified_epoch': 0,
+                        'modified_formatted': 'Journald Service'
+                    })
+            except Exception as e:
+                print(f"Could not fetch journald units from '{host_id}': {e}")
+                
+        except Exception as e:
+            print(f"Could not connect to host '{host_id}': {e}")
+            continue
+    
+    return jsonify({'sources': all_sources})
+
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
     hostname = request.args.get('host', 'local')

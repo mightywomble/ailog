@@ -644,52 +644,85 @@
             }
         };
         
-        selectLogsBtn.addEventListener('click', () => {
-            const selectedHostText = hostSelector.options[hostSelector.selectedIndex].text;
-            logSelectionTitle.textContent = `Select Logs to Monitor on ${selectedHostText}`;
-            logSelectionList.innerHTML = '';
+        selectLogsBtn.addEventListener('click', async () => {
+            logSelectionTitle.textContent = 'Select Logs to Monitor from All Hosts';
+            logSelectionList.innerHTML = '<div class="text-center p-4 text-gray-400">Loading logs from all hosts...</div>';
+            logSelectionModal.classList.remove('hidden');
             
-            const allSourceItems = document.querySelectorAll('#source-list-container .source-item');
-            if (allSourceItems.length === 0) {
-                showToast("No logs loaded to select from. Please select a host first.", "error");
-                return;
-            }
-            
-            allSourceItems.forEach(item => {
-                if (parseInt(item.dataset.size, 10) === 0 && item.dataset.type === 'file') return;
-
-                const name = item.dataset.name;
-                const type = item.dataset.type;
+            try {
+                const data = await fetchApi('/sources/all');
+                logSelectionList.innerHTML = '';
                 
-                const li = document.createElement('li');
-                li.className = 'flex items-center p-2 rounded-md hover:bg-gray-700';
-                
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.className = 'h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500 mr-4';
-                checkbox.value = JSON.stringify({ name, type, host: hostSelector.value });
-                
-                if (scheduledSources.some(s => s.name === name && s.type === type && s.host === hostSelector.value)) {
-                    checkbox.checked = true;
+                if (data.sources.length === 0) {
+                    logSelectionList.innerHTML = '<div class="text-center p-4 text-gray-500">No logs found on any configured hosts.</div>';
+                    return;
                 }
                 
-                const label = document.createElement('label');
-                label.textContent = name;
-                label.className = 'flex-grow cursor-pointer';
-                label.onclick = () => checkbox.click(); 
+                // Group logs by host
+                const logsByHost = {};
+                data.sources.forEach(source => {
+                    if (!logsByHost[source.host_name]) {
+                        logsByHost[source.host_name] = [];
+                    }
+                    logsByHost[source.host_name].push(source);
+                });
                 
-                li.appendChild(checkbox);
-                li.appendChild(label);
-                logSelectionList.appendChild(li);
-            });
-            logSelectionModal.classList.remove('hidden');
+                // Create sections for each host
+                Object.entries(logsByHost).forEach(([hostName, logs]) => {
+                    const hostSection = document.createElement('div');
+                    hostSection.className = 'mb-4';
+                    
+                    const hostHeader = document.createElement('h4');
+                    hostHeader.className = 'font-semibold text-white mb-2 px-2 py-1 bg-gray-700 rounded';
+                    hostHeader.textContent = `${hostName} (${logs.length} logs)`;
+                    hostSection.appendChild(hostHeader);
+                    
+                    logs.forEach(source => {
+                        if (parseInt(source.size_bytes, 10) === 0 && source.type === 'file') return;
+                        
+                        const li = document.createElement('li');
+                        li.className = 'flex items-center p-2 ml-4 rounded-md hover:bg-gray-700';
+                        
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.className = 'h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500 mr-4';
+                        checkbox.value = JSON.stringify({ name: source.name, type: source.type, host: source.host });
+                        
+                        if (scheduledSources.some(s => s.name === source.name && s.type === source.type && s.host === source.host)) {
+                            checkbox.checked = true;
+                        }
+                        
+                        const content = document.createElement('div');
+                        content.className = 'flex-grow';
+                        
+                        const nameSpan = document.createElement('span');
+                        nameSpan.className = 'font-medium cursor-pointer';
+                        nameSpan.textContent = source.name;
+                        nameSpan.onclick = () => checkbox.click();
+                        
+                        const detailsSpan = document.createElement('span');
+                        detailsSpan.className = 'text-xs text-gray-400 ml-2';
+                        detailsSpan.textContent = `${source.type} • ${source.size_formatted} • ${source.modified_formatted}`;
+                        
+                        content.appendChild(nameSpan);
+                        content.appendChild(detailsSpan);
+                        
+                        li.appendChild(checkbox);
+                        li.appendChild(content);
+                        hostSection.appendChild(li);
+                    });
+                    
+                    logSelectionList.appendChild(hostSection);
+                });
+                
+            } catch (error) {
+                logSelectionList.innerHTML = '<div class="text-center p-4 text-red-400">Failed to load logs from hosts.</div>';
+            }
         });
 
         saveLogSelectionBtn.addEventListener('click', () => {
-            const currentHost = hostSelector.value;
-            const otherHostSources = scheduledSources.filter(s => s.host !== currentHost);
-            const thisHostSources = Array.from(logSelectionList.querySelectorAll('input:checked')).map(cb => JSON.parse(cb.value));
-            scheduledSources = [...otherHostSources, ...thisHostSources];
+            const selectedLogs = Array.from(logSelectionList.querySelectorAll('input:checked')).map(cb => JSON.parse(cb.value));
+            scheduledSources = selectedLogs;
             selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
             logSelectionModal.classList.add('hidden');
         });
