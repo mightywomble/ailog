@@ -184,9 +184,26 @@
     </div>
 
     <div id="log-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-xl h-3/4 flex flex-col">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-6xl h-5/6 flex flex-col">
             <h3 id="log-selection-title" class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
-            <div id="log-selection-list" class="flex-grow overflow-y-auto border border-gray-700 rounded-md p-2"></div>
+            
+            <!-- Progress Section -->
+            <div id="log-selection-progress" class="mb-4 hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-300">Loading logs from hosts...</span>
+                    <span id="log-selection-progress-percent" class="text-sm text-gray-400">0%</span>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
+                    <div id="log-selection-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div id="log-selection-progress-details" class="max-h-20 overflow-y-auto bg-gray-900 rounded-md p-2 text-xs font-mono text-gray-400">
+                    <div>Starting host scan...</div>
+                </div>
+            </div>
+            
+            <div id="log-selection-list" class="flex-grow overflow-hidden border border-gray-700 rounded-md">
+                <!-- Content will be populated here -->
+            </div>
             <div class="mt-6 flex justify-end space-x-3">
                 <button id="cancel-log-selection-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
                 <button id="save-log-selection-btn" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Confirm Selections</button>
@@ -253,6 +270,10 @@
         const logSelectionModal = document.getElementById('log-selection-modal');
         const logSelectionTitle = document.getElementById('log-selection-title');
         const logSelectionList = document.getElementById('log-selection-list');
+        const logSelectionProgress = document.getElementById('log-selection-progress');
+        const logSelectionProgressBar = document.getElementById('log-selection-progress-bar');
+        const logSelectionProgressPercent = document.getElementById('log-selection-progress-percent');
+        const logSelectionProgressDetails = document.getElementById('log-selection-progress-details');
         const saveLogSelectionBtn = document.getElementById('save-log-selection-btn');
         const cancelLogSelectionBtn = document.getElementById('cancel-log-selection-btn');
         
@@ -827,19 +848,52 @@
             }
         };
         
+        const updateLogSelectionProgress = (message, progress = 0) => {
+            logSelectionProgressDetails.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+            logSelectionProgressDetails.scrollTop = logSelectionProgressDetails.scrollHeight;
+            logSelectionProgressBar.style.width = `${progress}%`;
+            logSelectionProgressPercent.textContent = `${progress}%`;
+        };
+
         selectLogsBtn.addEventListener('click', async () => {
             logSelectionTitle.textContent = 'Select Logs to Monitor from All Hosts';
-            logSelectionList.innerHTML = '<div class="text-center p-4 text-gray-400">Loading logs from all hosts...</div>';
+            logSelectionList.innerHTML = '';
             logSelectionModal.classList.remove('hidden');
             
+            // Show progress section
+            logSelectionProgress.classList.remove('hidden');
+            logSelectionProgressDetails.innerHTML = '';
+            updateLogSelectionProgress('Initializing scan of all configured hosts...', 5);
+            
             try {
+                updateLogSelectionProgress('Fetching logs from all hosts...', 10);
                 const data = await fetchApi('/sources/table');
-                logSelectionList.innerHTML = '';
+                updateLogSelectionProgress(`Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts`, 50);
                 
-                // Show summary information
+                if (data.failed_hosts && data.failed_hosts.length > 0) {
+                    data.failed_hosts.forEach(host => {
+                        updateLogSelectionProgress(`⚠️ Failed to connect to ${host.host_name}: ${host.error}`, 50);
+                    });
+                }
+                
+                updateLogSelectionProgress(`Found ${data.logs.length} unique logs across all hosts`, 70);
+                
+                if (data.logs.length === 0) {
+                    logSelectionList.innerHTML = '<div class="text-center p-4 text-gray-500">No logs found on any accessible hosts.</div>';
+                    logSelectionProgress.classList.add('hidden');
+                    return;
+                }
+                
+                updateLogSelectionProgress('Building log selection table...', 80);
+
+                // Create container with summary info
+                const contentContainer = document.createElement('div');
+                contentContainer.className = 'h-full flex flex-col';
+                
+                // Add summary information at the top
                 if (data.failed_hosts && data.failed_hosts.length > 0) {
                     const warningDiv = document.createElement('div');
-                    warningDiv.className = 'mb-4 p-3 bg-yellow-900/30 border border-yellow-600 rounded-md text-yellow-200';
+                    warningDiv.className = 'mb-4 p-3 bg-yellow-900/30 border border-yellow-600 rounded-md text-yellow-200 flex-shrink-0';
                     warningDiv.innerHTML = `
                         <h4 class="font-semibold mb-2">⚠️ Host Connection Issues</h4>
                         <p class="text-sm mb-2">Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts.</p>
@@ -850,27 +904,23 @@
                             </ul>
                         </details>
                     `;
-                    logSelectionList.appendChild(warningDiv);
-                }
-                
-                if (data.logs.length === 0) {
-                    logSelectionList.innerHTML += '<div class="text-center p-4 text-gray-500">No logs found on any accessible hosts.</div>';
-                    return;
+                    contentContainer.appendChild(warningDiv);
                 }
 
                 const tableContainer = document.createElement('div');
-                tableContainer.className = 'overflow-auto';
+                tableContainer.className = 'flex-1 overflow-auto border border-gray-600 rounded-md';
 
                 const table = document.createElement('table');
                 table.className = 'min-w-full divide-y divide-gray-700';
 
                 const thead = document.createElement('thead');
+                thead.className = 'bg-gray-700 sticky top-0 z-10';
                 const headerRow = document.createElement('tr');
                 
                 // Header: Log Name + Host Names
-                let headerHTML = '<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Log Name</th>';
+                let headerHTML = '<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider bg-gray-700">Log Name</th>';
                 data.hosts.forEach(host => {
-                    headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">${host.host_name}</th>`;
+                    headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider bg-gray-700">${host.host_name}</th>`;
                 });
                 headerRow.innerHTML = headerHTML;
                 thead.appendChild(headerRow);
@@ -900,9 +950,21 @@
                 table.appendChild(thead);
                 table.appendChild(tbody);
                 tableContainer.appendChild(table);
-                logSelectionList.appendChild(tableContainer);
+                contentContainer.appendChild(tableContainer);
+                logSelectionList.appendChild(contentContainer);
+                
+                updateLogSelectionProgress(`✅ Table ready with ${data.logs.length} logs from ${data.successful_hosts} hosts`, 100);
+                
+                // Hide progress after a short delay
+                setTimeout(() => {
+                    logSelectionProgress.classList.add('hidden');
+                }, 2000);
             } catch (error) {
+                updateLogSelectionProgress(`❌ Error: ${error.message}`, 0);
                 logSelectionList.innerHTML = '<div class="text-center p-4 text-red-400">Failed to load logs from hosts.</div>';
+                setTimeout(() => {
+                    logSelectionProgress.classList.add('hidden');
+                }, 3000);
             }
         });
 
