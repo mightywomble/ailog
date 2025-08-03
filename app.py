@@ -322,15 +322,24 @@ def get_log_table_view():
         future_to_host = {executor.submit(fetch_sources_from_host, host_id, host_name, failed_hosts): (host_id, host_name) 
                          for host_id, host_name in all_hostnames}
         
-        # Wait for completion with overall timeout
-        for future in as_completed(future_to_host, timeout=30):
-            host_id, host_name = future_to_host[future]
-            try:
-                host_sources = future.result(timeout=5)
-                all_sources.extend(host_sources)
-            except Exception as exc:
-                print(f"Host {host_name} generated an exception: {exc}")
-                failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': str(exc)})
+        # Wait for completion with overall timeout and proper error handling
+        try:
+            for future in as_completed(future_to_host, timeout=30):
+                host_id, host_name = future_to_host[future]
+                try:
+                    host_sources = future.result(timeout=5)
+                    all_sources.extend(host_sources)
+                except Exception as exc:
+                    print(f"Host {host_name} generated an exception: {exc}")
+                    failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': str(exc)})
+        except Exception as timeout_exc:
+            print(f"Overall timeout or error in table view: {timeout_exc}")
+            # Handle any remaining unfinished futures
+            for future, (host_id, host_name) in future_to_host.items():
+                if not future.done():
+                    print(f"Marking {host_name} as failed due to timeout")
+                    failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': 'Connection timed out'})
+                    future.cancel()
 
     # Create log-to-hosts mapping
     log_matrix = {}
