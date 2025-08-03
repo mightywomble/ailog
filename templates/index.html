@@ -855,6 +855,217 @@
             logSelectionProgressPercent.textContent = `${progress}%`;
         };
 
+        const showRetrySection = (failedHosts) => {
+            // Transform progress section into a retry section
+            const progressContainer = logSelectionProgress;
+            progressContainer.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-yellow-300">⚠️ Some hosts failed to connect</span>
+                    <button id="retry-failed-hosts-btn" class="px-3 py-1 text-xs bg-yellow-600 hover:bg-yellow-500 text-white rounded transition-colors">Retry Failed Hosts</button>
+                </div>
+                <div class="max-h-20 overflow-y-auto bg-gray-900 rounded-md p-2 text-xs">
+                    ${failedHosts.map(host => `<div class="text-red-400">❌ ${host.host_name}: ${host.error}</div>`).join('')}
+                </div>
+            `;
+            
+            // Add retry functionality
+            const retryBtn = document.getElementById('retry-failed-hosts-btn');
+            retryBtn.addEventListener('click', async () => {
+                retryBtn.disabled = true;
+                retryBtn.textContent = 'Retrying...';
+                
+                // Reset progress section for retry
+                progressContainer.innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium text-gray-300">Retrying failed hosts...</span>
+                        <span id="retry-progress-percent" class="text-sm text-gray-400">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
+                        <div id="retry-progress-bar" class="bg-yellow-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <div id="retry-progress-details" class="max-h-20 overflow-y-auto bg-gray-900 rounded-md p-2 text-xs font-mono text-gray-400">
+                        <div>Retrying failed host connections...</div>
+                    </div>
+                `;
+                
+                const retryProgressBar = document.getElementById('retry-progress-bar');
+                const retryProgressPercent = document.getElementById('retry-progress-percent');
+                const retryProgressDetails = document.getElementById('retry-progress-details');
+                
+                const updateRetryProgress = (message, progress = 0) => {
+                    retryProgressDetails.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+                    retryProgressDetails.scrollTop = retryProgressDetails.scrollHeight;
+                    retryProgressBar.style.width = `${progress}%`;
+                    retryProgressPercent.textContent = `${progress}%`;
+                };
+                
+                try {
+                    // Use streaming endpoint again for retry
+                    const eventSource = new EventSource('/sources/table/stream');
+                    let newData = null;
+                    
+                    const retryPromise = new Promise((resolve, reject) => {
+                        eventSource.onmessage = function(event) {
+                            try {
+                                const data = JSON.parse(event.data);
+                                
+                                if (data.status === 'progress') {
+                                    updateRetryProgress(data.message, data.progress || 0);
+                                } else if (data.status === 'complete') {
+                                    newData = data.data;
+                                    eventSource.close();
+                                    resolve(newData);
+                                } else if (data.status === 'error') {
+                                    eventSource.close();
+                                    reject(new Error(data.message));
+                                }
+                            } catch (e) {
+                                console.error('Error parsing retry SSE data:', e);
+                            }
+                        };
+                        
+                        eventSource.onerror = function(event) {
+                            eventSource.close();
+                            reject(new Error('Connection error during retry'));
+                        };
+                        
+                        setTimeout(() => {
+                            if (eventSource.readyState !== EventSource.CLOSED) {
+                                eventSource.close();
+                                reject(new Error('Retry timeout'));
+                            }
+                        }, 60000);
+                    });
+                    
+                    const retryData = await retryPromise;
+                    
+                    // Update the existing table with new data
+                    updateLogSelectionTable(retryData);
+                    
+                    updateRetryProgress(`✅ Retry complete: ${retryData.successful_hosts}/${retryData.total_hosts} hosts connected`, 100);
+                    
+                    // Handle remaining failed hosts
+                    if (retryData.failed_hosts && retryData.failed_hosts.length > 0) {
+                        setTimeout(() => {
+                            showRetrySection(retryData.failed_hosts);
+                        }, 1000);
+                    } else {
+                        setTimeout(() => {
+                            progressContainer.classList.add('hidden');
+                            showToast('All hosts connected successfully!', 'success');
+                        }, 2000);
+                    }
+                    
+                } catch (error) {
+                    updateRetryProgress(`❌ Retry failed: ${error.message}`, 0);
+                    setTimeout(() => {
+                        showRetrySection(failedHosts); // Show original failed hosts again
+                    }, 2000);
+                }
+            });
+        };
+
+        const updateLogSelectionTable = (newData) => {
+            // Find existing table and update it with new data
+            const existingTable = logSelectionList.querySelector('table');
+            if (!existingTable) {
+                // If no existing table, create a new one
+                buildLogSelectionTable(newData);
+                return;
+            }
+            
+            // Update the existing table with merged data
+            const existingData = getCurrentTableData();
+            const mergedData = mergeTableData(existingData, newData);
+            
+            // Rebuild the table content
+            const contentContainer = logSelectionList.querySelector('div');
+            if (contentContainer) {
+                logSelectionList.removeChild(contentContainer);
+            }
+            buildLogSelectionTable(mergedData);
+        };
+
+        const getCurrentTableData = () => {
+            // Extract current table data (this is a simplified version)
+            // In a real implementation, you'd want to preserve the current state
+            return { logs: [], hosts: [], failed_hosts: [], successful_hosts: 0, total_hosts: 0 };
+        };
+
+        const mergeTableData = (existingData, newData) => {
+            // Merge the data, preferring new data but keeping successful connections from existing
+            return newData; // Simplified - just use new data for now
+        };
+
+        const buildLogSelectionTable = (data) => {
+            // Extract the table building logic into a separate function
+            const contentContainer = document.createElement('div');
+            contentContainer.className = 'h-full flex flex-col';
+            
+            // Add summary information at the top
+            if (data.failed_hosts && data.failed_hosts.length > 0) {
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'mb-4 p-3 bg-yellow-900/30 border border-yellow-600 rounded-md text-yellow-200 flex-shrink-0';
+                warningDiv.innerHTML = `
+                    <h4 class="font-semibold mb-2">⚠️ Host Connection Issues</h4>
+                    <p class="text-sm mb-2">Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts.</p>
+                    <details class="text-xs">
+                        <summary class="cursor-pointer hover:text-yellow-100">Show failed hosts...</summary>
+                        <ul class="mt-2 ml-4 list-disc">
+                            ${data.failed_hosts.map(h => `<li>${h.host_name}: ${h.error}</li>`).join('')}
+                        </ul>
+                    </details>
+                `;
+                contentContainer.appendChild(warningDiv);
+            }
+
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'flex-1 overflow-auto border border-gray-600 rounded-md';
+
+            const table = document.createElement('table');
+            table.className = 'min-w-full divide-y divide-gray-700';
+
+            const thead = document.createElement('thead');
+            thead.className = 'bg-gray-700 sticky top-0 z-10';
+            const headerRow = document.createElement('tr');
+            
+            // Header: Log Name + Host Names
+            let headerHTML = '<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider bg-gray-700">Log Name</th>';
+            data.hosts.forEach(host => {
+                headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider bg-gray-700">${host.host_name}</th>`;
+            });
+            headerRow.innerHTML = headerHTML;
+            thead.appendChild(headerRow);
+            
+            const tbody = document.createElement('tbody');
+            tbody.className = 'bg-gray-800 divide-y divide-gray-700';
+
+            // Process the logs data
+            data.logs.forEach(log => {
+                const row = document.createElement('tr');
+                
+                let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${log.name}</td>`;
+                
+                data.hosts.forEach(host => {
+                    const hostData = log.hosts[host.host_id];
+                    if (hostData) {
+                        const checked = scheduledSources.some(s => s.name === log.name && s.type === log.type && s.host === host.host_id) ? 'checked' : '';
+                        rowHTML += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400"><input type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500" value='${JSON.stringify({ name: log.name, type: log.type, host: host.host_id })}' ${checked}/></td>`;
+                    } else {
+                        rowHTML += '<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">-</td>';
+                    }
+                });
+                row.innerHTML = rowHTML;
+                tbody.appendChild(row);
+            });
+
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableContainer.appendChild(table);
+            contentContainer.appendChild(tableContainer);
+            logSelectionList.appendChild(contentContainer);
+        };
+
         selectLogsBtn.addEventListener('click', async () => {
             logSelectionTitle.textContent = 'Select Logs to Monitor from All Hosts';
             logSelectionList.innerHTML = '';
@@ -994,10 +1205,17 @@
                 
                 updateLogSelectionProgress(`✅ Table ready with ${data.logs.length} logs from ${data.successful_hosts} hosts`, 100);
                 
-                // Hide progress after a short delay
-                setTimeout(() => {
-                    logSelectionProgress.classList.add('hidden');
-                }, 2000);
+                // Hide progress after a short delay, but keep it visible if there are failed hosts
+                if (data.failed_hosts && data.failed_hosts.length > 0) {
+                    // Show retry section instead of hiding progress
+                    setTimeout(() => {
+                        showRetrySection(data.failed_hosts);
+                    }, 1000);
+                } else {
+                    setTimeout(() => {
+                        logSelectionProgress.classList.add('hidden');
+                    }, 2000);
+                }
             } catch (error) {
                 updateLogSelectionProgress(`❌ Error: ${error.message}`, 0);
                 logSelectionList.innerHTML = '<div class="text-center p-4 text-red-400">Failed to load logs from hosts.</div>';
