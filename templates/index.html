@@ -1090,6 +1090,10 @@
                 
                 const streamPromise = new Promise((resolve, reject) => {
                     let messageCount = 0;
+                    let partialSources = [];
+                    let partialHosts = [];
+                    let partialFailedHosts = [];
+                    let totalHosts = 0;
                     
                     eventSource.onopen = function(event) {
                         console.log('EventSource connection opened');
@@ -1104,6 +1108,44 @@
                             
                             if (data.status === 'progress') {
                                 updateLogSelectionProgress(data.message, data.progress || 0);
+                                
+                                // Extract host information from progress messages
+                                if (data.message.includes('Found') && data.message.includes('hosts to scan')) {
+                                    const match = data.message.match(/Found (\d+) hosts/);
+                                    if (match) totalHosts = parseInt(match[1]);
+                                }
+                                
+                                // Track successful host connections
+                                if (data.message.includes('✅') && data.message.includes('Found') && data.message.includes('log sources')) {
+                                    const hostMatch = data.message.match(/✅ ([^:]+): Found (\d+) log sources/);
+                                    if (hostMatch) {
+                                        const hostName = hostMatch[1];
+                                        const sourceCount = parseInt(hostMatch[2]);
+                                        console.log(`Tracked successful host: ${hostName} with ${sourceCount} sources`);
+                                        
+                                        // Add to partial hosts list if not already there
+                                        if (!partialHosts.find(h => h.host_name === hostName)) {
+                                            partialHosts.push({
+                                                host_id: hostName === 'Localhost' ? 'local' : hostName.toLowerCase(),
+                                                host_name: hostName
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                // Track failed hosts
+                                if (data.message.includes('❌')) {
+                                    const failMatch = data.message.match(/❌ ([^:]+): (.+)/);
+                                    if (failMatch) {
+                                        const hostName = failMatch[1];
+                                        const error = failMatch[2];
+                                        partialFailedHosts.push({
+                                            host_id: hostName === 'Localhost' ? 'local' : hostName.toLowerCase(),
+                                            host_name: hostName,
+                                            error: error
+                                        });
+                                    }
+                                }
                             } else if (data.status === 'complete') {
                                 console.log('SSE Complete - final data:', data.data);
                                 collectedData = data.data;
@@ -1134,6 +1176,16 @@
                         if (collectedData) {
                             console.log('Using partial data despite connection error:', collectedData);
                             resolve(collectedData);
+                        } else if (partialHosts.length > 0) {
+                            console.log('Creating partial data from collected progress info');
+                            const partialData = {
+                                logs: [], // We don't have detailed log info, but we have host info
+                                hosts: partialHosts,
+                                failed_hosts: partialFailedHosts,
+                                total_hosts: totalHosts || partialHosts.length + partialFailedHosts.length,
+                                successful_hosts: partialHosts.length
+                            };
+                            resolve(partialData);
                         } else {
                             reject(new Error('Connection error while fetching logs'));
                         }
@@ -1143,12 +1195,40 @@
                     setTimeout(() => {
                         if (eventSource.readyState !== EventSource.CLOSED) {
                             console.log('SSE timeout reached, current state:', eventSource.readyState);
+                            console.log('Partial hosts collected:', partialHosts);
+                            console.log('Failed hosts:', partialFailedHosts);
                             eventSource.close();
                             
                             // If we have partial data, use it
                             if (collectedData) {
                                 console.log('Using partial data due to timeout:', collectedData);
                                 resolve(collectedData);
+                            } else if (partialHosts.length > 0) {
+                                console.log('Creating partial data from timeout with collected progress info');
+                                // Add the host that was being processed when timeout occurred to failed hosts
+                                const lastMessage = logSelectionProgressDetails.lastElementChild?.textContent || '';
+                                if (lastMessage.includes('Connecting to')) {
+                                    const connectingMatch = lastMessage.match(/Connecting to ([^.]+)/);
+                                    if (connectingMatch) {
+                                        const timedOutHost = connectingMatch[1];
+                                        if (!partialFailedHosts.find(h => h.host_name === timedOutHost)) {
+                                            partialFailedHosts.push({
+                                                host_id: timedOutHost === 'Localhost' ? 'local' : timedOutHost.toLowerCase(),
+                                                host_name: timedOutHost,
+                                                error: 'Connection timed out'
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                const partialData = {
+                                    logs: [], // We don't have detailed log info, but we have host info
+                                    hosts: partialHosts,
+                                    failed_hosts: partialFailedHosts,
+                                    total_hosts: totalHosts || partialHosts.length + partialFailedHosts.length,
+                                    successful_hosts: partialHosts.length
+                                };
+                                resolve(partialData);
                             } else {
                                 reject(new Error('Timeout while fetching logs'));
                             }
