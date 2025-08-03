@@ -858,65 +858,61 @@
                     return;
                 }
                 
-                // Group logs by host
-                const logsByHost = {};
+                if (data.sources.length === 0) {
+                    logSelectionList.innerHTML = '\u003cdiv class="text-center p-4 text-gray-500"\u003eNo logs found on any accessible hosts.\u003c/div\u003e';
+                    return;
+                }
+
+                const tableContainer = document.createElement('div');
+                tableContainer.className = 'overflow-auto';
+
+                const table = document.createElement('table');
+                table.className = 'min-w-full divide-y divide-gray-700';
+
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                
+                // Header: Log Name + Host Names
+                let headerHTML = '<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Log Name</th>';
+                data.hosts.forEach(host => {
+                    headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">${host.host_name}</th>`;
+                });
+                headerRow.innerHTML = headerHTML;
+                thead.appendChild(headerRow);
+                
+                const tbody = document.createElement('tbody');
+                tbody.className = 'bg-gray-800 divide-y divide-gray-700';
+
+                const logsByName = {};
                 data.sources.forEach(source => {
-                    if (!logsByHost[source.host_name]) {
-                        logsByHost[source.host_name] = [];
-                    }
-                    logsByHost[source.host_name].push(source);
+                    const logKey = `${source.name}|${source.type}`;
+                    if (!logsByName[logKey]) logsByName[logKey] = {};
+                    logsByName[logKey][source.host] = source;
                 });
-                
-                // Create sections for each host
-                Object.entries(logsByHost).forEach(([hostName, logs]) => {
-                    const hostSection = document.createElement('div');
-                    hostSection.className = 'mb-4';
+
+                Object.entries(logsByName).forEach(([logKey, hosts]) => {
+                    const logName = logKey.split('|')[0];
+                    const row = document.createElement('tr');
                     
-                    const hostHeader = document.createElement('h4');
-                    hostHeader.className = 'font-semibold text-white mb-2 px-2 py-1 bg-gray-700 rounded';
-                    hostHeader.textContent = `${hostName} (${logs.length} logs)`;
-                    hostSection.appendChild(hostHeader);
+                    let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${logName}</td>`;
                     
-                    logs.forEach(source => {
-                        if (parseInt(source.size_bytes, 10) === 0 && source.type === 'file') return;
-                        
-                        const li = document.createElement('li');
-                        li.className = 'flex items-center p-2 ml-4 rounded-md hover:bg-gray-700';
-                        
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.className = 'h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500 mr-4';
-                        checkbox.value = JSON.stringify({ name: source.name, type: source.type, host: source.host });
-                        
-                        if (scheduledSources.some(s => s.name === source.name && s.type === source.type && s.host === source.host)) {
-                            checkbox.checked = true;
+                    data.hosts.forEach(host => {
+                        const source = hosts[host.host_id];
+                        if (source) {
+                            const checked = scheduledSources.some(s => s.name === source.name f&& s.type === source.type f&& s.host === source.host) ? 'checked' : '';
+                            rowHTML += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400"><input type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500" value='${JSON.stringify({ name: source.name, type: source.type, host: source.host })}' ${checked}/></td>`;
+                        } else {
+                            rowHTML += '<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">-</td>';
                         }
-                        
-                        const content = document.createElement('div');
-                        content.className = 'flex-grow';
-                        
-                        const nameSpan = document.createElement('span');
-                        nameSpan.className = 'font-medium cursor-pointer';
-                        nameSpan.textContent = source.name;
-                        nameSpan.onclick = () => checkbox.click();
-                        
-                        const detailsSpan = document.createElement('span');
-                        detailsSpan.className = 'text-xs text-gray-400 ml-2';
-                        detailsSpan.textContent = `${source.type} • ${source.size_formatted} • ${source.modified_formatted}`;
-                        
-                        content.appendChild(nameSpan);
-                        content.appendChild(detailsSpan);
-                        
-                        li.appendChild(checkbox);
-                        li.appendChild(content);
-                        hostSection.appendChild(li);
                     });
-                    
-                    logSelectionList.appendChild(hostSection);
+                    row.innerHTML = rowHTML;
+                    tbody.appendChild(row);
                 });
-                
-            } catch (error) {
-                logSelectionList.innerHTML = '<div class="text-center p-4 text-red-400">Failed to load logs from hosts.</div>';
+
+                table.appendChild(thead);
+                table.appendChild(tbody);
+                tableContainer.appendChild(table);
+                logSelectionList.appendChild(tableContainer);
             }
         });
 
