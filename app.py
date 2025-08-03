@@ -117,10 +117,16 @@ def format_relative_time(epoch_time):
     if delta.seconds >= 60: return f"{delta.seconds // 60} mins ago"
     return "Just now"
 
-def send_discord_notification(webhook_url, log_name, analysis_text):
+def send_discord_notification(webhook_url, log_name, host_id, analysis_text):
     if not webhook_url: return
     headers = {'Content-Type': 'application/json'}
-    discord_payload = {"embeds": [{"title": f"🚨 AI Alert for: {log_name}","description": analysis_text[:4000],"color": 15158332, "footer": { "text": "Log Viewer AI Analysis" },"timestamp": datetime.datetime.now().isoformat()}]}
+    
+    # Retrieve the friendly name of the host
+    hosts = load_hosts()
+    host_info = hosts.get(host_id, {'friendly_name': host_id})
+    friendly_name = host_info.get('friendly_name', host_id)
+    
+    discord_payload = {"embeds": [{"title": f"🚨 AI Alert for: {log_name} on {friendly_name}","description": analysis_text[:4000],"color": 15158332, "footer": { "text": "Log Viewer AI Analysis" },"timestamp": datetime.datetime.now().isoformat()}]}
     try:
         requests.post(webhook_url, data=json.dumps(discord_payload), headers=headers, timeout=10)
     except requests.exceptions.RequestException as e:
@@ -376,6 +382,198 @@ def get_log_table_view():
     
     return jsonify(response_data)
 
+@app.route('/sources/table/stream')
+def get_log_table_view_stream():
+    """Get logs organized in a table format with streaming progress updates"""
+    def generate_table_events():
+        def generate_event(data):
+            return f"data: {json.dumps(data)}\n\n"
+        
+        try:
+            yield generate_event({'status': 'progress', 'message': 'Initializing host scan...', 'progress': 5})
+            
+            all_sources = []
+            failed_hosts = []
+            hosts = load_hosts()
+            all_hostnames = [('local', 'Localhost')] + [(host_id, host_data['friendly_name']) for host_id, host_data in hosts.items()]
+            total_hosts = len(all_hostnames)
+            
+            yield generate_event({'status': 'progress', 'message': f'Found {total_hosts} hosts to scan', 'progress': 10})
+            
+            # Process hosts sequentially for better progress tracking
+            for i, (host_id, host_name) in enumerate(all_hostnames):
+                host_progress = 10 + int((i / total_hosts) * 80)
+                yield generate_event({'status': 'progress', 'message': f'Connecting to {host_name}...', 'progress': host_progress})
+                
+                try:
+                    # Fetch sources from this host with detailed logging
+                    host_sources = fetch_sources_from_host_detailed(host_id, host_name, generate_event, host_progress)
+                    all_sources.extend(host_sources)
+                    yield generate_event({'status': 'progress', 'message': f'✅ {host_name}: Found {len(host_sources)} log sources', 'progress': host_progress + int(80/total_hosts)})
+                except Exception as e:
+                    error_msg = str(e)
+                    if 'timeout' in error_msg.lower():
+                        error_msg = "Connection timed out"
+                    elif 'connection refused' in error_msg.lower():
+                        error_msg = "Connection refused"
+                    elif 'no route to host' in error_msg.lower():
+                        error_msg = "No route to host"
+                        
+                    failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': error_msg})
+                    yield generate_event({'status': 'progress', 'message': f'❌ {host_name}: {error_msg}', 'progress': host_progress + int(80/total_hosts)})
+            
+            yield generate_event({'status': 'progress', 'message': 'Building log matrix...', 'progress': 90})
+            
+            # Create log-to-hosts mapping
+            log_matrix = {}
+            host_list = []
+            
+            # Build host list
+            for host_id, host_name in all_hostnames:
+                if not any(f['host_id'] == host_id for f in failed_hosts):
+                    host_list.append({'host_id': host_id, 'host_name': host_name})
+            
+            # Build log matrix
+            for source in all_sources:
+                log_key = f"{source['name']}|{source['type']}"
+                if log_key not in log_matrix:
+                    log_matrix[log_key] = {
+                        'name': source['name'],
+                        'type': source['type'],
+                        'hosts': {},
+                        'size_info': source.get('size_formatted', 'N/A'),
+                        'modified_info': source.get('modified_formatted', 'N/A')
+                    }
+                
+                # Add host information for this log
+                log_matrix[log_key]['hosts'][source['host']] = {
+                    'host_id': source['host'],
+                    'host_name': source['host_name'],
+                    'size_bytes': source.get('size_bytes', 0),
+                    'size_formatted': source.get('size_formatted', 'N/A'),
+                    'modified_epoch': source.get('modified_epoch', 0),
+                    'modified_formatted': source.get('modified_formatted', 'N/A')
+                }
+            
+            # Convert to list format for frontend
+            logs_table = list(log_matrix.values())
+            
+            # Sort logs by name
+            logs_table.sort(key=lambda x: x['name'].lower())
+            
+            response_data = {
+                'logs': logs_table,
+                'hosts': host_list,
+                'failed_hosts': failed_hosts,
+                'total_hosts': len(all_hostnames),
+                'successful_hosts': len(host_list)
+            }
+            
+            yield generate_event({'status': 'complete', 'data': response_data, 'progress': 100})
+            
+        except Exception as e:
+            yield generate_event({'status': 'error', 'message': str(e)})
+    
+    return Response(stream_with_context(generate_table_events()), mimetype='text/event-stream')
+
+def fetch_sources_from_host_detailed(host_id, host_name, progress_callback, base_progress):
+    """Fetch log sources from a single host with detailed progress reporting"""
+    host_sources = []
+    
+    try:
+        # Use shorter timeout for bulk operations
+        progress_callback({'status': 'progress', 'message': f'📂 {host_name}: Listing log directory...', 'progress': base_progress})
+        cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
+        res_ls = execute_command(host_id, cmd_ls, timeout=8)
+        filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
+        
+        progress_callback({'status': 'progress', 'message': f'📋 {host_name}: Found {len(filenames)} potential log files', 'progress': base_progress})
+
+        # Process files but limit to avoid timeout - sort by modification time and get recent ones
+        if len(filenames) > 10:
+            progress_callback({'status': 'progress', 'message': f'🔍 {host_name}: Checking file stats for recent files...', 'progress': base_progress})
+            # Get file stats for sorting by modification time
+            file_stats = []
+            for i, filename in enumerate(filenames[:20]):  # Check first 20 files quickly
+                if i % 5 == 0:  # Update progress every 5 files
+                    progress_callback({'status': 'progress', 'message': f'📊 {host_name}: Checking {filename}...', 'progress': base_progress})
+                try:
+                    cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
+                    res_stat = execute_command(host_id, cmd_stat, timeout=3)  # Very short timeout
+                    size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
+                    if size_bytes > 0:
+                        file_stats.append((filename, size_bytes, mod_time_epoch))
+                except Exception:
+                    continue
+            
+            # Sort by modification time (newest first) and take top 10
+            file_stats.sort(key=lambda x: x[2], reverse=True)
+            progress_callback({'status': 'progress', 'message': f'📝 {host_name}: Processing {len(file_stats[:10])} most recent log files...', 'progress': base_progress})
+            
+            for filename, size_bytes, mod_time_epoch in file_stats[:10]:
+                host_sources.append({
+                    'name': filename,
+                    'type': 'file',
+                    'host': host_id,
+                    'host_name': host_name,
+                    'size_bytes': size_bytes,
+                    'size_formatted': format_bytes(size_bytes),
+                    'modified_epoch': mod_time_epoch,
+                    'modified_formatted': format_relative_time(mod_time_epoch)
+                })
+        else:
+            # Process all files if there are few
+            progress_callback({'status': 'progress', 'message': f'📝 {host_name}: Processing all {len(filenames)} log files...', 'progress': base_progress})
+            for i, filename in enumerate(filenames):
+                if i % 3 == 0:  # Update progress every 3 files
+                    progress_callback({'status': 'progress', 'message': f'📄 {host_name}: Processing {filename}...', 'progress': base_progress})
+                try:
+                    cmd_stat = f"sudo stat -c '%s %Y' {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
+                    res_stat = execute_command(host_id, cmd_stat, timeout=5)
+                    size_bytes, mod_time_epoch = map(int, res_stat.stdout.strip().split())
+                    if size_bytes > 0:
+                        host_sources.append({
+                            'name': filename,
+                            'type': 'file',
+                            'host': host_id,
+                            'host_name': host_name,
+                            'size_bytes': size_bytes,
+                            'size_formatted': format_bytes(size_bytes),
+                            'modified_epoch': mod_time_epoch,
+                            'modified_formatted': format_relative_time(mod_time_epoch)
+                        })
+                except Exception as e:
+                    continue
+
+        # Get journald services with timeout
+        progress_callback({'status': 'progress', 'message': f'🔧 {host_name}: Fetching systemd journal services...', 'progress': base_progress})
+        try:
+            cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq | head -15"  # Limit results
+            res_journal = execute_command(host_id, cmd_journal, timeout=8)
+            journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
+            
+            progress_callback({'status': 'progress', 'message': f'📋 {host_name}: Found {len(journal_units)} journal services', 'progress': base_progress})
+            
+            for unit in journal_units:
+                host_sources.append({
+                    'name': unit,
+                    'type': 'journal',
+                    'host': host_id,
+                    'host_name': host_name,
+                    'size_bytes': 0,
+                    'size_formatted': 'N/A',
+                    'modified_epoch': 0,
+                    'modified_formatted': 'Journald Service'
+                })
+        except Exception as e:
+            progress_callback({'status': 'progress', 'message': f'⚠️ {host_name}: Could not fetch journal services: {str(e)}', 'progress': base_progress})
+
+    except Exception as e:
+        progress_callback({'status': 'progress', 'message': f'❌ {host_name}: Connection failed: {str(e)}', 'progress': base_progress})
+        raise e
+
+    return host_sources
+
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
     hostname = request.args.get('host', 'local')
@@ -476,7 +674,7 @@ def analyse_log():
         analysis = response.choices[0].message.content
         discord_sent = False
         if webhook_url and any(keyword in analysis.lower() for keyword in DISCORD_ALERT_KEYWORDS):
-            send_discord_notification(webhook_url, log_name, analysis)
+            send_discord_notification(webhook_url, log_name, 'local', analysis)
             discord_sent = True
         return jsonify({'analysis': analysis, 'discord_sent': discord_sent})
     except Exception as e: return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
@@ -520,7 +718,7 @@ def _do_analysis_task():
             analysis = response.choices[0].message.content
             if any(keyword in analysis.lower() for keyword in DISCORD_ALERT_KEYWORDS):
                 print(f"Issue found in {log_name} on {host}. Sending alert to Discord.")
-                send_discord_notification(webhook_url, f"{log_name} on {host}", analysis)
+                send_discord_notification(webhook_url, log_name, host, analysis)
         except Exception as e:
             print(f"Error during scheduled analysis of {log_name} on {host}: {e}")
 
