@@ -1,10 +1,31 @@
 /* Styles for the log viewer application */
-body { font-family: 'Inter', sans-serif; }
+body { font-family: 'Inter', sans-serif; background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); }
 pre, code { font-family: 'JetBrains Mono', monospace; }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: #1f2937; }
 ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
 .sort-btn.active, .filter-btn.active { background-color: #4f46e5; color: white; }
+
+/* Glassy effect for containers */
+.glass-container {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.button {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    color: white;
+    padding: 10px 20px;
+    text-transform: uppercase;
+    transition: background 0.3s ease;
+}
+.button:hover {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+}
 .hidden { display: none; }
 .bg-header { background-color: rgba(31, 41, 55, 0.5); }
 
