@@ -203,11 +203,11 @@
                 <!-- Scheduler Column -->
                 <div class="space-y-4 glass-container p-4 flex flex-col">
                     <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Scheduled Analysis</h4>
-                    <p class="text-xs text-gray-600">Scheduled analysis can now run on any configured host.</p>
+                    <p class="text-xs text-black font-bold">Scheduled analysis can now run on any configured host.</p>
                     <div id="scheduler-status" class="text-sm text-gray-600 p-2 rounded-md bg-white/80">Loading status...</div>
                     <div class="flex-grow">
                         <button id="select-logs-btn" class="button w-full mb-4 px-4 py-2 text-sm">Select Logs for Schedule...</button>
-                        <span id="selected-log-count" class="text-sm text-gray-600 block text-center">0 logs selected</span>
+                        <span id="selected-log-count" class="text-sm text-black font-bold block text-center">0 logs selected</span>
                     </div>
                     <div>
                         <label for="schedule-interval-input" class="block text-sm font-medium text-gray-700 mb-1">Run every (hours)</label>
@@ -750,8 +750,8 @@
                                 <button class="delete-host-btn p-1 rounded hover:bg-gray-700" data-host-id="${id}" title="Delete"><svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
                             </div>
                         </div>
-                        <p class="text-sm text-gray-400 mt-1">${host.description || 'No description'}</p>
-                        <p class="text-xs text-gray-500 font-mono mt-2">${host.user}@${host.ip}</p>
+                        <p class="text-sm text-black mt-1">${host.description || 'No description'}</p>
+                        <p class="text-xs text-black font-mono mt-2">${host.user}@${host.ip}</p>
                     `;
                     hostListDiv.appendChild(div);
                 }
