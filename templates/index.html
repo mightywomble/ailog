@@ -65,9 +65,6 @@
         <aside class="w-1/4 glass-container p-4 flex flex-col">
             <div class="flex items-center justify-between mb-4">
                 <h2 class="text-lg font-semibold text-gray-800">Hosts</h2>
-                <select id="host-selector" class="text-sm px-3 py-1 rounded border border-gray-300 bg-white text-gray-800">
-                    <option value="local">Localhost</option>
-                </select>
             </div>
             <div id="host-list-container" class="flex-1 overflow-y-auto space-y-2">
                 <!-- Host cards will be populated here -->
@@ -275,7 +272,7 @@
         const resizeHandle = document.getElementById('resize-handle');
         const logViewPanel = document.getElementById('log-view-panel');
         
-        const hostSelector = document.getElementById('host-selector');
+        const hostListContainer = document.getElementById('host-list-container');
         const settingsBtn = document.getElementById('settings-btn');
         const closeSettingsBtn = document.getElementById('close-settings-btn');
         const settingsModal = document.getElementById('settings-modal');
@@ -335,6 +332,8 @@
         let currentEventSource = null;
         let currentViewMode = 'list';
         let tableData = null;
+        let selectedHostId = 'local';
+        let hosts = {};
 
         // --- UTILITY FUNCTIONS ---
         const showToast = (message, type = 'success') => {
