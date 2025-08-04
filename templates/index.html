@@ -528,18 +528,10 @@
                 listViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-indigo-600 text-white rounded transition-colors';
                 tableViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors';
                 
-                // Hide host selector in list mode
-                hostSelector.style.display = 'block';
-                hostSelector.parentElement.style.display = 'flex';
-                
                 fetchSourcesForHost();
             } else {
                 listViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors';
                 tableViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-indigo-600 text-white rounded transition-colors';
-                
-                // Show host selector as disabled in table mode
-                hostSelector.style.display = 'none';
-                hostSelector.parentElement.style.display = 'none';
                 
                 fetchTableView();
             }
