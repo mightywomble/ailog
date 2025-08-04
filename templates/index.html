@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/style.css">
     <script>
         tailwind.config = {
             theme: {
@@ -59,42 +59,60 @@
         </div>
     </header>
 
-    <div class="flex flex-1 overflow-hidden">
-        <aside class="w-1/3 md:w-1/4 lg:w-1/5 bg-gray-800 border-r border-gray-700 flex flex-col">
-            <div class="p-4 border-b border-gray-700 space-y-3">
-                <input type="text" id="search-box" placeholder="Filter by name..." class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <div id="filter-controls" class="grid grid-cols-3 gap-1 text-sm">
-                    <button class="filter-btn active" data-filter="all">All</button>
-                    <button class="filter-btn" data-filter="file">Syslog</button>
-                    <button class="filter-btn" data-filter="journal">Journal</button>
-                </div>
-                <div class="flex gap-2">
-                    <button id="list-view-btn" class="flex-1 px-3 py-2 text-xs bg-indigo-600 text-white rounded transition-colors">List View</button>
-                    <button id="table-view-btn" class="flex-1 px-3 py-2 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors">Table View</button>
-                </div>
+    <div class="flex flex-1 overflow-hidden m-4 gap-4">
+        <!-- Host List Sidebar -->
+        <aside class="w-1/4 glass-container p-4 flex flex-col">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">Hosts</h2>
+            <div id="host-list-container" class="flex-1 overflow-y-auto space-y-2">
+                <!-- Host cards will be populated here -->
             </div>
-            <div class="p-2 border-b border-gray-700">
-                <div id="sort-controls" class="flex items-center justify-between text-xs">
-                    <span class="px-2 text-gray-400">Sort by:</span>
-                    <div class="flex space-x-1"><button class="sort-btn active" data-sort="name">Name</button><button class="sort-btn" data-sort="size">Size</button><button class="sort-btn" data-sort="date">Date</button></div>
-                </div>
-            </div>
-            <div id="progress-container" class="p-4 hidden max-h-48 overflow-y-auto">
-                <p id="progress-message" class="text-xs text-gray-400 mb-1 truncate">Loading logs...</p>
-                <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
+            <div id="progress-container" class="mt-4 hidden">
+                <p id="progress-message" class="text-xs text-gray-600 mb-1 truncate">Loading...</p>
+                <div class="w-full bg-gray-300 rounded-full h-2 mb-2">
                     <div id="progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
                 </div>
-                <div id="progress-logs" class="space-y-1 text-xs font-mono"></div>
+                <div id="progress-logs" class="max-h-32 overflow-y-auto space-y-1 text-xs font-mono text-gray-600"></div>
             </div>
-            <div id="journal-loading-indicator" class="p-4 text-center hidden">
-                <p class="text-xs text-amber-400 animate-pulse">Loading journal services...</p>
-            </div>
-            <nav class="flex-1 overflow-y-auto p-2">
-                <ul id="source-list-container"></ul>
-            </nav>
         </aside>
 
-        <main class="flex-1 flex flex-col bg-gray-900 overflow-hidden">
+        <!-- Log Table Area -->
+        <div class="flex-1 glass-container p-4 flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 id="log-table-title" class="text-lg font-semibold text-gray-800">Select a host to view logs</h2>
+                <div class="flex items-center space-x-3">
+                    <span id="truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
+                    <button id="ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
+                </div>
+            </div>
+            <div id="log-table-container" class="flex-1 overflow-auto">
+                <div class="text-center text-gray-500 mt-16">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <p class="text-lg">Click on a host to see available logs</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Content Modal -->
+    <div id="log-content-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="glass-container w-full max-w-6xl h-5/6 flex flex-col p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 id="log-content-title" class="text-xl font-semibold text-gray-800">Log Content</h2>
+                <div class="flex items-center space-x-3">
+                    <span id="log-truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
+                    <button id="log-ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
+                    <button id="close-log-modal-btn" class="text-gray-600 hover:text-gray-800 text-2xl leading-none">&times;</button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-auto bg-gray-100 p-4 rounded-lg border">
+                <pre><code id="modal-log-content" class="text-sm text-gray-800 font-mono">Log content will appear here...</code></pre>
+            </div>
+        </div>
+    </div>
+
+<main class="hidden flex-1 flex flex-col bg-gray-900 overflow-auto p-4">
             <div id="log-view-panel" class="flex-1 flex flex-col overflow-hidden">
                 <div class="p-4 border-b border-gray-700 bg-gray-800/30 flex justify-between items-center">
                     <h2 id="log-title" class="text-lg font-semibold text-gray-400 truncate">Select a log source</h2>
