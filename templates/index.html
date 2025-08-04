@@ -133,20 +133,14 @@
         </div>
     </div>
 
-    <!-- Log Content Modal -->
-    <div id="log-content-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="glass-container w-full max-w-6xl h-5/6 flex flex-col p-6">
+<!-- AI Analysis Modal -->
+    <div id="ai-analysis-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="glass-container w-full max-w-3xl p-6">
             <div class="flex justify-between items-center mb-4">
-                <h2 id="log-content-title" class="text-xl font-semibold text-gray-800">Log Content</h2>
-                <div class="flex items-center space-x-3">
-                    <span id="log-truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
-                    <button id="log-ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
-                    <button id="close-log-modal-btn" class="text-gray-600 hover:text-gray-800 text-2xl leading-none">&times;</button>
-                </div>
+                <h2 class="text-xl font-semibold text-gray-200">AI Analysis Result</h2>
+                <button id="close-ai-modal-btn" class="text-gray-400 hover:text-gray-200 text-2xl leading-none">&times;</button>
             </div>
-            <div class="flex-1 overflow-auto bg-gray-100 p-4 rounded-lg border">
-                <pre><code id="modal-log-content" class="text-sm text-gray-800 font-mono">Log content will appear here...</code></pre>
-            </div>
+            <div id="ai-analysis-content" class="overflow-auto text-gray-300" style="max-height: 70vh"></div>
         </div>
     </div>
 
@@ -895,7 +889,7 @@
             }
         });
 
-        aiAnalyseBtn.addEventListener('click', async () => {
+aiAnalyseBtn.addEventListener('click', async () => {
             const apiKey = localStorage.getItem('openai_api_key');
             if (!apiKey) {
                 showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
@@ -908,8 +902,6 @@
 
             aiAnalyseBtn.textContent = 'Analysing...';
             aiAnalyseBtn.disabled = true;
-            aiViewPanel.classList.remove('hidden');
-            aiViewPanel.classList.add('flex');
             aiContentWrapper.innerHTML = '<p>Contacting AI assistant...</p>';
 
             try {
@@ -918,10 +910,25 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ log_content: currentLogContent, log_name: currentLogName, api_key: apiKey, webhook_url: localStorage.getItem('discord_webhook_url') })
                 });
-                aiContentWrapper.innerHTML = data.analysis.replace(/\n/g, '<br>');
                 if (data.discord_sent) showToast('Issue detected! Alert sent to Discord.', 'info');
+
+                // Show analysis in modal
+                const aiAnalysisModal = document.getElementById('ai-analysis-modal');
+                const aiAnalysisContent = document.getElementById('ai-analysis-content');
+                const closeAiModalBtn = document.getElementById('close-ai-modal-btn');
+
+                aiAnalysisContent.innerHTML = data.analysis.replace(/\n/g, '<br>');
+                aiAnalysisModal.classList.remove('hidden');
+
+                closeAiModalBtn.addEventListener('click', () => {
+                    aiAnalysisModal.classList.add('hidden');
+                });
             } catch (error) {
-                aiContentWrapper.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
+                // Show error in modal as well
+                const aiAnalysisModal = document.getElementById('ai-analysis-modal');
+                const aiAnalysisContent = document.getElementById('ai-analysis-content');
+                aiAnalysisContent.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
+                aiAnalysisModal.classList.remove('hidden');
             } finally {
                 aiAnalyseBtn.textContent = 'AI Analyse';
                 aiAnalyseBtn.disabled = false;
