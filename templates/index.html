@@ -60,7 +60,15 @@
         </div>
     </header>
 
-    <div class="flex flex-1 overflow-hidden m-4 gap-4">
+    <!-- Progress bar for journald services (10% height) -->
+    <div id="top-progress-container" class="h-10 glass-container mx-4 p-2 flex items-center justify-between hidden">
+        <p id="top-progress-message" class="text-xs text-gray-600 truncate">Fetching journald services...</p>
+        <div class="w-full bg-gray-300 rounded-full h-2 mx-4">
+            <div id="top-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden m-4 gap-4" style="height: calc(100vh - 160px);">
         <!-- Host List Sidebar -->
         <aside class="w-1/4 glass-container p-4 flex flex-col">
             <div class="flex items-center justify-between mb-4">
@@ -79,9 +87,9 @@
         </aside>
 
         <!-- Log Files and Content Area -->
-        <div class="flex-1 flex flex-col gap-4">
-            <!-- Log Files List (Top Half) -->
-            <div class="flex-1 glass-container p-4 flex flex-col">
+        <div class="flex-1 flex flex-col gap-4" style="height: 100%;">
+            <!-- Log Files List (Top 40%) -->
+            <div class="glass-container p-4 flex flex-col" style="height: 40%; min-height: 200px;">
                 <div class="flex justify-between items-center mb-4">
                     <h2 id="log-table-title" class="text-lg font-semibold text-gray-800">Select a host to view logs</h2>
                 </div>
@@ -104,8 +112,8 @@
                 </div>
             </div>
             
-            <!-- Log Content Area (Bottom Half) -->
-            <div class="flex-1 glass-container p-4 flex flex-col">
+            <!-- Log Content Area (Bottom 50%) -->
+            <div class="glass-container p-4 flex flex-col" style="height: 50%; min-height: 250px;">
                 <div class="flex justify-between items-center mb-4">
                     <h2 id="log-content-title" class="text-lg font-semibold text-gray-800">Log Content</h2>
                     <div class="flex items-center space-x-3">
