@@ -623,10 +623,15 @@
             logTableTitle.textContent = `Fetching logs from ${hostName}...`;
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
-            progressContainer.classList.remove('hidden');
-            progressBar.style.width = '0%';
-            progressMessage.textContent = 'Initializing connection...';
-            progressLogs.innerHTML = ''; // Clear previous logs
+            
+            // Use top progress bar instead of sidebar progress
+            const topProgressContainer = document.getElementById('top-progress-container');
+            const topProgressBar = document.getElementById('top-progress-bar');
+            const topProgressMessage = document.getElementById('top-progress-message');
+            
+            topProgressContainer.classList.remove('hidden');
+            topProgressBar.style.width = '0%';
+            topProgressMessage.textContent = 'Initializing connection...';
             
             let journalItems = [];
             currentEventSource = new EventSource(url);
@@ -635,16 +640,8 @@
                 const data = JSON.parse(event.data);
                 switch(data.status) {
                     case 'progress':
-                        progressBar.style.width = `${data.progress}%`;
-                        progressMessage.textContent = data.message;
-                        
-                        // Append log to dedicated logs area
-                        const logEntry = document.createElement('div');
-                        logEntry.className = 'text-xs text-gray-400';
-                        logEntry.textContent = data.message;
-                        
-                        progressLogs.appendChild(logEntry);
-                        progressContainer.scrollTop = progressContainer.scrollHeight;
+                        topProgressBar.style.width = `${data.progress}%`;
+                        topProgressMessage.textContent = data.message;
                         break;
                     case 'source':
                         if (data.data.type === 'file') appendSourceToList(data.data);
@@ -652,8 +649,8 @@
                         break;
                     case 'complete':
                         journalItems.forEach(appendSourceToList);
-                        progressBar.style.width = `100%`;
-                        progressMessage.textContent = 'Done!';
+                        topProgressBar.style.width = `100%`;
+                        topProgressMessage.textContent = 'Done!';
                         if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
 
                         if (sourceListContainer.children.length === 0) {
@@ -663,12 +660,12 @@
                             logTableTitle.textContent = `All logs pulled from ${hostName}. Select a log to view.`;
                         }
                         
-                        setTimeout(() => progressContainer.classList.add('hidden'), 1500);
+                        setTimeout(() => topProgressContainer.classList.add('hidden'), 1500);
                         currentEventSource.close();
                         break;
                     case 'error':
                         showToast(data.message, 'error');
-                        progressContainer.classList.add('hidden');
+                        topProgressContainer.classList.add('hidden');
                         if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
                         sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${data.message}</li>`;
                         currentEventSource.close();
@@ -679,7 +676,7 @@
             currentEventSource.onerror = (err) => {
                 console.error("EventSource failed:", err);
                 showToast('Connection to server failed. Check if the backend is running.', 'error');
-                progressContainer.classList.add('hidden');
+                topProgressContainer.classList.add('hidden');
                 if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
                 if (currentEventSource) currentEventSource.close();
             };
@@ -864,8 +861,12 @@
             const selectedHost = selectedHostId;
             const selectedHostName = hosts[selectedHost]?.friendly_name || 'Localhost';
 
-            logTitle.textContent = `Loading: ${currentLogName}...`;
-            logContent.textContent = 'Fetching log data...';
+            // Update the log content area elements
+            const logContentTitle = document.getElementById('log-content-title');
+            const logContentContainer = document.getElementById('log-content-container');
+            
+            logContentTitle.textContent = `Loading: ${currentLogName}...`;
+            logContentContainer.innerHTML = '<div class="text-center text-gray-500 mt-16">Fetching log data...</div>';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
 
@@ -878,16 +879,18 @@
                 if (!response.ok) throw new Error(data.error);
                 
                 currentLogContent = data.content;
-                logTitle.textContent = `${currentLogName} on ${selectedHostName}`;
-                logContent.textContent = data.content || 'Log source is empty.';
+                logContentTitle.textContent = `${currentLogName} on ${selectedHostName}`;
+                
+                // Create a pre element with black text for log content
+                logContentContainer.innerHTML = `<pre class="text-sm text-black font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
                 if (localStorage.getItem('openai_api_key') && data.content) {
                      aiAnalyseBtn.classList.remove('hidden');
                      if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
                 }
             } catch (error) {
-                logTitle.textContent = `Error loading ${currentLogName}`;
-                logContent.textContent = error.message;
+                logContentTitle.textContent = `Error loading ${currentLogName}`;
+                logContentContainer.innerHTML = `<div class="text-center text-red-500 mt-16">${error.message}</div>`;
                 showToast(error.message, 'error');
             }
         });
