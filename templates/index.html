@@ -545,18 +545,87 @@
             }
         };
 
+        // --- HOST CARD FUNCTIONS ---
+        const populateHostCards = async () => {
+            try {
+                const hostsData = await fetchApi('/hosts');
+                hosts = hostsData;
+                hostListContainer.innerHTML = '';
+                
+                // Add localhost card
+                const localhostCard = createHostCard('local', {
+                    friendly_name: 'Localhost',
+                    ip: 'localhost',
+                    user: 'local',
+                    description: 'Local machine'
+                });
+                hostListContainer.appendChild(localhostCard);
+                
+                // Add remote host cards
+                for (const [id, host] of Object.entries(hosts)) {
+                    const hostCard = createHostCard(id, host);
+                    hostListContainer.appendChild(hostCard);
+                }
+                
+                // Select localhost by default
+                selectHost('local');
+            } catch (error) {
+                hostListContainer.innerHTML = '<div class="p-4 text-red-400">Failed to load hosts.</div>';
+            }
+        };
+        
+        const createHostCard = (hostId, hostData) => {
+            const card = document.createElement('div');
+            card.className = 'host-card p-3 rounded-lg border border-gray-300 cursor-pointer hover:bg-gray-50 transition-all';
+            card.dataset.hostId = hostId;
+            
+            card.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-gray-800">${hostData.friendly_name}</h3>
+                        <p class="text-sm text-gray-600">${hostData.description || 'No description'}</p>
+                        <p class="text-xs text-gray-500 font-mono">${hostData.user}@${hostData.ip}</p>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <div class="connection-indicator w-3 h-3 rounded-full bg-gray-400"></div>
+                    </div>
+                </div>
+            `;
+            
+            card.addEventListener('click', () => selectHost(hostId));
+            return card;
+        };
+        
+        const selectHost = (hostId) => {
+            selectedHostId = hostId;
+            
+            // Update card selection visuals
+            hostListContainer.querySelectorAll('.host-card').forEach(card => {
+                if (card.dataset.hostId === hostId) {
+                    card.classList.add('bg-indigo-100', 'border-indigo-500');
+                    card.classList.remove('border-gray-300');
+                } else {
+                    card.classList.remove('bg-indigo-100', 'border-indigo-500');
+                    card.classList.add('border-gray-300');
+                }
+            });
+            
+            // Fetch logs for selected host
+            fetchSourcesForHost();
+        };
+
         // --- CORE APP LOGIC ---
         const fetchSourcesForHost = () => {
-            const selectedHost = hostSelector.value;
-            const url = selectedHost === 'local' ? '/sources/local' : `/sources/remote/${selectedHost}`;
+            const url = selectedHostId === 'local' ? '/sources/local' : `/sources/remote/${selectedHostId}`;
+            const hostName = selectedHostId === 'local' ? 'Localhost' : (hosts[selectedHostId]?.friendly_name || selectedHostId);
 
             if (currentEventSource) {
                 currentEventSource.close();
             }
 
             sourceListContainer.innerHTML = '';
-            logTitle.textContent = `Fetching logs from ${hostSelector.options[hostSelector.selectedIndex].text}...`;
-            logContent.textContent = '';
+            const logTableTitle = document.getElementById('log-table-title');
+            logTableTitle.textContent = `Fetching logs from ${hostName}...`;
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
             progressContainer.classList.remove('hidden');
@@ -590,24 +659,22 @@
                         journalItems.forEach(appendSourceToList);
                         progressBar.style.width = `100%`;
                         progressMessage.textContent = 'Done!';
-                        journalLoadingIndicator.classList.add('hidden');
+                        if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
 
-                        const selectedHostName = hostSelector.options[hostSelector.selectedIndex].text;
                         if (sourceListContainer.children.length === 0) {
                             sourceListContainer.innerHTML = '<li class="p-4 text-center text-gray-500">No log sources found on host.</li>';
-                            logTitle.textContent = `No logs found on ${selectedHostName}.`;
+                            logTableTitle.textContent = `No logs found on ${hostName}.`;
                         } else {
-                            logTitle.textContent = `All logs pulled from ${selectedHostName}. Select a log to view.`;
+                            logTableTitle.textContent = `All logs pulled from ${hostName}. Select a log to view.`;
                         }
                         
-                        runSortAndFilter();
                         setTimeout(() => progressContainer.classList.add('hidden'), 1500);
                         currentEventSource.close();
                         break;
                     case 'error':
                         showToast(data.message, 'error');
                         progressContainer.classList.add('hidden');
-                        journalLoadingIndicator.classList.add('hidden');
+                        if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
                         sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${data.message}</li>`;
                         currentEventSource.close();
                         break;
@@ -618,7 +685,7 @@
                 console.error("EventSource failed:", err);
                 showToast('Connection to server failed. Check if the backend is running.', 'error');
                 progressContainer.classList.add('hidden');
-                journalLoadingIndicator.classList.add('hidden');
+                if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
                 if (currentEventSource) currentEventSource.close();
             };
         };
