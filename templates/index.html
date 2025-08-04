@@ -319,8 +319,7 @@
         const saveLogSelectionBtn = document.getElementById('save-log-selection-btn');
         const cancelLogSelectionBtn = document.getElementById('cancel-log-selection-btn');
         
-        const listViewBtn = document.getElementById('list-view-btn');
-        const tableViewBtn = document.getElementById('table-view-btn');
+        // Removed non-existent view mode buttons: listViewBtn, tableViewBtn
         
         const toast = document.getElementById('toast-notification');
         
@@ -503,21 +502,7 @@
             }
         };
 
-        const switchViewMode = (mode) => {
-            currentViewMode = mode;
-            
-            if (mode === 'list') {
-                listViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-indigo-600 text-white rounded transition-colors';
-                tableViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors';
-                
-                fetchSourcesForHost();
-            } else {
-                listViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors';
-                tableViewBtn.className = 'flex-1 px-3 py-2 text-xs bg-indigo-600 text-white rounded transition-colors';
-                
-                fetchTableView();
-            }
-        };
+        // switchViewMode function removed - view mode buttons don't exist in current UI
 
         // --- HOST CARD FUNCTIONS ---
         const populateHostCards = async () => {
@@ -1484,8 +1469,7 @@
         // Event listeners for search/filter/sort removed - not needed for current UI
 
         // --- VIEW MODE LISTENERS ---
-        listViewBtn.addEventListener('click', () => switchViewMode('list'));
-        tableViewBtn.addEventListener('click', () => switchViewMode('table'));
+        // View mode listeners removed - buttons don't exist in current UI
 
         // --- INITIALIZATION ---
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
