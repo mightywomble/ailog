@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <script>
         tailwind.config = {
             theme: {
@@ -62,7 +63,12 @@
     <div class="flex flex-1 overflow-hidden m-4 gap-4">
         <!-- Host List Sidebar -->
         <aside class="w-1/4 glass-container p-4 flex flex-col">
-            <h2 class="text-lg font-semibold text-gray-800 mb-4">Hosts</h2>
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-800">Hosts</h2>
+                <select id="host-selector" class="text-sm px-3 py-1 rounded border border-gray-300 bg-white text-gray-800">
+                    <option value="local">Localhost</option>
+                </select>
+            </div>
             <div id="host-list-container" class="flex-1 overflow-y-auto space-y-2">
                 <!-- Host cards will be populated here -->
             </div>
