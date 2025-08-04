@@ -78,21 +78,48 @@
             </div>
         </aside>
 
-        <!-- Log Table Area -->
-        <div class="flex-1 glass-container p-4 flex flex-col">
-            <div class="flex justify-between items-center mb-4">
-                <h2 id="log-table-title" class="text-lg font-semibold text-gray-800">Select a host to view logs</h2>
-                <div class="flex items-center space-x-3">
-                    <span id="truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
-                    <button id="ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
+        <!-- Log Files and Content Area -->
+        <div class="flex-1 flex flex-col gap-4">
+            <!-- Log Files List (Top Half) -->
+            <div class="flex-1 glass-container p-4 flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="log-table-title" class="text-lg font-semibold text-gray-800">Select a host to view logs</h2>
+                </div>
+                
+                <!-- Progress bar for log loading -->
+                <div id="log-progress-container" class="mb-4 hidden">
+                    <p id="log-progress-message" class="text-xs text-gray-600 mb-1 truncate">Loading...</p>
+                    <div class="w-full bg-gray-300 rounded-full h-2 mb-2">
+                        <div id="log-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+                
+                <div id="log-table-container" class="flex-1 overflow-auto">
+                    <div class="text-center text-gray-500 mt-16">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p class="text-lg">Click on a host to see available logs</p>
+                    </div>
                 </div>
             </div>
-            <div id="log-table-container" class="flex-1 overflow-auto">
-                <div class="text-center text-gray-500 mt-16">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <p class="text-lg">Click on a host to see available logs</p>
+            
+            <!-- Log Content Area (Bottom Half) -->
+            <div class="flex-1 glass-container p-4 flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="log-content-title" class="text-lg font-semibold text-gray-800">Log Content</h2>
+                    <div class="flex items-center space-x-3">
+                        <span id="truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
+                        <button id="ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
+                    </div>
+                </div>
+                <div id="log-content-container" class="flex-1 overflow-auto bg-gray-100 p-4 rounded-lg border">
+                    <div class="text-center text-gray-500 mt-16">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p class="text-lg">Select a log file to view its content</p>
+                    </div>
                 </div>
             </div>
         </div>
