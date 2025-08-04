@@ -615,6 +615,7 @@
                 currentEventSource.close();
             }
 
+            const sourceListContainer = document.getElementById('log-table-container');
             sourceListContainer.innerHTML = '';
             const logTableTitle = document.getElementById('log-table-title');
             logTableTitle.textContent = `Fetching logs from ${hostName}...`;
@@ -760,21 +761,8 @@
             }
         };
         
-        const populateHostSelector = async () => {
-            try {
-                const hosts = await fetchApi('/hosts');
-                const selectedValue = hostSelector.value;
-                hostSelector.innerHTML = '<option value="local">Localhost</option>';
-                for (const [id, host] of Object.entries(hosts)) {
-                    const option = new Option(host.friendly_name, id)
-                    hostSelector.add(option);
-                }
-                hostSelector.value = selectedValue;
-            } catch(error) {}
-        };
 
         // --- EVENT LISTENERS ---
-        hostSelector.addEventListener('change', fetchSourcesForHost);
 
         settingsBtn.addEventListener('click', () => {
              settingsModal.classList.remove('hidden');
@@ -802,7 +790,7 @@
                     await fetchApi(`/hosts/delete/${hostId}`, { method: 'DELETE' });
                     showToast('Host deleted.');
                     populateHostList();
-                    populateHostSelector();
+                    populateHostCards();
                 }
             }
         });
@@ -852,7 +840,7 @@
                 hostModal.classList.add('hidden');
                 settingsModal.classList.remove('hidden');
                 populateHostList();
-                populateHostSelector();
+                populateHostCards();
             } catch(error) {}
         });
         
@@ -871,8 +859,8 @@
             const sourceItem = link.closest('.source-item');
             currentLogName = sourceItem.dataset.name;
             const type = sourceItem.dataset.type;
-            const selectedHost = hostSelector.value;
-            const selectedHostName = hostSelector.options[hostSelector.selectedIndex].text;
+            const selectedHost = selectedHostId;
+            const selectedHostName = hosts[selectedHost]?.friendly_name || 'Localhost';
 
             logTitle.textContent = `Loading: ${currentLogName}...`;
             logContent.textContent = 'Fetching log data...';
@@ -1529,7 +1517,7 @@
         // --- INITIALIZATION ---
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
         discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
-        populateHostSelector().then(fetchSourcesForHost);
+        populateHostCards();
     });
     </script>
 </body>
