@@ -264,9 +264,7 @@
         const logContent = document.getElementById('log-content');
         const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
         const truncationWarning = document.getElementById('truncation-warning');
-        const searchBox = document.getElementById('search-box');
-        const sortControls = document.getElementById('sort-controls');
-        const filterControls = document.getElementById('filter-controls');
+        // Removed non-existent elements: searchBox, sortControls, filterControls
         const aiContentWrapper = document.getElementById('ai-content-wrapper');
         const aiViewPanel = document.getElementById('ai-view-panel');
         const resizeHandle = document.getElementById('resize-handle');
@@ -377,23 +375,7 @@
             }
         };
         
-        const runSortAndFilter = () => {
-            const nameFilter = searchBox.value.toLowerCase();
-            const typeFilter = filterControls.querySelector('.active').dataset.filter;
-            const sortBy = sortControls.querySelector('.active').dataset.sort;
-            const items = Array.from(sourceListContainer.querySelectorAll('.source-item'));
-            items.sort((a, b) => {
-                if (sortBy === 'name') return a.dataset.name.localeCompare(b.dataset.name);
-                if (sortBy === 'size') return parseInt(b.dataset.size) - parseInt(a.dataset.size);
-                if (sortBy === 'date') return parseInt(b.dataset.modified) - parseInt(a.dataset.modified);
-                return 0;
-            }).forEach(item => {
-                const nameMatch = item.dataset.name.toLowerCase().includes(nameFilter);
-                const typeMatch = (typeFilter === 'all') || (item.dataset.type === typeFilter);
-                item.style.display = (nameMatch && typeMatch) ? '' : 'none';
-                sourceListContainer.appendChild(item);
-            });
-        };
+        // runSortAndFilter function removed - not needed for current UI
 
         // --- TABLE VIEW FUNCTIONS ---
         const fetchTableView = async () => {
@@ -1499,16 +1481,7 @@
             finally { testDiscordBtn.disabled = false; testDiscordBtn.textContent = 'Test'; }
         });
 
-        [searchBox, filterControls, sortControls].forEach(el => {
-            el.addEventListener('input', runSortAndFilter);
-            el.addEventListener('click', e => {
-                if (e.target.matches('.filter-btn, .sort-btn')) {
-                    el.querySelector('.active').classList.remove('active');
-                    e.target.classList.add('active');
-                    runSortAndFilter();
-                }
-            });
-        });
+        // Event listeners for search/filter/sort removed - not needed for current UI
 
         // --- VIEW MODE LISTENERS ---
         listViewBtn.addEventListener('click', () => switchViewMode('list'));
