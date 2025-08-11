@@ -47,6 +47,143 @@ def get_ssh_prefix_args(user, ip):
         "-o", "BatchMode=yes", f"{user}@{ip}"
     ]
 
+# --- SEARCH FUNCTIONALITY ---
+@app.route('/search', methods=['POST'])
+def search_logs():
+    """Search for keywords/phrases across logs"""
+    data = request.get_json()
+    query = data.get('query', '').strip()
+    search_scope = data.get('scope', 'all')  # 'all' or specific log identifier
+    host_filter = data.get('host_filter', [])  # list of host IDs to search in
+    case_sensitive = data.get('case_sensitive', False)
+    
+    if not query:
+        return jsonify({'error': 'Search query is required'}), 400
+    
+    search_results = []
+    failed_hosts = []
+    
+    # Get list of hosts to search
+    hosts = load_hosts()
+    search_hosts = [('local', 'Localhost')]
+    
+    # Add remote hosts
+    for host_id, host_data in hosts.items():
+        if not host_filter or host_id in host_filter:
+            search_hosts.append((host_id, host_data['friendly_name']))
+    
+    # Filter hosts if host_filter is specified
+    if host_filter:
+        search_hosts = [(h_id, h_name) for h_id, h_name in search_hosts if h_id in host_filter or h_id == 'local']
+    
+    # Perform search on each host
+    for host_id, host_name in search_hosts:
+        try:
+            host_results = search_host_logs(host_id, host_name, query, search_scope, case_sensitive)
+            search_results.extend(host_results)
+        except Exception as e:
+            error_msg = str(e)
+            if 'timeout' in error_msg.lower():
+                error_msg = "Connection timed out"
+            elif 'connection refused' in error_msg.lower():
+                error_msg = "Connection refused"
+            failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': error_msg})
+    
+    return jsonify({
+        'results': search_results,
+        'total_matches': len(search_results),
+        'failed_hosts': failed_hosts,
+        'query': query,
+        'scope': search_scope
+    })
+
+def search_host_logs(host_id, host_name, query, search_scope, case_sensitive):
+    """Search for query in logs on a specific host"""
+    results = []
+    
+    # Get available log sources from the host
+    try:
+        # List log files
+        cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
+        res_ls = execute_command(host_id, cmd_ls, timeout=10)
+        filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
+        
+        # Search in log files
+        for filename in filenames:
+            if search_scope != 'all' and search_scope != f"file:{filename}":
+                continue
+                
+            try:
+                # Use grep to search within the file
+                grep_flags = "-i" if not case_sensitive else ""
+                if filename.endswith('.gz'):
+                    search_cmd = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, filename))} 2>/dev/null | grep {grep_flags} -n {shlex.quote(query)} | head -20"
+                else:
+                    search_cmd = f"sudo grep {grep_flags} -n {shlex.quote(query)} {shlex.quote(os.path.join(LOG_DIRECTORY, filename))} | head -20"
+                
+                result = execute_command(host_id, search_cmd, timeout=15)
+                
+                if result.stdout.strip():
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        if ':' in line:
+                            line_num, content = line.split(':', 1)
+                            results.append({
+                                'host_id': host_id,
+                                'host_name': host_name,
+                                'log_name': filename,
+                                'log_type': 'file',
+                                'line_number': line_num,
+                                'content': content.strip(),
+                                'timestamp': None  # Could extract from log line if needed
+                            })
+            except Exception as e:
+                # Skip files we can't read
+                continue
+        
+        # Search in journal services if scope allows
+        if search_scope == 'all' or search_scope.startswith('journal:'):
+            try:
+                cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq | head -10"
+                res_journal = execute_command(host_id, cmd_journal, timeout=10)
+                journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
+                
+                for unit in journal_units:
+                    if search_scope != 'all' and search_scope != f"journal:{unit}":
+                        continue
+                        
+                    try:
+                        # Search in journal for this unit
+                        grep_flags = "-i" if not case_sensitive else ""
+                        journal_search_cmd = f"sudo journalctl -u {shlex.quote(unit)} -n 100 --no-pager | grep {grep_flags} -n {shlex.quote(query)} | head -10"
+                        result = execute_command(host_id, journal_search_cmd, timeout=15)
+                        
+                        if result.stdout.strip():
+                            lines = result.stdout.strip().split('\n')
+                            for line in lines:
+                                if ':' in line:
+                                    line_num, content = line.split(':', 1)
+                                    results.append({
+                                        'host_id': host_id,
+                                        'host_name': host_name,
+                                        'log_name': unit,
+                                        'log_type': 'journal',
+                                        'line_number': line_num,
+                                        'content': content.strip(),
+                                        'timestamp': None
+                                    })
+                    except Exception as e:
+                        continue
+                        
+            except Exception as e:
+                # Skip journal search if it fails
+                pass
+                
+    except Exception as e:
+        raise Exception(f"Failed to search logs on {host_name}: {str(e)}")
+    
+    return results
+
 # --- CORE LOGIC (Refactored for Remote Execution) ---
 def execute_command(hostname, command_str, timeout=10):
     ssh_prefix_args = []

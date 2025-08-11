@@ -60,6 +60,48 @@
         </div>
     </header>
 
+    <!-- Search Bar -->
+    <div class="glass-container mx-4 mt-4 p-4 shadow-lg">
+        <div class="flex items-center space-x-4">
+            <div class="flex-1">
+                <input type="text" id="search-input" 
+                    class="w-full bg-white/80 border border-gray-300 rounded-lg px-4 py-2 placeholder-gray-500 focus:outline-none focus:border-indigo-500" 
+                    placeholder="Search logs for keywords or phrases...">
+            </div>
+            <div class="flex items-center space-x-2">
+                <label class="flex items-center text-sm text-gray-700">
+                    <input type="checkbox" id="case-sensitive-checkbox" class="mr-2">
+                    Case sensitive
+                </label>
+                <select id="search-scope" class="bg-white/80 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <option value="all">All logs</option>
+                    <option value="selected">Selected log only</option>
+                </select>
+                <button id="search-btn" class="button px-6 py-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    Search
+                </button>
+            </div>
+        </div>
+        
+        <!-- Search Results -->
+        <div id="search-results-container" class="hidden mt-4">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-lg font-semibold text-gray-800">Search Results</h3>
+                <button id="close-search-results" class="text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div id="search-results-list" class="max-h-96 overflow-y-auto space-y-2">
+                <!-- Search results will be populated here -->
+            </div>
+        </div>
+    </div>
+
     <!-- Progress bar for journald services (10% height) -->
     <div id="top-progress-container" class="h-10 glass-container mx-4 p-2 flex items-center justify-between hidden">
         <p id="top-progress-message" class="text-xs text-gray-600 truncate">Fetching journald services...</p>
@@ -360,6 +402,17 @@
         let tableData = null;
         let selectedHostId = 'local';
         let hosts = {};
+        let currentLogType = null;
+        let currentHostId = null;
+
+        // Search elements
+        const searchInput = document.getElementById('search-input');
+        const searchBtn = document.getElementById('search-btn');
+        const caseSensitiveCheckbox = document.getElementById('case-sensitive-checkbox');
+        const searchScope = document.getElementById('search-scope');
+        const searchResultsContainer = document.getElementById('search-results-container');
+        const searchResultsList = document.getElementById('search-results-list');
+        const closeSearchResults = document.getElementById('close-search-results');
 
         // --- UTILITY FUNCTIONS ---
         const showToast = (message, type = 'success') => {
@@ -1515,6 +1568,143 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
         // --- VIEW MODE LISTENERS ---
         // View mode listeners removed - buttons don't exist in current UI
+
+        // --- SEARCH FUNCTIONALITY ---
+        const performSearch = async () => {
+            const query = searchInput.value.trim();
+            if (!query) {
+                showToast('Please enter a search query', 'error');
+                return;
+            }
+
+            searchBtn.disabled = true;
+            searchBtn.textContent = 'Searching...';
+            searchResultsList.innerHTML = '';
+
+            try {
+                const scope = searchScope.value === 'selected' && currentLogName ? 
+                    (currentLogType === 'file' ? `file:${currentLogName}` : `journal:${currentLogName}`) : 'all';
+                
+                const hostFilter = searchScope.value === 'selected' && currentHostId ? [currentHostId] : [];
+
+                const searchData = {
+                    query: query,
+                    scope: scope,
+                    host_filter: hostFilter,
+                    case_sensitive: caseSensitiveCheckbox.checked
+                };
+
+                const results = await fetchApi('/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(searchData)
+                });
+
+                displaySearchResults(results, query);
+            } catch (error) {
+                searchResultsList.innerHTML = `
+                    <div class="p-4 text-red-500 text-center">
+                        <p>Search failed: ${error.message}</p>
+                    </div>
+                `;
+                searchResultsContainer.classList.remove('hidden');
+            } finally {
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search';
+            }
+        };
+
+        const displaySearchResults = (results, query) => {
+            searchResultsList.innerHTML = '';
+            
+            if (results.failed_hosts && results.failed_hosts.length > 0) {
+                const failedDiv = document.createElement('div');
+                failedDiv.className = 'mb-3 p-2 bg-yellow-100 border border-yellow-300 rounded text-yellow-800 text-xs';
+                failedDiv.innerHTML = `⚠️ Could not search ${results.failed_hosts.length} host(s): ${results.failed_hosts.map(h => h.host_name).join(', ')}`;
+                searchResultsList.appendChild(failedDiv);
+            }
+
+            if (results.total_matches === 0) {
+                const noResultsDiv = document.createElement('div');
+                noResultsDiv.className = 'p-4 text-gray-500 text-center';
+                noResultsDiv.innerHTML = `No matches found for "${query}"`;
+                searchResultsList.appendChild(noResultsDiv);
+            } else {
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'mb-3 text-sm text-gray-600';
+                headerDiv.innerHTML = `Found ${results.total_matches} match${results.total_matches !== 1 ? 'es' : ''} for "${query}"`;
+                searchResultsList.appendChild(headerDiv);
+
+                results.results.forEach(result => {
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = 'mb-2 p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors';
+                    
+                    // Highlight the search term in the content
+                    const highlightedContent = result.content.replace(
+                        new RegExp(`(${escapeRegExp(query)})`, caseSensitiveCheckbox.checked ? 'g' : 'gi'),
+                        '<mark class="bg-yellow-200">$1</mark>'
+                    );
+                    
+                    resultDiv.innerHTML = `
+                        <div class="flex items-start justify-between mb-2">
+                            <div class="flex-1">
+                                <div class="flex items-center space-x-2 mb-1">
+                                    <span class="font-medium text-gray-800">${result.log_name}</span>
+                                    <span class="text-xs px-2 py-1 rounded ${
+                                        result.log_type === 'file' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+                                    }">${result.log_type}</span>
+                                    <span class="text-xs text-gray-500">on ${result.host_name}</span>
+                                </div>
+                                <div class="text-sm text-gray-600 font-mono bg-gray-100 p-2 rounded">
+                                    ${result.line_number ? `Line ${result.line_number}: ` : ''}${highlightedContent}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    resultDiv.addEventListener('click', () => {
+                        loadLogContent(result.log_name, result.log_type, result.host_id, result.host_name);
+                        // Update current log info for "selected log only" searches
+                        currentLogName = result.log_name;
+                        currentLogType = result.log_type;
+                        currentHostId = result.host_id;
+                        // Close search results
+                        searchResultsContainer.classList.add('hidden');
+                    });
+                    
+                    searchResultsList.appendChild(resultDiv);
+                });
+            }
+            
+            searchResultsContainer.classList.remove('hidden');
+        };
+
+        const escapeRegExp = (string) => {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        };
+
+        // Search event listeners
+        searchBtn.addEventListener('click', performSearch);
+        
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+        
+        closeSearchResults.addEventListener('click', () => {
+            searchResultsContainer.classList.add('hidden');
+        });
+
+        // Update search scope when log is selected
+        const originalLoadLogContent = loadLogContent;
+        loadLogContent = async (logName, logType, hostId, hostName) => {
+            await originalLoadLogContent(logName, logType, hostId, hostName);
+            // Update current log info for search
+            currentLogName = logName;
+            currentLogType = logType;
+            currentHostId = hostId;
+        };
 
         // --- INITIALIZATION ---
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
