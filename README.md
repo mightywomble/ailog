@@ -1,6 +1,6 @@
-# Local & Remote Log Viewer with AI Analysis
+# AI Log Viewer - Multi-Host Log Analysis Platform
 
-An advanced, modern web application for viewing system logs from `/var/log` and `journalctl` on both the **local** machine and **remote** servers via **SSH**. This tool is supercharged with both manual and scheduled AI analysis and proactive Discord alerting, providing a powerful, elegant interface for developers and system administrators to monitor logs directly from their web browser.
+A comprehensive, modern web application for viewing and analyzing system logs from `/var/log` and `journalctl` across both **local** and **remote** servers. This advanced platform combines real-time log viewing, powerful search capabilities, AI-powered analysis, and proactive alerting in a sleek, responsive interface designed for developers and system administrators.
 
 ### ⚠️ Security Warning
 
@@ -8,36 +8,60 @@ This application is designed for use on a trusted, internal development network 
 
 **DO NOT expose this application to the public internet.** Doing so would create a significant security risk. You must ensure that passwordless SSH key-based authentication is set up correctly and that the principle of least privilege is followed.
 
-### Key Features
+## 🚀 Key Features
 
-* **Unified Log Access:** View traditional logs from `/var/log` and `journalctl` logs for systemd services in a single interface.
-* **Multi-Host Management:**
-    * Seamlessly switch between `localhost` and any number of configured remote servers from a dropdown menu.
-    * Add, edit, and delete remote hosts with friendly names, IP addresses, SSH users, and descriptions.
-    * **SSH Connection Testing:** A built-in test button verifies the SSH connection and `sudo` access to a remote server *before* adding it, ensuring a correct configuration.
-* **Streaming Log Loading:**
-    * When connecting to a host, a progress bar provides real-time feedback as logs are discovered and loaded.
-    * Syslog files are loaded first for a fast, responsive UI, while slower `journalctl` services are loaded in the background.
-* **Scheduled AI Monitoring:**
-    * Select specific logs from **any configured host** and set a recurring interval (in hours) for automatic AI analysis.
-    * The scheduler is now aware of remote hosts and will execute analysis on the correct machine.
-* **Proactive Discord Alerts:** Automatically sends a rich, formatted notification to a Discord channel via webhook if the manual or scheduled AI analysis detects keywords like "error", "issue", or "warning".
-* **On-Demand Analysis:** Trigger an immediate analysis of all monitored logs with a single "Run Now" button.
-* **Dynamic UI:**
-    * Filter the view to show only syslog files, only journald services, or all sources combined.
-    * Sort logs by name, size, or modification date.
-* **Gzip Decompression:** Automatically decompresses and displays `.gz` log archives on the fly.
-* **Secure Credential Storage:** OpenAI API keys and Discord webhooks are stored securely in the browser's local storage and are never transmitted to the server except when making direct API calls.
+### 📊 **Unified Log Management**
+* **Multi-Source Access:** View traditional syslog files from `/var/log` and systemd journal entries in a unified interface
+* **Cross-Platform Compatibility:** Works seamlessly across Linux distributions with systemd support
+* **Automatic Decompression:** Handles `.gz` compressed log archives transparently
 
-### Installation & Setup on Ubuntu 24.04
+### 🌐 **Multi-Host Architecture**
+* **Host Management Dashboard:** Intuitive interface for managing local and remote servers
+* **SSH Connection Testing:** Built-in validation ensures proper SSH key setup and sudo permissions before adding hosts
+* **Dynamic Host Switching:** Seamlessly switch between configured servers with real-time log loading
+* **Connection Status Monitoring:** Visual indicators show host connectivity status
 
-This guide provides complete instructions for setting up the application and running it as a `systemd` service.
+### 🔍 **Advanced Search Capabilities**
+* **Global Search:** Search across all logs from all configured hosts simultaneously
+* **Scoped Search:** Target specific log files or journal units for precise results
+* **Case-Sensitive Options:** Fine-tune search behavior with case sensitivity controls
+* **Real-Time Results:** Instant search results with highlighted matches and line numbers
+* **Cross-Host Discovery:** Find log entries across your entire infrastructure from a single search
 
-#### Prerequisites
+### 🤖 **AI-Powered Analysis**
+* **On-Demand Analysis:** Manual log analysis using OpenAI's GPT models with intelligent error detection
+* **Scheduled Monitoring:** Automated recurring analysis with customizable intervals
+* **Multi-Host Scheduling:** Monitor logs across different servers with unified scheduling
+* **Smart Alerting:** Proactive Discord notifications for detected issues and anomalies
 
-* An Ubuntu 24.04 server (or any Debian-based system) to run the Log Viewer application.
-* A non-root user with `sudo` privileges. We will use `david` in this guide; be sure to replace `david` with your actual username in all commands.
-* Passwordless SSH key access from the Log Viewer server to any remote hosts you wish to monitor.
+### 📈 **Real-Time Progress Tracking**
+* **Streaming Updates:** Server-Sent Events (SSE) provide real-time feedback during log loading
+* **Progress Visualization:** Detailed progress bars and status messages for all operations
+* **Error Recovery:** Automatic retry mechanisms for failed host connections
+* **Performance Optimization:** Concurrent processing with timeout handling for reliable operations
+
+### 🔒 **Security & Privacy**
+* **Local Credential Storage:** API keys and webhooks stored securely in browser localStorage
+* **SSH Key Authentication:** Passwordless SSH access with proper key-based security
+* **Granular Sudo Permissions:** Minimal required permissions for enhanced security
+* **Network Isolation:** Designed for trusted internal networks only
+
+## 🛠 Installation & Setup
+
+### System Requirements
+* **Operating System:** Ubuntu 20.04+ / Debian 11+ / CentOS 8+ (systemd-based distributions)
+* **Python:** 3.8 or higher
+* **Memory:** 512MB+ RAM (1GB+ recommended for multiple hosts)
+* **Network:** Internal network access to monitored hosts
+* **SSH:** Key-based authentication configured for remote hosts
+
+### Prerequisites
+
+* A Linux server to host the AI Log Viewer application
+* Non-root user with sudo privileges (we'll use `david` in examples - replace with your username)
+* SSH key-based authentication configured for remote host access
+* OpenAI API key for AI analysis features (optional but recommended)
+* Discord webhook URL for notifications (optional)
 
 #### Step 1: Install System Dependencies
 
@@ -64,16 +88,18 @@ It's best practice to run a Python application in a virtual environment.
 python3 -m venv venv
 source venv/bin/activate
 ```
-Create a file named `requirements.txt` in your project directory with the following content:
+The project includes a `requirements.txt` file with all necessary dependencies:
 
 **requirements.txt**
 ```
-Flask
-openai
-requests
-APScheduler
+Flask>=2.3.3
+Werkzeug>=2.3.7
+openai>=1.3.0
+requests>=2.31.0
+APScheduler>=3.10.4
 ```
-Now, install these requirements using pip.
+
+Install the dependencies:
 ```bash
 pip install -r requirements.txt
 ```
@@ -147,30 +173,207 @@ sudo systemctl status logviewer
 ```
 You should see output indicating the service is `active (running)`.
 
-### Usage
+## 📖 Usage Guide
 
-Once the service is running, access the application by navigating to your server's IP address on port `5001`: `http://<your-server-ip>:5001`
+### Getting Started
 
-1.  **Initial Configuration**:
-    * Click the **Settings** (gear) icon in the top right.
-    * In the **Credentials** section, enter your OpenAI API Key and Discord Webhook URL.
-    * Click **Save Credentials & Close**. These are stored in your browser's local storage.
+Access the application at: `http://<your-server-ip>:5001`
 
-2.  **Managing Remote Hosts**:
-    * In Settings, click the **Add New** button in the **Remote Hosts** panel.
-    * Fill in the **Friendly Name** (e.g., "Web Server 1"), IP Address, and SSH User.
-    * Click the yellow **Test Connection** button. The app will attempt to SSH and run a `sudo` command.
-        * On success, the button will turn green. You can now click **Add Host**.
-        * On failure, an error will be displayed. You must fix the issue (e.g., SSH keys, `sudoers` permissions) and re-test.
-    * Existing hosts can be edited or deleted from the list in the Settings panel.
+The interface features a clean, modern design with:
+- **Host sidebar** for server selection
+- **Log list panel** showing available logs
+- **Content viewer** for log analysis
+- **Global search bar** for cross-host searches
 
-3.  **Viewing and Analyzing Logs**:
-    * Select the desired server from the **Host** dropdown in the header.
-    * The log list will load with a progress bar.
-    * Click on any log or service to view its content.
-    * Click the **AI Analyse** button for an on-demand analysis.
+### 🔧 Initial Setup
 
-4.  **Scheduled Monitoring**:
-    * In Settings, click the **Select Logs for Schedule...** button.
-    * The selection modal will show logs for the currently selected host in the main UI.
-    * Check the logs you wish to monitor and click **Confirm Selections**. Your selections are saved per-host.
+1. **Configure Credentials**:
+   - Click the **Settings** ⚙️ icon in the header
+   - Enter your **OpenAI API Key** for AI analysis
+   - Add your **Discord Webhook URL** for notifications
+   - Click **Save Credentials & Close**
+
+2. **Add Remote Hosts**:
+   - In Settings → **Remote Hosts** → **Add New**
+   - Fill in host details:
+     - **Friendly Name**: "Production Server", "Database Host", etc.
+     - **IP Address**: Server IP or hostname
+     - **SSH User**: Username for SSH access
+     - **Description**: Optional host description
+   - Click **Test Connection** to verify SSH and sudo access
+   - On success (green indicator), click **Save Host**
+
+### 🔍 Search Functionality
+
+#### Global Search
+1. Enter search terms in the top search bar
+2. Select search scope:
+   - **All logs**: Search across all hosts and log files
+   - **Selected log only**: Search within currently viewed log
+3. Toggle **Case sensitive** if needed
+4. Click **Search** or press Enter
+
+#### Search Features
+- **Cross-host results**: Find logs from any configured server
+- **Highlighted matches**: Search terms highlighted in results
+- **Line numbers**: Exact line location for each match
+- **Quick navigation**: Click results to jump to specific logs
+- **Failed host handling**: Clear indicators for unreachable servers
+
+### 📊 Log Management
+
+#### Viewing Logs
+1. **Select Host**: Choose from the host sidebar (localhost always available)
+2. **Browse Logs**: Real-time loading with progress indicators
+3. **View Content**: Click any log file or journal unit
+4. **AI Analysis**: Use **AI Analyse** button for automated insights
+
+#### Log Types
+- **📄 File logs**: Traditional syslog files from `/var/log`
+- **🔧 Journal entries**: systemd journal units via `journalctl`
+- **📦 Compressed logs**: Automatic `.gz` decompression
+
+### 🤖 AI Analysis & Monitoring
+
+#### Manual Analysis
+1. Load any log file or journal unit
+2. Click **AI Analyse** (requires OpenAI API key)
+3. View detailed analysis in popup modal
+4. Automatic Discord alerts for detected issues
+
+#### Scheduled Monitoring
+1. **Settings** → **Select Logs for Schedule...**
+2. **Cross-host selection**: Choose logs from multiple servers
+3. **Set interval**: Configure analysis frequency (hours)
+4. **Start monitoring**: Enable automated analysis
+5. **Run Now**: Trigger immediate analysis of all monitored logs
+
+### 📈 Advanced Features
+
+#### Multi-Host Operations
+- **Concurrent processing**: Parallel operations across multiple hosts
+- **Retry mechanisms**: Automatic retry for failed connections
+- **Progress tracking**: Real-time status for all operations
+- **Error recovery**: Graceful handling of network issues
+
+#### Performance Optimization
+- **Streaming data**: Server-Sent Events for real-time updates
+- **Caching**: Intelligent caching of host data
+- **Timeout handling**: Configurable timeouts for reliability
+- **Resource management**: Efficient memory usage for large logs
+
+### 🚨 Troubleshooting
+
+#### Common Issues
+1. **Host connection failures**:
+   - Verify SSH key authentication
+   - Check sudo permissions (see sudoers configuration)
+   - Ensure network connectivity
+
+2. **Search not working**:
+   - Check host connectivity in sidebar
+   - Verify log file permissions
+   - Look for timeout errors in browser console
+
+3. **AI analysis errors**:
+   - Validate OpenAI API key in Settings
+   - Check API quota and billing
+   - Ensure log content is not empty
+
+#### Debug Information
+The application provides detailed startup logs showing:
+- Number of configured hosts loaded
+- Host connection details
+- Scheduler status and configuration
+- Service startup confirmation
+
+## 🏗️ Technical Architecture
+
+### Backend (Flask)
+- **Framework**: Flask with APScheduler for background tasks
+- **APIs**: RESTful endpoints for log access, search, and host management
+- **Streaming**: Server-Sent Events (SSE) for real-time progress updates
+- **Concurrency**: ThreadPoolExecutor for parallel host operations
+- **Security**: SSH key-based authentication with minimal sudo permissions
+
+### Frontend (Vanilla JavaScript)
+- **UI Framework**: Tailwind CSS for responsive design
+- **Real-time Updates**: EventSource API for SSE communication
+- **State Management**: Local storage for credentials and preferences
+- **Progressive Enhancement**: Graceful degradation for network issues
+
+### Data Flow
+1. **Host Configuration**: JSON-based host storage with validation
+2. **Log Discovery**: Parallel scanning across configured hosts
+3. **Search Processing**: Distributed grep operations with result aggregation
+4. **AI Analysis**: OpenAI API integration with Discord webhook notifications
+5. **Scheduling**: APScheduler for automated monitoring tasks
+
+## 📝 Recent Updates
+
+### v2.1.0 - Advanced Search & Multi-Host Enhancements
+- ✨ **Global Search**: Search across all logs from all hosts simultaneously
+- 🎯 **Scoped Search**: Target specific logs or journal units
+- 🔍 **Search Highlighting**: Visual highlighting of search terms in results
+- 📊 **Progress Tracking**: Real-time progress for all operations
+- 🔄 **Retry Mechanisms**: Automatic retry for failed host connections
+- 🐛 **Bug Fixes**: Resolved const redeclaration issues and improved error handling
+- 🎨 **UI Improvements**: Enhanced visual feedback and user experience
+
+### v2.0.0 - Multi-Host Architecture
+- 🌐 **Multi-Host Support**: Manage multiple remote servers from single interface
+- 🔒 **SSH Integration**: Secure passwordless authentication
+- ⚡ **Concurrent Processing**: Parallel operations across hosts
+- 📈 **Streaming Updates**: Real-time progress with Server-Sent Events
+- 🤖 **Cross-Host AI Monitoring**: Schedule analysis across multiple servers
+
+### v1.0.0 - Initial Release
+- 📄 **Log Viewing**: Basic syslog and journal viewing
+- 🤖 **AI Analysis**: OpenAI-powered log analysis
+- 🔔 **Discord Alerts**: Webhook notifications
+- 📅 **Scheduling**: Automated monitoring capabilities
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read our contributing guidelines and submit pull requests for any improvements.
+
+### Development Setup
+```bash
+# Clone repository
+git clone <your-repo-url>
+cd ailog
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run development server
+python3 app.py
+```
+
+### Testing
+- Test with multiple host configurations
+- Verify SSH key authentication
+- Check sudo permissions on target hosts
+- Test search functionality across different log types
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## ⚠️ Disclaimer
+
+**Security Notice**: This application is intended for use in trusted, internal networks only. It requires elevated permissions and SSH access to monitored systems. Ensure proper network isolation and access controls are in place.
+
+**AI Analysis**: AI-powered analysis requires an OpenAI API key and usage may incur costs based on your OpenAI plan.
+
+## 📞 Support
+
+For issues, feature requests, or questions:
+1. Check the troubleshooting section above
+2. Review application logs for detailed error information
+3. Open an issue on the project repository
+4. Include system information and error logs for faster resolution
