@@ -1707,13 +1707,16 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
         // Update search scope when log is selected
         const originalLoadLogContent = loadLogContent;
-        loadLogContent = async (logName, logType, hostId, hostName) => {
+        const enhancedLoadLogContent = async (logName, logType, hostId, hostName) => {
             await originalLoadLogContent(logName, logType, hostId, hostName);
             // Update current log info for search
             currentLogName = logName;
             currentLogType = logType;
             currentHostId = hostId;
         };
+        
+        // Replace the original function
+        window.loadLogContent = enhancedLoadLogContent;
 
         // --- INITIALIZATION ---
         apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
