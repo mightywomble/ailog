@@ -588,12 +588,16 @@
 
         // --- HOST CARD FUNCTIONS ---
         const populateHostCards = async () => {
+            console.log('[DEBUG] Starting populateHostCards()');
             try {
+                console.log('[DEBUG] Fetching hosts from /hosts endpoint...');
                 const hostsData = await fetchApi('/hosts');
+                console.log('[DEBUG] Received hosts data:', hostsData);
                 hosts = hostsData;
                 hostListContainer.innerHTML = '';
                 
                 // Add localhost card
+                console.log('[DEBUG] Creating localhost card...');
                 const localhostCard = createHostCard('local', {
                     friendly_name: 'Localhost',
                     ip: 'localhost',
@@ -603,14 +607,19 @@
                 hostListContainer.appendChild(localhostCard);
                 
                 // Add remote host cards
+                console.log(`[DEBUG] Creating ${Object.keys(hosts).length} remote host cards...`);
                 for (const [id, host] of Object.entries(hosts)) {
+                    console.log(`[DEBUG] Creating card for host: ${host.friendly_name} (${id})`);
                     const hostCard = createHostCard(id, host);
                     hostListContainer.appendChild(hostCard);
                 }
                 
                 // Select localhost by default
+                console.log('[DEBUG] Selecting localhost by default...');
                 selectHost('local');
+                console.log('[DEBUG] populateHostCards() completed successfully');
             } catch (error) {
+                console.error('[DEBUG] Error in populateHostCards():', error);
                 hostListContainer.innerHTML = '<div class="p-4 text-red-400">Failed to load hosts.</div>';
             }
         };

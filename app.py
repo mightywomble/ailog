@@ -766,7 +766,10 @@ def get_journal_content(unit):
 # --- HOST MANAGEMENT ROUTES ---
 @app.route('/hosts', methods=['GET'])
 def get_hosts():
-    return jsonify(load_hosts())
+    print("[DEBUG] /hosts endpoint called")
+    hosts_data = load_hosts()
+    print(f"[DEBUG] Returning hosts data: {hosts_data}")
+    return jsonify(hosts_data)
 
 @app.route('/hosts/add', methods=['POST'])
 def add_host():
@@ -944,8 +947,41 @@ def startup_scheduler():
         interval = config.get('interval', 1)
         scheduler.add_job(perform_scheduled_analysis, 'interval', hours=interval, id='scheduled_analysis', replace_existing=True)
 
+# --- STARTUP INITIALIZATION ---
+def initialize_app():
+    """Initialize application components on startup"""
+    print("=== AI Log Viewer Startup ===")
+    
+    # Load and display host configuration
+    hosts = load_hosts()
+    if hosts:
+        print(f"Loaded {len(hosts)} configured hosts:")
+        for host_id, host_data in hosts.items():
+            print(f"  - {host_data.get('friendly_name', 'Unnamed')} ({host_data.get('user')}@{host_data.get('ip')})")
+    else:
+        print("No hosts configured - only localhost will be available")
+    
+    # Load scheduler configuration
+    config = load_config()
+    if config.get('is_running'):
+        print(f"Scheduler was previously running - will restart with {config.get('interval', 1)} hour interval")
+        scheduled_sources = config.get('sources', [])
+        if scheduled_sources:
+            print(f"Monitoring {len(scheduled_sources)} log sources for analysis")
+    else:
+        print("Scheduler is not configured to run")
+    
+    print(f"Starting web server on http://0.0.0.0:5001")
+    print("============================")
+
 if __name__ == '__main__':
+    # Initialize application
+    initialize_app()
+    
+    # Start scheduler
     scheduler.start()
     startup_scheduler()
     atexit.register(lambda: scheduler.shutdown())
+    
+    # Start Flask app
     app.run(host='0.0.0.0', port=5001, debug=False)
