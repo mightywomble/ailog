@@ -49,60 +49,35 @@
 </head>
 <body class="bg-gradient-to-br from-indigo-100 via-purple-50 to-teal-100 text-gray-800 font-sans antialiased min-h-screen">
 
-    <header class="glass-container fade-in">
-        <div class="flex items-center justify-between flex-wrap gap-4">
-            <div class="flex items-center space-x-4">
-                <div class="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center shadow-lg">
-                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                    </svg>
-                </div>
-                <div>
-                    <h1 class="app-title">AI Log Viewer</h1>
-                    <p class="text-sm text-secondary opacity-80">Multi-Host Log Analysis Platform</p>
-                </div>
-            </div>
-            <div class="flex items-center space-x-4">
-                <div class="flex items-center space-x-2 px-4 py-2 glass-subtle rounded-full">
-                    <div class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
-                    <span class="text-xs font-medium text-secondary">System Active</span>
-                </div>
-                <button id="settings-btn" class="button hover-lift">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    Settings
-                </button>
-            </div>
+    <header class="glass-container mx-4 mt-4 p-4 shadow-lg flex items-center justify-between flex-wrap gap-2">
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">AI Log Viewer</h1>
+        <div class="flex items-center space-x-4">
+            <button id="settings-btn" class="button text-sm px-4 py-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                Settings
+            </button>
+            <div id="sudo-mode-indicator" class="bg-red-100/80 border border-red-300 text-red-800 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">SUDO MODE ENABLED</div>
         </div>
     </header>
 
     <!-- Search Bar -->
-    <div class="search-container glass-strong slide-up">
-        <div class="flex items-center space-x-6">
-            <div class="flex-1 relative">
-                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <svg class="h-5 w-5 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                </div>
+    <div class="glass-container mx-4 mt-4 p-4 shadow-lg">
+        <div class="flex items-center space-x-4">
+            <div class="flex-1">
                 <input type="text" id="search-input" 
-                    class="search-input pl-12 w-full" 
-                    placeholder="🔍 Search across all hosts and logs...">
+                    class="w-full bg-white/80 border border-gray-300 rounded-lg px-4 py-2 placeholder-gray-500 focus:outline-none focus:border-indigo-500" 
+                    placeholder="Search logs for keywords or phrases...">
             </div>
-            <div class="flex items-center space-x-4">
-                <div class="glass-subtle px-4 py-2 rounded-full">
-                    <label class="flex items-center text-sm font-medium cursor-pointer">
-                        <input type="checkbox" id="case-sensitive-checkbox" class="mr-3 w-4 h-4 rounded">
-                        <span class="text-secondary">Case Sensitive</span>
-                    </label>
-                </div>
-                <select id="search-scope" class="form-control min-w-48">
-                    <option value="all">🌐 All Hosts & Logs</option>
-                    <option value="selected">📄 Current Log Only</option>
+            <div class="flex items-center space-x-2">
+                <label class="flex items-center text-sm text-gray-700">
+                    <input type="checkbox" id="case-sensitive-checkbox" class="mr-2">
+                    Case sensitive
+                </label>
+                <select id="search-scope" class="bg-white/80 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <option value="all">All logs</option>
+                    <option value="selected">Selected log only</option>
                 </select>
-                <button id="search-btn" class="button-primary hover-lift disabled:opacity-50 disabled:cursor-not-allowed">
+                <button id="search-btn" class="button px-6 py-2 disabled:opacity-50 disabled:cursor-not-allowed">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
@@ -112,141 +87,88 @@
         </div>
         
         <!-- Search Results -->
-        <div id="search-results-container" class="hidden mt-6">
-            <div class="glass-subtle rounded-2xl p-6">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center space-x-3">
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-blue-500 flex items-center justify-center">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <h3 class="text-xl font-bold text-gradient">Search Results</h3>
-                    </div>
-                    <button id="close-search-results" class="button hover-lift p-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-                <div id="search-results-list" class="search-results space-y-2">
-                    <!-- Search results will be populated here -->
-                </div>
+        <div id="search-results-container" class="hidden mt-4">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-lg font-semibold text-gray-800">Search Results</h3>
+                <button id="close-search-results" class="text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div id="search-results-list" class="max-h-96 overflow-y-auto space-y-2">
+                <!-- Search results will be populated here -->
             </div>
         </div>
     </div>
 
-    <!-- Progress bar for journald services -->
-    <div id="top-progress-container" class="progress-container glass-strong mx-4 hidden scale-in">
-        <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center space-x-3">
-                <div class="loading-spinner w-5 h-5"></div>
-                <p id="top-progress-message" class="text-sm font-medium text-primary">Fetching journald services...</p>
-            </div>
-            <span class="text-xs font-mono text-secondary bg-white bg-opacity-10 px-2 py-1 rounded-full">Loading...</span>
-        </div>
-        <div class="progress-bar">
-            <div id="top-progress-bar" class="progress-fill" style="width: 0%"></div>
+    <!-- Progress bar for journald services (10% height) -->
+    <div id="top-progress-container" class="h-10 glass-container mx-4 p-2 flex items-center justify-between hidden">
+        <p id="top-progress-message" class="text-xs text-gray-600 truncate">Fetching journald services...</p>
+        <div class="w-full bg-gray-300 rounded-full h-2 mx-4">
+            <div id="top-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
         </div>
     </div>
 
     <div class="flex flex-1 overflow-hidden m-4 gap-4" style="height: calc(100vh - 160px);">
         <!-- Host List Sidebar -->
-        <aside class="w-1/4 glass-container p-6 flex flex-col fade-in">
-            <div class="flex items-center justify-between mb-6">
-                <div class="flex items-center space-x-3">
-                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h6l2 2h6a2 2 0 012 2v4a2 2 0 01-2 2H5z"></path>
-                        </svg>
-                    </div>
-                    <h2 class="text-xl font-bold text-gradient">Host Servers</h2>
-                </div>
-                <div class="text-xs font-mono text-secondary bg-white bg-opacity-10 px-2 py-1 rounded-full" id="host-counter">0 hosts</div>
+        <aside class="w-1/4 glass-container p-4 flex flex-col">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-800">Hosts</h2>
             </div>
-            <div id="host-list-container" class="flex-1 overflow-y-auto space-y-3 pr-2">
+            <div id="host-list-container" class="flex-1 overflow-y-auto space-y-2">
                 <!-- Host cards will be populated here -->
             </div>
-            <div id="progress-container" class="mt-6 hidden">
-                <div class="progress-container">
-                    <div class="flex items-center justify-between mb-2">
-                        <p id="progress-message" class="text-sm font-medium text-primary">Loading...</p>
-                        <span class="text-xs text-secondary">Processing...</span>
-                    </div>
-                    <div class="progress-bar">
-                        <div id="progress-bar" class="progress-fill" style="width: 0%"></div>
-                    </div>
-                    <div id="progress-logs" class="mt-3 max-h-32 overflow-y-auto space-y-1 text-xs font-mono text-secondary bg-black bg-opacity-20 rounded-lg p-2"></div>
+            <div id="progress-container" class="mt-4 hidden">
+                <p id="progress-message" class="text-xs text-gray-600 mb-1 truncate">Loading...</p>
+                <div class="w-full bg-gray-300 rounded-full h-2 mb-2">
+                    <div id="progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
                 </div>
+                <div id="progress-logs" class="max-h-32 overflow-y-auto space-y-1 text-xs font-mono text-gray-600"></div>
             </div>
         </aside>
 
         <!-- Log Files and Content Area -->
-        <div class="flex-1 flex flex-col gap-6" style="height: 100%;">
+        <div class="flex-1 flex flex-col gap-4" style="height: 100%;">
             <!-- Log Files List (Top 40%) -->
-            <div class="glass-container p-6 flex flex-col slide-up" style="height: 40%; min-height: 200px;">
-                <div class="flex justify-between items-center mb-6">
-                    <div class="flex items-center space-x-3">
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17h6l-3-3 3-3H9l3 3-3 3z"></path>
-                            </svg>
-                        </div>
-                        <h2 id="log-table-title" class="text-xl font-bold text-gradient">Select a host to view logs</h2>
-                    </div>
+            <div class="glass-container p-4 flex flex-col" style="height: 40%; min-height: 200px;">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="log-table-title" class="text-lg font-semibold text-gray-800">Select a host to view logs</h2>
                 </div>
                 
                 <!-- Progress bar for log loading -->
                 <div id="log-progress-container" class="mb-4 hidden">
-                    <div class="progress-container">
-                        <div class="flex items-center justify-between mb-2">
-                            <p id="log-progress-message" class="text-sm font-medium text-primary">Loading...</p>
-                            <span class="text-xs text-secondary">Processing...</span>
-                        </div>
-                        <div class="progress-bar">
-                            <div id="log-progress-bar" class="progress-fill" style="width: 0%"></div>
-                        </div>
+                    <p id="log-progress-message" class="text-xs text-gray-600 mb-1 truncate">Loading...</p>
+                    <div class="w-full bg-gray-300 rounded-full h-2 mb-2">
+                        <div id="log-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
                     </div>
                 </div>
                 
-                <div id="log-table-container" class="flex-1 overflow-auto pr-2">
-                    <div class="text-center text-muted mt-16">
-                        <div class="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                        </div>
-                        <p class="text-lg font-medium">🏠 Click on a host to see available logs</p>
-                        <p class="text-sm opacity-70 mt-2">Browse through your connected servers to view log files</p>
+                <div id="log-table-container" class="flex-1 overflow-auto">
+                    <div class="text-center text-gray-500 mt-16">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p class="text-lg">Click on a host to see available logs</p>
                     </div>
                 </div>
             </div>
             
             <!-- Log Content Area (Bottom 50%) -->
-            <div class="glass-container p-6 flex flex-col slide-up" style="height: 50%; min-height: 250px;">
-                <div class="flex justify-between items-center mb-6">
+            <div class="glass-container p-4 flex flex-col" style="height: 50%; min-height: 250px;">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="log-content-title" class="text-lg font-semibold text-gray-800">Log Content</h2>
                     <div class="flex items-center space-x-3">
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-teal-500 flex items-center justify-center">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                            </svg>
-                        </div>
-                        <h2 id="log-content-title" class="text-xl font-bold text-gradient">Log Content</h2>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <span id="truncation-warning" class="hidden text-xs font-semibold px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 border border-yellow-300">⚠️ Log will be truncated for analysis</span>
-                        <button id="ai-analyse-btn" class="hidden button-primary hover-lift">✨ AI Analyse</button>
+                        <span id="truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
+                        <button id="ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
                     </div>
                 </div>
-                <div id="log-content-container" class="flex-1 overflow-auto log-content rounded-2xl">
-                    <div class="text-center text-muted mt-16">
-                        <div class="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-green-100 to-teal-100 flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                        </div>
-                        <p class="text-lg font-medium">📄 Select a log file to view its content</p>
-                        <p class="text-sm opacity-70 mt-2">Choose from the available logs in the panel above</p>
+                <div id="log-content-container" class="flex-1 overflow-auto bg-gray-100 p-4 rounded-lg border">
+                    <div class="text-center text-gray-500 mt-16">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p class="text-lg">Select a log file to view its content</p>
                     </div>
                 </div>
             </div>
@@ -254,22 +176,13 @@
     </div>
 
 <!-- AI Analysis Modal -->
-    <div id="ai-analysis-modal" class="hidden fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div class="glass-strong w-full max-w-4xl max-h-[90vh] p-8 scale-in">
-            <div class="flex justify-between items-center mb-6">
-                <div class="flex items-center space-x-4">
-                    <div class="w-10 h-10 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
-                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
-                        </svg>
-                    </div>
-                    <h2 class="text-2xl font-bold text-gradient">🤖 AI Analysis Results</h2>
-                </div>
-                <button id="close-ai-modal-btn" class="button hover-lift p-3 text-xl">&times;</button>
+    <div id="ai-analysis-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="glass-container w-full max-w-3xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-200">AI Analysis Result</h2>
+                <button id="close-ai-modal-btn" class="text-gray-400 hover:text-gray-200 text-2xl leading-none">&times;</button>
             </div>
-            <div class="glass-subtle rounded-2xl p-6">
-                <div id="ai-analysis-content" class="overflow-auto text-primary leading-relaxed" style="max-height: 60vh"></div>
-            </div>
+            <div id="ai-analysis-content" class="overflow-auto text-gray-300" style="max-height: 70vh"></div>
         </div>
     </div>
 
@@ -293,69 +206,40 @@
     </div>
 
     <!-- Settings Modal -->
-    <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div class="glass-strong w-full max-w-6xl max-h-[90vh] overflow-y-auto p-8 scale-in">
-            <div class="flex justify-between items-center mb-8">
-                <div class="flex items-center space-x-4">
-                    <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                        </svg>
-                    </div>
-                    <h3 class="text-3xl font-bold text-gradient">⚙️ System Configuration</h3>
-                </div>
-                <button id="close-settings-btn" class="button hover-lift p-3 text-xl">&times;</button>
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+<div class="glass-container p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+<h3 class="text-xl font-semibold text-gray-800">Settings</h3>
+<button id="close-settings-btn" class="text-gray-600 hover:text-gray-800 text-2xl leading-none">&times;</button>
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- Credentials Column -->
-                <div class="space-y-6 glass-subtle p-6 rounded-2xl">
-                    <div class="flex items-center space-x-3 border-b border-white border-opacity-20 pb-4">
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-yellow-400 to-orange-500 flex items-center justify-center">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
-                            </svg>
-                        </div>
-                        <h4 class="text-xl font-bold text-gradient">🔐 API Credentials</h4>
+                <div class="space-y-6 glass-container p-4">
+                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Credentials</h4>
+                    <div>
+                        <label for="api-key-input" class="block text-sm font-medium text-gray-700 mb-1">OpenAI API Key</label>
+                        <input type="password" id="api-key-input" class="w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="sk-...">
                     </div>
-                    <div class="space-y-2">
-                        <label for="api-key-input" class="block text-sm font-bold text-primary mb-2">🔑 OpenAI API Key</label>
-                        <input type="password" id="api-key-input" class="form-control" placeholder="sk-proj-...">
-                    </div>
-                    <div class="space-y-2">
-                        <label for="discord-webhook-input" class="block text-sm font-bold text-primary mb-2">💬 Discord Webhook URL</label>
-                        <div class="flex space-x-3">
-                            <input type="password" id="discord-webhook-input" class="form-control flex-grow" placeholder="https://discord.com/api/webhooks/...">
-                            <button id="test-discord-btn" class="button hover-lift px-6 py-2 disabled:opacity-50 disabled:cursor-wait whitespace-nowrap">Test</button>
+                    <div>
+                        <label for="discord-webhook-input" class="block text-sm font-medium text-gray-700 mb-1">Discord Webhook URL</label>
+                        <div class="flex space-x-2">
+                            <input type="password" id="discord-webhook-input" class="flex-grow w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2" placeholder="https://discord.com/api/webhooks/...">
+                            <button id="test-discord-btn" class="button px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-wait">Test</button>
                         </div>
                     </div>
                 </div>
                 <!-- Hosts Column -->
-                <div class="space-y-6 glass-subtle p-6 rounded-2xl flex flex-col">
-                    <div class="flex justify-between items-center border-b border-white border-opacity-20 pb-4">
-                        <div class="flex items-center space-x-3">
-                            <div class="w-8 h-8 rounded-full bg-gradient-to-r from-blue-400 to-cyan-500 flex items-center justify-center">
-                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h6l2 2h6a2 2 0 012 2v4a2 2 0 01-2 2H5z"></path>
-                                </svg>
-                            </div>
-                            <h4 class="text-xl font-bold text-gradient">🖥️ Remote Hosts</h4>
-                        </div>
-                        <button id="add-new-host-btn" class="button-primary hover-lift px-4 py-2">+ Add New</button>
+                <div class="space-y-4 glass-container p-4 flex flex-col">
+                    <div class="flex justify-between items-center border-b border-gray-300 pb-2">
+                         <h4 class="font-semibold text-lg text-gray-800">Remote Hosts</h4>
+                         <button id="add-new-host-btn" class="button px-3 py-1 text-sm">Add New</button>
                     </div>
                     <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
                 </div>
                 <!-- Scheduler Column -->
-                <div class="space-y-6 glass-subtle p-6 rounded-2xl flex flex-col">
-                    <div class="flex items-center space-x-3 border-b border-white border-opacity-20 pb-4">
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-pink-500 flex items-center justify-center">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <h4 class="text-xl font-bold text-gradient">⏰ Scheduled Analysis</h4>
-                    </div>
-                    <p class="text-sm text-secondary font-medium px-3 py-2 glass-subtle rounded-lg">💡 Automated monitoring across all configured hosts</p>
+                <div class="space-y-4 glass-container p-4 flex flex-col">
+                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Scheduled Analysis</h4>
+                    <p class="text-xs text-black font-bold">Scheduled analysis can now run on any configured host.</p>
                     <div id="scheduler-status" class="text-sm text-gray-600 p-2 rounded-md bg-white/80">Loading status...</div>
                     <div class="flex-grow">
                         <button id="select-logs-btn" class="button w-full mb-4 px-4 py-2 text-sm">Select Logs for Schedule...</button>
