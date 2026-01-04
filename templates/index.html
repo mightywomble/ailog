@@ -1,0 +1,1766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Log Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'sans': ['Inter', 'system-ui', 'sans-serif'],
+                        'mono': ['JetBrains Mono', 'Monaco', 'monospace']
+                    },
+                    colors: {
+                        'primary': {
+                            50: '#f0f9ff',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.5s ease-in-out',
+                        'slide-up': 'slideUp 0.3s ease-out',
+                        'pulse-slow': 'pulse 3s infinite',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(10px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gradient-to-br from-indigo-100 via-purple-50 to-teal-100 text-gray-800 font-sans antialiased min-h-screen">
+
+    <header class="glass-container mx-4 mt-4 p-4 shadow-lg flex items-center justify-between flex-wrap gap-2">
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">AI Log Viewer</h1>
+        <div class="flex items-center space-x-4">
+            <button id="settings-btn" class="button text-sm px-4 py-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                Settings
+            </button>
+            <div id="sudo-mode-indicator" class="bg-red-100/80 border border-red-300 text-red-800 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">SUDO MODE ENABLED</div>
+        </div>
+    </header>
+
+    <!-- Search Bar -->
+    <div class="glass-container mx-4 mt-4 p-4 shadow-lg">
+        <div class="flex items-center space-x-4">
+            <div class="flex-1">
+                <input type="text" id="search-input" 
+                    class="w-full bg-white/80 border border-gray-300 rounded-lg px-4 py-2 placeholder-gray-500 focus:outline-none focus:border-indigo-500" 
+                    placeholder="Search logs for keywords or phrases...">
+            </div>
+            <div class="flex items-center space-x-2">
+                <label class="flex items-center text-sm text-gray-700">
+                    <input type="checkbox" id="case-sensitive-checkbox" class="mr-2">
+                    Case sensitive
+                </label>
+                <select id="search-scope" class="bg-white/80 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <option value="all">All logs</option>
+                    <option value="selected">Selected log only</option>
+                </select>
+                <button id="search-btn" class="button px-6 py-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    Search
+                </button>
+            </div>
+        </div>
+        
+        <!-- Search Results -->
+        <div id="search-results-container" class="hidden mt-4">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-lg font-semibold text-gray-800">Search Results</h3>
+                <button id="close-search-results" class="text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div id="search-results-list" class="max-h-96 overflow-y-auto space-y-2">
+                <!-- Search results will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress bar for journald services (10% height) -->
+    <div id="top-progress-container" class="h-10 glass-container mx-4 p-2 flex items-center justify-between hidden">
+        <p id="top-progress-message" class="text-xs text-gray-600 truncate">Fetching journald services...</p>
+        <div class="w-full bg-gray-300 rounded-full h-2 mx-4">
+            <div id="top-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden m-4 gap-4" style="height: calc(100vh - 160px);">
+        <!-- Host List Sidebar -->
+        <aside class="w-1/4 glass-container p-4 flex flex-col">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-800">Hosts</h2>
+            </div>
+            <div id="host-list-container" class="flex-1 overflow-y-auto space-y-2">
+                <!-- Host cards will be populated here -->
+            </div>
+            <div id="progress-container" class="mt-4 hidden">
+                <p id="progress-message" class="text-xs text-gray-600 mb-1 truncate">Loading...</p>
+                <div class="w-full bg-gray-300 rounded-full h-2 mb-2">
+                    <div id="progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div id="progress-logs" class="max-h-32 overflow-y-auto space-y-1 text-xs font-mono text-gray-600"></div>
+            </div>
+        </aside>
+
+        <!-- Log Files and Content Area -->
+        <div class="flex-1 flex flex-col gap-4" style="height: 100%;">
+            <!-- Log Files List (Top 40%) -->
+            <div class="glass-container p-4 flex flex-col" style="height: 40%; min-height: 200px;">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="log-table-title" class="text-lg font-semibold text-gray-800">Select a host to view logs</h2>
+                    <div class="flex items-center space-x-2">
+                        <label class="flex items-center text-sm text-gray-700">
+                            <input type="checkbox" id="show-empty-logs" class="mr-2" checked>
+                            Show 0-byte logs
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Progress bar for log loading -->
+                <div id="log-progress-container" class="mb-4 hidden">
+                    <p id="log-progress-message" class="text-xs text-gray-600 mb-1 truncate">Loading...</p>
+                    <div class="w-full bg-gray-300 rounded-full h-2 mb-2">
+                        <div id="log-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+                
+                <div id="log-table-container" class="flex-1 overflow-auto">
+                    <div class="text-center text-gray-500 mt-16">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p class="text-lg">Click on a host to see available logs</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Log Content Area (Bottom 50%) -->
+            <div class="glass-container p-4 flex flex-col" style="height: 50%; min-height: 250px;">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="log-content-title" class="text-lg font-semibold text-gray-800">Log Content</h2>
+                    <div class="flex items-center space-x-3">
+                        <span id="truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
+                        <button id="ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
+                    </div>
+                </div>
+                <div id="log-content-container" class="flex-1 overflow-auto bg-gray-100 p-4 rounded-lg border">
+                    <div class="text-center text-gray-500 mt-16">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p class="text-lg">Select a log file to view its content</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<!-- AI Analysis Modal -->
+    <div id="ai-analysis-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="glass-container w-full max-w-3xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-200">AI Analysis Result</h2>
+                <button id="close-ai-modal-btn" class="text-gray-400 hover:text-gray-200 text-2xl leading-none">&times;</button>
+            </div>
+            <div id="ai-analysis-content" class="overflow-auto text-gray-300" style="max-height: 70vh"></div>
+        </div>
+    </div>
+
+<main class="hidden flex-1 flex flex-col bg-gray-900 overflow-auto p-4">
+            <div id="log-view-panel" class="flex-1 flex flex-col overflow-hidden">
+                <div class="p-4 border-b border-gray-700 bg-gray-800/30 flex justify-between items-center">
+                    <h2 id="log-title" class="text-lg font-semibold text-gray-400 truncate">Select a log source</h2>
+                    <div class="flex items-center space-x-3">
+                        <span id="truncation-warning" class="hidden text-xs text-yellow-400 font-semibold">Log will be truncated for analysis</span>
+                        <button id="ai-analyse-btn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">AI Analyse</button>
+                    </div>
+                </div>
+                <div id="log-content-wrapper" class="flex-1 p-4 overflow-auto bg-black/20"><pre><code id="log-content" class="text-sm text-gray-300">Log content will appear here...</code></pre></div>
+            </div>
+            <div id="resize-handle" class="w-full h-2 bg-gray-700 hover:bg-indigo-500 transition-colors duration-200 hidden"></div>
+            <div id="ai-view-panel" class="hidden flex-1 flex-col overflow-hidden">
+                <div class="p-4 border-b border-gray-700 bg-gray-800/30"><h2 class="text-lg font-semibold text-green-400">AI Analysis</h2></div>
+                <div id="ai-content-wrapper" class="flex-1 p-4 overflow-auto prose prose-invert max-w-none"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+<div class="glass-container p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+<h3 class="text-xl font-semibold text-gray-800">Settings</h3>
+<button id="close-settings-btn" class="text-gray-600 hover:text-gray-800 text-2xl leading-none">&times;</button>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Credentials Column -->
+                <div class="space-y-6 glass-container p-4">
+                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Credentials</h4>
+                    <div>
+                        <label for="api-key-input" class="block text-sm font-medium text-gray-700 mb-1">OpenAI API Key</label>
+                        <input type="password" id="api-key-input" class="w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="sk-...">
+                    </div>
+                    <div>
+                        <label for="discord-webhook-input" class="block text-sm font-medium text-gray-700 mb-1">Discord Webhook URL</label>
+                        <div class="flex space-x-2">
+                            <input type="password" id="discord-webhook-input" class="flex-grow w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2" placeholder="https://discord.com/api/webhooks/...">
+                            <button id="test-discord-btn" class="button px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-wait">Test</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Hosts Column -->
+                <div class="space-y-4 glass-container p-4 flex flex-col">
+                    <div class="flex justify-between items-center border-b border-gray-300 pb-2">
+                         <h4 class="font-semibold text-lg text-gray-800">Remote Hosts</h4>
+                         <button id="add-new-host-btn" class="button px-3 py-1 text-sm">Add New</button>
+                    </div>
+                    <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                </div>
+                <!-- Scheduler Column -->
+                <div class="space-y-4 glass-container p-4 flex flex-col">
+                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Scheduled Analysis</h4>
+                    <p class="text-xs text-black font-bold">Scheduled analysis can now run on any configured host.</p>
+                    <div id="scheduler-status" class="text-sm text-gray-600 p-2 rounded-md bg-white/80">Loading status...</div>
+                    <div class="flex-grow">
+                        <button id="select-logs-btn" class="button w-full mb-4 px-4 py-2 text-sm">Select Logs for Schedule...</button>
+                        <span id="selected-log-count" class="text-sm text-black font-bold block text-center">0 logs selected</span>
+                    </div>
+                    <div>
+                        <label for="schedule-interval-input" class="block text-sm font-medium text-gray-700 mb-1">Run every (hours)</label>
+                        <input type="number" id="schedule-interval-input" class="w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2" min="1" max="100" value="12">
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 pt-2">
+                         <button id="start-schedule-btn" class="button px-4 py-2 text-sm">Start</button>
+                         <button id="stop-schedule-btn" class="button px-4 py-2 text-sm">Stop</button>
+                         <button id="run-now-btn" class="button px-4 py-2 text-sm">Run Now</button>
+                    </div>
+                </div>
+            </div>
+             <div class="mt-8 flex justify-end">
+                <button id="save-credentials-btn" class="button px-6 py-2">Save Credentials & Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add/Edit Host Modal -->
+    <div id="host-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-white/80 backdrop-blur-lg rounded-lg shadow-xl p-6 w-full max-w-lg">
+             <h3 id="host-modal-title" class="text-xl font-semibold mb-6 text-black">Add New Host</h3>
+             <form id="host-form" class="space-y-4">
+                 <input type="hidden" id="host-id-input">
+                 <div>
+                     <label for="host-friendly-name-input" class="block text-sm font-medium text-black">Friendly Name</label>
+                     <input type="text" id="host-friendly-name-input" class="mt-1 w-full bg-white/80 border border-gray-300 rounded px-3 py-2" required>
+                 </div>
+                 <div>
+                     <label for="host-ip-input" class="block text-sm font-medium text-black">IP Address or Hostname</label>
+                     <input type="text" id="host-ip-input" class="mt-1 w-full bg-white/80 border border-gray-300 rounded px-3 py-2" required>
+                 </div>
+                 <div>
+                     <label for="host-user-input" class="block text-sm font-medium text-black">SSH User</label>
+                     <input type="text" id="host-user-input" class="mt-1 w-full bg-white/80 border border-gray-300 rounded px-3 py-2" required>
+                 </div>
+                 <div>
+                     <label for="host-description-input" class="block text-sm font-medium text-black">Description</label>
+                     <textarea id="host-description-input" rows="2" class="mt-1 w-full bg-white/80 border border-gray-300 rounded px-3 py-2"></textarea>
+                 </div>
+                 
+                 <div id="host-test-status" class="text-sm p-2 rounded-md hidden"></div>
+
+                 <div class="flex justify-between items-center pt-4">
+                    <button type="button" id="host-modal-cancel-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500">Cancel</button>
+                    <div id="host-form-actions" class="flex items-center space-x-2">
+                        <button type="button" id="host-test-btn" class="px-4 py-2 rounded-md bg-yellow-500 hover:bg-yellow-400 text-black">Test Connection</button>
+                        <button type="submit" id="host-save-btn" class="px-4 py-2 rounded-md bg-green-600 hover:bg-green-500 hidden">Save Host</button>
+                    </div>
+                 </div>
+             </form>
+        </div>
+    </div>
+
+    <div id="log-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-6xl h-5/6 flex flex-col">
+            <h3 id="log-selection-title" class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
+            
+            <!-- Progress Section -->
+            <div id="log-selection-progress" class="mb-4 hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-300">Loading logs from hosts...</span>
+                    <span id="log-selection-progress-percent" class="text-sm text-gray-400">0%</span>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
+                    <div id="log-selection-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div id="log-selection-progress-details" class="max-h-20 overflow-y-auto bg-gray-900 rounded-md p-2 text-xs font-mono text-gray-400">
+                    <div>Starting host scan...</div>
+                </div>
+            </div>
+            
+            <div id="log-selection-list" class="flex-grow overflow-hidden border border-gray-700 rounded-md">
+                <!-- Content will be populated here -->
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button id="cancel-log-selection-btn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
+                <button id="save-log-selection-btn" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Confirm Selections</button>
+            </div>
+        </div>
+    </div>
+    <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg"></div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- ELEMENT SELECTORS ---
+        const sourceListContainer = document.getElementById('log-table-container');
+        const logTitle = document.getElementById('log-title');
+        const logContent = document.getElementById('log-content');
+        const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
+        const truncationWarning = document.getElementById('truncation-warning');
+        // Removed non-existent elements: searchBox, sortControls, filterControls
+        const aiContentWrapper = document.getElementById('ai-content-wrapper');
+        const aiViewPanel = document.getElementById('ai-view-panel');
+        const resizeHandle = document.getElementById('resize-handle');
+        const logViewPanel = document.getElementById('log-view-panel');
+        
+        const hostListContainer = document.getElementById('host-list-container');
+        const settingsBtn = document.getElementById('settings-btn');
+        const closeSettingsBtn = document.getElementById('close-settings-btn');
+        const settingsModal = document.getElementById('settings-modal');
+        const hostListDiv = document.getElementById('host-list');
+        const addNewHostBtn = document.getElementById('add-new-host-btn');
+        
+        const hostModal = document.getElementById('host-modal');
+        const hostModalTitle = document.getElementById('host-modal-title');
+        const hostForm = document.getElementById('host-form');
+        const hostIdInput = document.getElementById('host-id-input');
+        const hostFriendlyNameInput = document.getElementById('host-friendly-name-input');
+        const hostIpInput = document.getElementById('host-ip-input');
+        const hostUserInput = document.getElementById('host-user-input');
+        const hostDescriptionInput = document.getElementById('host-description-input');
+        const hostTestStatus = document.getElementById('host-test-status');
+        const hostTestBtn = document.getElementById('host-test-btn');
+        const hostSaveBtn = document.getElementById('host-save-btn');
+        const hostModalCancelBtn = document.getElementById('host-modal-cancel-btn');
+        
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressMessage = document.getElementById('progress-message');
+        const progressLogs = document.getElementById('progress-logs');
+        const journalLoadingIndicator = document.getElementById('journal-loading-indicator');
+        
+        const apiKeyInput = document.getElementById('api-key-input');
+        const discordWebhookInput = document.getElementById('discord-webhook-input');
+        const testDiscordBtn = document.getElementById('test-discord-btn');
+        const saveCredentialsBtn = document.getElementById('save-credentials-btn');
+        
+        const schedulerStatusDiv = document.getElementById('scheduler-status');
+        const scheduleIntervalInput = document.getElementById('schedule-interval-input');
+        const startScheduleBtn = document.getElementById('start-schedule-btn');
+        const stopScheduleBtn = document.getElementById('stop-schedule-btn');
+        const runNowBtn = document.getElementById('run-now-btn');
+        const selectLogsBtn = document.getElementById('select-logs-btn');
+        const selectedLogCountSpan = document.getElementById('selected-log-count');
+
+        const logSelectionModal = document.getElementById('log-selection-modal');
+        const logSelectionTitle = document.getElementById('log-selection-title');
+        const logSelectionList = document.getElementById('log-selection-list');
+        const logSelectionProgress = document.getElementById('log-selection-progress');
+        const logSelectionProgressBar = document.getElementById('log-selection-progress-bar');
+        const logSelectionProgressPercent = document.getElementById('log-selection-progress-percent');
+        const logSelectionProgressDetails = document.getElementById('log-selection-progress-details');
+        const saveLogSelectionBtn = document.getElementById('save-log-selection-btn');
+        const cancelLogSelectionBtn = document.getElementById('cancel-log-selection-btn');
+        
+        // Removed non-existent view mode buttons: listViewBtn, tableViewBtn
+        
+        const toast = document.getElementById('toast-notification');
+        
+        let currentLogName = "";
+        let currentLogContent = "";
+        let scheduledSources = [];
+        let currentEventSource = null;
+        let currentViewMode = 'list';
+        let tableData = null;
+        let selectedHostId = 'local';
+        let hosts = {};
+        let currentLogType = null;
+        let currentHostId = null;
+
+        // Search elements
+        const searchInput = document.getElementById('search-input');
+        const searchBtn = document.getElementById('search-btn');
+        const caseSensitiveCheckbox = document.getElementById('case-sensitive-checkbox');
+        const searchScope = document.getElementById('search-scope');
+        const searchResultsContainer = document.getElementById('search-results-container');
+        const searchResultsList = document.getElementById('search-results-list');
+        const closeSearchResults = document.getElementById('close-search-results');
+
+        // --- UTILITY FUNCTIONS ---
+        const showToast = (message, type = 'success') => {
+            toast.textContent = message;
+            toast.className = 'fixed bottom-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg';
+            if (type === 'error') toast.classList.add('bg-red-500');
+            else if (type === 'info') toast.classList.add('bg-sky-500');
+            else toast.classList.add('bg-green-500');
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 4000);
+        };
+        
+        const fetchApi = async (endpoint, options = {}) => {
+            // Set default timeout of 60 seconds for API calls
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
+            
+            try {
+                const response = await fetch(endpoint, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({error: 'An unknown server error occurred.'}));
+                    throw new Error(errorData.error);
+                }
+                return response.json();
+            } catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    console.error("Request timed out:", endpoint);
+                    showToast('Request timed out. Please try again.', 'error');
+                    throw new Error('Request timed out');
+                } else {
+                    console.error("API Error:", error);
+                    showToast(error.message, 'error');
+                    throw error;
+                }
+            }
+        };
+        
+        // runSortAndFilter function removed - not needed for current UI
+
+        // --- TABLE VIEW FUNCTIONS ---
+        const fetchTableView = async () => {
+            sourceListContainer.innerHTML = '';
+            logTitle.textContent = 'Loading logs from all hosts...';
+            logContent.textContent = '';
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressMessage.textContent = 'Fetching logs from all hosts...';
+            progressLogs.innerHTML = '';
+
+            try {
+                const data = await fetchApi('/sources/table');
+                tableData = data;
+                renderTableView(data);
+                
+                progressBar.style.width = '100%';
+                progressMessage.textContent = 'Table view loaded!';
+                logTitle.textContent = `Table View - ${data.logs.length} logs across ${data.successful_hosts} hosts`;
+                
+                setTimeout(() => progressContainer.classList.add('hidden'), 1500);
+            } catch (error) {
+                sourceListContainer.innerHTML = `<li class="p-4 text-red-400">Failed to load table view: ${error.message}</li>`;
+                progressContainer.classList.add('hidden');
+            }
+        };
+
+        const renderTableView = (data) => {
+            sourceListContainer.innerHTML = '';
+            
+            if (data.failed_hosts && data.failed_hosts.length > 0) {
+                const warningLi = document.createElement('li');
+                warningLi.className = 'mb-2 p-2 bg-yellow-900/30 border border-yellow-600 rounded text-yellow-200 text-xs';
+                warningLi.innerHTML = `⚠️ ${data.failed_hosts.length} host(s) failed to connect`;
+                sourceListContainer.appendChild(warningLi);
+            }
+            
+            if (data.logs.length === 0) {
+                const noLogsLi = document.createElement('li');
+                noLogsLi.className = 'p-4 text-center text-gray-500';
+                noLogsLi.textContent = 'No logs found on any accessible hosts.';
+                sourceListContainer.appendChild(noLogsLi);
+                return;
+            }
+            
+            data.logs.forEach(log => {
+                const li = document.createElement('li');
+                li.className = 'log-table-item mb-2 bg-gray-700/50 rounded-lg p-3 border border-gray-600';
+                
+                const logHeader = document.createElement('div');
+                logHeader.className = 'flex items-center justify-between mb-2';
+                
+                const logTitle = document.createElement('span');
+                logTitle.className = 'font-medium text-white truncate flex-grow';
+                logTitle.textContent = log.name;
+                
+                const logType = document.createElement('span');
+                logType.className = `text-xs px-2 py-1 rounded ${
+                    log.type === 'file' ? 'bg-blue-600 text-blue-100' : 'bg-purple-600 text-purple-100'
+                }`;
+                logType.textContent = log.type;
+                
+                logHeader.appendChild(logTitle);
+                logHeader.appendChild(logType);
+                
+                const hostsContainer = document.createElement('div');
+                hostsContainer.className = 'flex flex-wrap gap-1';
+                
+                data.hosts.forEach(host => {
+                    const hostBadge = document.createElement('button');
+                    const hasLog = log.hosts[host.host_id];
+                    
+                    if (hasLog) {
+                        hostBadge.className = 'px-2 py-1 text-xs rounded bg-green-600 hover:bg-green-500 text-white transition-colors cursor-pointer';
+                        hostBadge.title = `${hasLog.size_formatted} - ${hasLog.modified_formatted}`;
+                        hostBadge.textContent = host.host_name;
+                        
+                        hostBadge.onclick = () => {
+                            loadLogContent(log.name, log.type, host.host_id, host.host_name);
+                        };
+                    } else {
+                        hostBadge.className = 'px-2 py-1 text-xs rounded bg-gray-600 text-gray-400 cursor-not-allowed';
+                        hostBadge.textContent = host.host_name;
+                        hostBadge.disabled = true;
+                    }
+                    
+                    hostsContainer.appendChild(hostBadge);
+                });
+                
+                li.appendChild(logHeader);
+                li.appendChild(hostsContainer);
+                sourceListContainer.appendChild(li);
+            });
+        };
+
+        const loadLogContent = async (logName, logType, hostId, hostName) => {
+            currentLogName = logName;
+            logTitle.textContent = `Loading: ${logName} from ${hostName}...`;
+            logContent.textContent = 'Fetching log data...';
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+
+            const hostParam = hostId === 'local' ? '' : `?host=${hostId}`;
+            const url = logType === 'file' ? `/log/${encodeURIComponent(logName)}${hostParam}` : `/journal/${encodeURIComponent(logName)}${hostParam}`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+                
+                currentLogContent = data.content;
+                logTitle.textContent = `${logName} on ${hostName}`;
+                logContent.textContent = data.content || 'Log source is empty.';
+                
+                if (localStorage.getItem('openai_api_key') && data.content) {
+                     aiAnalyseBtn.classList.remove('hidden');
+                     if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                }
+            } catch (error) {
+                logTitle.textContent = `Error loading ${logName}`;
+                logContent.textContent = error.message;
+                showToast(error.message, 'error');
+            }
+        };
+
+        // switchViewMode function removed - view mode buttons don't exist in current UI
+
+        // --- HOST CARD FUNCTIONS ---
+        const populateHostCards = async () => {
+            console.log('[DEBUG] Starting populateHostCards()');
+            try {
+                console.log('[DEBUG] Fetching hosts from /hosts endpoint...');
+                const hostsData = await fetchApi('/hosts');
+                console.log('[DEBUG] Received hosts data:', hostsData);
+                hosts = hostsData;
+                hostListContainer.innerHTML = '';
+                
+                // Add localhost card
+                console.log('[DEBUG] Creating localhost card...');
+                const localhostCard = createHostCard('local', {
+                    friendly_name: 'Localhost',
+                    ip: 'localhost',
+                    user: 'local',
+                    description: 'Local machine'
+                });
+                hostListContainer.appendChild(localhostCard);
+                
+                // Add remote host cards
+                console.log(`[DEBUG] Creating ${Object.keys(hosts).length} remote host cards...`);
+                for (const [id, host] of Object.entries(hosts)) {
+                    console.log(`[DEBUG] Creating card for host: ${host.friendly_name} (${id})`);
+                    const hostCard = createHostCard(id, host);
+                    hostListContainer.appendChild(hostCard);
+                }
+                
+                // Select localhost by default
+                console.log('[DEBUG] Selecting localhost by default...');
+                selectHost('local');
+                console.log('[DEBUG] populateHostCards() completed successfully');
+            } catch (error) {
+                console.error('[DEBUG] Error in populateHostCards():', error);
+                hostListContainer.innerHTML = '<div class="p-4 text-red-400">Failed to load hosts.</div>';
+            }
+        };
+        
+        const createHostCard = (hostId, hostData) => {
+            const card = document.createElement('div');
+            card.className = 'host-card p-3 rounded-lg border border-gray-300 cursor-pointer hover:bg-gray-50 transition-all';
+            card.dataset.hostId = hostId;
+            
+            card.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-gray-800">${hostData.friendly_name}</h3>
+                        <p class="text-sm text-gray-600">${hostData.description || 'No description'}</p>
+                        <p class="text-xs text-gray-500 font-mono">${hostData.user}@${hostData.ip}</p>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <div class="connection-indicator w-3 h-3 rounded-full bg-gray-400"></div>
+                    </div>
+                </div>
+            `;
+            
+            card.addEventListener('click', () => selectHost(hostId));
+            return card;
+        };
+        
+        const selectHost = (hostId) => {
+            selectedHostId = hostId;
+            
+            // Update card selection visuals
+            hostListContainer.querySelectorAll('.host-card').forEach(card => {
+                if (card.dataset.hostId === hostId) {
+                    card.classList.add('bg-indigo-100', 'border-indigo-500');
+                    card.classList.remove('border-gray-300');
+                } else {
+                    card.classList.remove('bg-indigo-100', 'border-indigo-500');
+                    card.classList.add('border-gray-300');
+                }
+            });
+            
+            // Fetch logs for selected host
+            fetchSourcesForHost();
+        };
+
+        // --- CORE APP LOGIC ---
+        const fetchSourcesForHost = () => {
+            const url = selectedHostId === 'local' ? '/sources/local' : `/sources/remote/${selectedHostId}`;
+            const hostName = selectedHostId === 'local' ? 'Localhost' : (hosts[selectedHostId]?.friendly_name || selectedHostId);
+
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+
+            const sourceListContainer = document.getElementById('log-table-container');
+            sourceListContainer.innerHTML = '';
+            const logTableTitle = document.getElementById('log-table-title');
+            logTableTitle.textContent = `Fetching logs from ${hostName}...`;
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+            
+            // Use top progress bar instead of sidebar progress
+            const topProgressContainer = document.getElementById('top-progress-container');
+            const topProgressBar = document.getElementById('top-progress-bar');
+            const topProgressMessage = document.getElementById('top-progress-message');
+            
+            topProgressContainer.classList.remove('hidden');
+            topProgressBar.style.width = '0%';
+            topProgressMessage.textContent = 'Initializing connection...';
+            
+            let journalItems = [];
+            currentEventSource = new EventSource(url);
+
+            currentEventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                switch(data.status) {
+                    case 'progress':
+                        topProgressBar.style.width = `${data.progress}%`;
+                        topProgressMessage.textContent = data.message;
+                        break;
+                    case 'source':
+                        if (data.data.type === 'file') appendSourceToList(data.data);
+                        else journalItems.push(data.data);
+                        break;
+                    case 'complete':
+                        journalItems.forEach(appendSourceToList);
+                        topProgressBar.style.width = `100%`;
+                        topProgressMessage.textContent = 'Done!';
+                        if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
+
+                        if (sourceListContainer.children.length === 0) {
+                            sourceListContainer.innerHTML = '<li class="p-4 text-center text-gray-500">No log sources found on host.</li>';
+                            logTableTitle.textContent = `No logs found on ${hostName}.`;
+                        } else {
+                            logTableTitle.textContent = `All logs pulled from ${hostName}. Select a log to view.`;
+                        }
+                        
+                        setTimeout(() => topProgressContainer.classList.add('hidden'), 1500);
+                        currentEventSource.close();
+                        break;
+                    case 'error':
+                        showToast(data.message, 'error');
+                        topProgressContainer.classList.add('hidden');
+                        if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
+                        sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${data.message}</li>`;
+                        currentEventSource.close();
+                        break;
+                }
+            };
+
+            currentEventSource.onerror = (err) => {
+                console.error("EventSource failed:", err);
+                showToast('Connection to server failed. Check if the backend is running.', 'error');
+                topProgressContainer.classList.add('hidden');
+                if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
+                if (currentEventSource) currentEventSource.close();
+            };
+        };
+
+        const appendSourceToList = (source) => {
+            const li = document.createElement('li');
+            li.className = 'source-item';
+            li.dataset.name = source.name;
+            li.dataset.type = source.type;
+            li.dataset.size = source.size_bytes;
+            li.dataset.modified = source.modified_epoch;
+            
+            // Check if this is a 0-byte log and if they should be hidden
+            const showEmptyLogs = document.getElementById('show-empty-logs').checked;
+            const isEmptyLog = source.size_bytes === 0;
+            
+            li.innerHTML = `
+                <a href="#" class="log-link flex items-center w-full text-left p-3 rounded-lg border border-transparent hover:bg-gray-700/70 focus:bg-indigo-600 focus:text-white transition-all">
+                    <div class="flex-shrink-0 mr-3">
+                        ${source.type === 'file' 
+                            ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`
+                            : `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>`}
+                    </div>
+                    <div class="flex-grow overflow-hidden">
+                        <span class="font-medium truncate block">${source.name}</span>
+                        <span class="text-xs text-gray-500">${source.modified_formatted}</span>
+                    </div>
+                    <span class="text-xs font-mono text-gray-400 ml-2 flex-shrink-0">${source.size_formatted}</span>
+                </a>
+            `;
+            
+            // Hide the item if it's 0-byte and the toggle is unchecked
+            if (isEmptyLog && !showEmptyLogs) {
+                li.style.display = 'none';
+            }
+            
+            sourceListContainer.appendChild(li);
+        };
+        
+        // Function to filter existing logs based on the toggle
+        const filterLogsBySize = () => {
+            const showEmptyLogs = document.getElementById('show-empty-logs').checked;
+            const logItems = sourceListContainer.querySelectorAll('.source-item');
+            
+            logItems.forEach(item => {
+                const sizeBytes = parseInt(item.dataset.size);
+                const isEmptyLog = sizeBytes === 0;
+                
+                if (isEmptyLog && !showEmptyLogs) {
+                    item.style.display = 'none';
+                } else {
+                    item.style.display = '';
+                }
+            });
+        };
+        
+        // --- HOST MANAGEMENT ---
+        const openHostModal = (host = null) => {
+            hostForm.reset();
+            hostTestStatus.classList.add('hidden');
+            hostSaveBtn.classList.add('hidden');
+            hostTestBtn.classList.remove('hidden');
+            hostTestBtn.disabled = false;
+            hostTestBtn.textContent = 'Test Connection';
+
+            if (host) { // Edit mode
+                hostModalTitle.textContent = 'Edit Host';
+                hostIdInput.value = host.id;
+                hostFriendlyNameInput.value = host.friendly_name;
+                hostIpInput.value = host.ip;
+                hostUserInput.value = host.user;
+                hostDescriptionInput.value = host.description;
+                hostSaveBtn.textContent = 'Save Changes';
+            } else { // Add mode
+                hostModalTitle.textContent = 'Add New Host';
+                hostIdInput.value = '';
+                hostSaveBtn.textContent = 'Add Host';
+            }
+            settingsModal.classList.add('hidden');
+            hostModal.classList.remove('hidden');
+        };
+
+        const populateHostList = async () => {
+            try {
+                const hosts = await fetchApi('/hosts');
+                hostListDiv.innerHTML = '';
+                if (Object.keys(hosts).length === 0) {
+                     hostListDiv.innerHTML = `<p class="text-sm text-gray-500 text-center">No remote hosts configured.</p>`;
+                }
+                for (const [id, host] of Object.entries(hosts)) {
+                    const div = document.createElement('div');
+                    div.className = 'glass-container p-3 rounded-lg';
+                    div.innerHTML = `
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-white">${host.friendly_name}</span>
+                            <div class="flex space-x-2">
+                                <button class="edit-host-btn p-1 rounded hover:bg-gray-700" data-host-id="${id}" title="Edit"><svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg></button>
+                                <button class="delete-host-btn p-1 rounded hover:bg-gray-700" data-host-id="${id}" title="Delete"><svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                            </div>
+                        </div>
+                        <p class="text-sm text-black mt-1">${host.description || 'No description'}</p>
+                        <p class="text-xs text-black font-mono mt-2">${host.user}@${host.ip}</p>
+                    `;
+                    hostListDiv.appendChild(div);
+                }
+            } catch (error) {
+                 hostListDiv.innerHTML = `<p class="text-red-400">Could not load hosts.</p>`;
+            }
+        };
+        
+
+        // --- EVENT LISTENERS ---
+
+        settingsBtn.addEventListener('click', () => {
+             settingsModal.classList.remove('hidden');
+             populateHostList();
+             updateSchedulerStatus();
+        });
+        closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+        addNewHostBtn.addEventListener('click', () => openHostModal());
+        hostModalCancelBtn.addEventListener('click', () => {
+            hostModal.classList.add('hidden');
+            settingsModal.classList.remove('hidden');
+        });
+        
+        hostListDiv.addEventListener('click', async (e) => {
+            const button = e.target.closest('button');
+            if (!button) return;
+            const hostId = button.dataset.hostId;
+            if (button.classList.contains('edit-host-btn')) {
+                const hosts = await fetchApi('/hosts');
+                const hostData = hosts[hostId];
+                if (hostData) openHostModal({ id: hostId, ...hostData });
+            }
+            if (button.classList.contains('delete-host-btn')) {
+                if (confirm('Are you sure you want to delete this host?')) {
+                    await fetchApi(`/hosts/delete/${hostId}`, { method: 'DELETE' });
+                    showToast('Host deleted.');
+                    populateHostList();
+                    populateHostCards();
+                }
+            }
+        });
+
+        hostTestBtn.addEventListener('click', async () => {
+            hostTestStatus.classList.remove('hidden');
+            hostTestStatus.textContent = 'Testing...';
+            hostTestStatus.className = 'text-sm p-2 rounded-md bg-gray-700 text-yellow-400';
+            hostSaveBtn.classList.add('hidden');
+            hostTestBtn.disabled = true;
+            try {
+                const res = await fetchApi('/hosts/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: hostIpInput.value, user: hostUserInput.value })
+                });
+                if (res.success) {
+                    hostTestStatus.textContent = res.message;
+                    hostTestStatus.className = 'text-sm p-2 rounded-md bg-green-800 text-green-300';
+                    hostSaveBtn.classList.remove('hidden');
+                    hostTestBtn.classList.add('hidden');
+                } else {
+                     throw new Error(res.error);
+                }
+            } catch (error) {
+                hostTestStatus.textContent = `Test Failed: ${error.message}`;
+                hostTestStatus.className = 'text-sm p-2 rounded-md bg-red-800 text-red-300';
+                hostTestBtn.disabled = false;
+                hostTestBtn.textContent = 'Retry Test';
+            }
+        });
+
+        hostForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const hostId = hostIdInput.value;
+            const hostData = {
+                friendly_name: hostFriendlyNameInput.value,
+                ip: hostIpInput.value,
+                user: hostUserInput.value,
+                description: hostDescriptionInput.value,
+            };
+            const url = hostId ? `/hosts/update/${hostId}` : '/hosts/add';
+            const method = hostId ? 'PUT' : 'POST';
+            try {
+                await fetchApi(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(hostData) });
+                showToast(`Host ${hostId ? 'updated' : 'added'} successfully.`);
+                hostModal.classList.add('hidden');
+                settingsModal.classList.remove('hidden');
+                populateHostList();
+                populateHostCards();
+            } catch(error) {}
+        });
+        
+        saveCredentialsBtn.addEventListener('click', () => {
+            localStorage.setItem('openai_api_key', apiKeyInput.value.trim() || '');
+            localStorage.setItem('discord_webhook_url', discordWebhookInput.value.trim() || '');
+            showToast('Credentials saved!');
+            settingsModal.classList.add('hidden');
+        });
+
+        sourceListContainer.addEventListener('click', async (event) => {
+            const link = event.target.closest('.log-link');
+            if (!link) return;
+            event.preventDefault();
+
+            const sourceItem = link.closest('.source-item');
+            currentLogName = sourceItem.dataset.name;
+            const type = sourceItem.dataset.type;
+            const selectedHost = selectedHostId;
+            const selectedHostName = hosts[selectedHost]?.friendly_name || 'Localhost';
+
+            // Update the log content area elements
+            const logContentTitle = document.getElementById('log-content-title');
+            const logContentContainer = document.getElementById('log-content-container');
+            
+            logContentTitle.textContent = `Loading: ${currentLogName}...`;
+            logContentContainer.innerHTML = '<div class="text-center text-gray-500 mt-16">Fetching log data...</div>';
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+
+            const hostParam = selectedHost === 'local' ? '' : `?host=${selectedHost}`;
+            const url = type === 'file' ? `/log/${encodeURIComponent(currentLogName)}${hostParam}` : `/journal/${encodeURIComponent(currentLogName)}${hostParam}`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+                
+                currentLogContent = data.content;
+                logContentTitle.textContent = `${currentLogName} on ${selectedHostName}`;
+                
+                // Create a pre element with black text for log content
+                logContentContainer.innerHTML = `<pre class="text-sm text-black font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
+                
+                if (localStorage.getItem('openai_api_key') && data.content) {
+                     aiAnalyseBtn.classList.remove('hidden');
+                     if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                }
+            } catch (error) {
+                logContentTitle.textContent = `Error loading ${currentLogName}`;
+                logContentContainer.innerHTML = `<div class="text-center text-red-500 mt-16">${error.message}</div>`;
+                showToast(error.message, 'error');
+            }
+        });
+
+aiAnalyseBtn.addEventListener('click', async () => {
+            const apiKey = localStorage.getItem('openai_api_key');
+            if (!apiKey) {
+                showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
+                return;
+            }
+            if (!currentLogContent) {
+                showToast('No log content to analyse.', 'error');
+                return;
+            }
+
+            aiAnalyseBtn.textContent = 'Analysing...';
+            aiAnalyseBtn.disabled = true;
+            aiContentWrapper.innerHTML = '<p>Contacting AI assistant...</p>';
+
+            try {
+                const data = await fetchApi('/analyse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ log_content: currentLogContent, log_name: currentLogName, api_key: apiKey, webhook_url: localStorage.getItem('discord_webhook_url') })
+                });
+                if (data.discord_sent) showToast('Issue detected! Alert sent to Discord.', 'info');
+
+                // Show analysis in modal
+                const aiAnalysisModal = document.getElementById('ai-analysis-modal');
+                const aiAnalysisContent = document.getElementById('ai-analysis-content');
+                const closeAiModalBtn = document.getElementById('close-ai-modal-btn');
+
+                aiAnalysisContent.innerHTML = data.analysis.replace(/\n/g, '<br>');
+                aiAnalysisModal.classList.remove('hidden');
+
+                closeAiModalBtn.addEventListener('click', () => {
+                    aiAnalysisModal.classList.add('hidden');
+                });
+            } catch (error) {
+                // Show error in modal as well
+                const aiAnalysisModal = document.getElementById('ai-analysis-modal');
+                const aiAnalysisContent = document.getElementById('ai-analysis-content');
+                aiAnalysisContent.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
+                aiAnalysisModal.classList.remove('hidden');
+            } finally {
+                aiAnalyseBtn.textContent = 'AI Analyse';
+                aiAnalyseBtn.disabled = false;
+            }
+        });
+        
+        const updateSchedulerStatus = async () => {
+            try {
+                const data = await fetchApi('/schedule/status');
+                scheduledSources = data.sources || [];
+                selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+
+                if (data.is_running) {
+                    const nextRun = new Date(data.next_run).toLocaleString();
+                    schedulerStatusDiv.innerHTML = `<p class="text-green-400 font-semibold">Status: Running</p><p>Monitoring ${data.sources.length} logs every ${data.interval} hour(s).</p><p>Next run: ${nextRun}</p>`;
+                    scheduleIntervalInput.value = data.interval;
+                } else {
+                    schedulerStatusDiv.innerHTML = `<p class="text-yellow-400 font-semibold">Status: Not Running</p>`;
+                }
+            } catch (error) {
+                schedulerStatusDiv.innerHTML = `<p class="text-red-400 font-semibold">Error fetching status.</p>`;
+            }
+        };
+        
+        const updateLogSelectionProgress = (message, progress = 0) => {
+            logSelectionProgressDetails.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+            logSelectionProgressDetails.scrollTop = logSelectionProgressDetails.scrollHeight;
+            logSelectionProgressBar.style.width = `${progress}%`;
+            logSelectionProgressPercent.textContent = `${progress}%`;
+        };
+
+        const showRetrySection = (failedHosts) => {
+            // Transform progress section into a retry section
+            const progressContainer = logSelectionProgress;
+            progressContainer.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-yellow-300">⚠️ Some hosts failed to connect</span>
+                    <button id="retry-failed-hosts-btn" class="px-3 py-1 text-xs bg-yellow-600 hover:bg-yellow-500 text-white rounded transition-colors">Retry Failed Hosts</button>
+                </div>
+                <div class="max-h-20 overflow-y-auto bg-gray-900 rounded-md p-2 text-xs">
+                    ${failedHosts.map(host => `<div class="text-red-400">❌ ${host.host_name}: ${host.error}</div>`).join('')}
+                </div>
+            `;
+            
+            // Add retry functionality
+            const retryBtn = document.getElementById('retry-failed-hosts-btn');
+            retryBtn.addEventListener('click', async () => {
+                retryBtn.disabled = true;
+                retryBtn.textContent = 'Retrying...';
+                
+                // Reset progress section for retry
+                progressContainer.innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium text-gray-300">Retrying failed hosts...</span>
+                        <span id="retry-progress-percent" class="text-sm text-gray-400">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
+                        <div id="retry-progress-bar" class="bg-yellow-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <div id="retry-progress-details" class="max-h-20 overflow-y-auto bg-gray-900 rounded-md p-2 text-xs font-mono text-gray-400">
+                        <div>Retrying failed host connections...</div>
+                    </div>
+                `;
+                
+                const retryProgressBar = document.getElementById('retry-progress-bar');
+                const retryProgressPercent = document.getElementById('retry-progress-percent');
+                const retryProgressDetails = document.getElementById('retry-progress-details');
+                
+                const updateRetryProgress = (message, progress = 0) => {
+                    retryProgressDetails.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+                    retryProgressDetails.scrollTop = retryProgressDetails.scrollHeight;
+                    retryProgressBar.style.width = `${progress}%`;
+                    retryProgressPercent.textContent = `${progress}%`;
+                };
+                
+                try {
+                    // Use streaming endpoint again for retry
+                    const eventSource = new EventSource('/sources/table/stream');
+                    let newData = null;
+                    
+                    const retryPromise = new Promise((resolve, reject) => {
+                        eventSource.onmessage = function(event) {
+                            try {
+                                const data = JSON.parse(event.data);
+                                
+                                if (data.status === 'progress') {
+                                    updateRetryProgress(data.message, data.progress || 0);
+                                } else if (data.status === 'complete') {
+                                    newData = data.data;
+                                    eventSource.close();
+                                    resolve(newData);
+                                } else if (data.status === 'error') {
+                                    eventSource.close();
+                                    reject(new Error(data.message));
+                                }
+                            } catch (e) {
+                                console.error('Error parsing retry SSE data:', e);
+                            }
+                        };
+                        
+                        eventSource.onerror = function(event) {
+                            eventSource.close();
+                            reject(new Error('Connection error during retry'));
+                        };
+                        
+                        setTimeout(() => {
+                            if (eventSource.readyState !== EventSource.CLOSED) {
+                                eventSource.close();
+                                reject(new Error('Retry timeout'));
+                            }
+                        }, 60000);
+                    });
+                    
+                    const retryData = await retryPromise;
+                    
+                    // Update the existing table with new data
+                    updateLogSelectionTable(retryData);
+                    
+                    updateRetryProgress(`✅ Retry complete: ${retryData.successful_hosts}/${retryData.total_hosts} hosts connected`, 100);
+                    
+                    // Handle remaining failed hosts
+                    if (retryData.failed_hosts && retryData.failed_hosts.length > 0) {
+                        setTimeout(() => {
+                            showRetrySection(retryData.failed_hosts);
+                        }, 1000);
+                    } else {
+                        setTimeout(() => {
+                            progressContainer.classList.add('hidden');
+                            showToast('All hosts connected successfully!', 'success');
+                        }, 2000);
+                    }
+                    
+                } catch (error) {
+                    updateRetryProgress(`❌ Retry failed: ${error.message}`, 0);
+                    setTimeout(() => {
+                        showRetrySection(failedHosts); // Show original failed hosts again
+                    }, 2000);
+                }
+            });
+        };
+
+        const updateLogSelectionTable = (newData) => {
+            // Find existing table and update it with new data
+            const existingTable = logSelectionList.querySelector('table');
+            if (!existingTable) {
+                // If no existing table, create a new one
+                buildLogSelectionTable(newData);
+                return;
+            }
+            
+            // Update the existing table with merged data
+            const existingData = getCurrentTableData();
+            const mergedData = mergeTableData(existingData, newData);
+            
+            // Rebuild the table content
+            const contentContainer = logSelectionList.querySelector('div');
+            if (contentContainer) {
+                logSelectionList.removeChild(contentContainer);
+            }
+            buildLogSelectionTable(mergedData);
+        };
+
+        const getCurrentTableData = () => {
+            // Extract current table data (this is a simplified version)
+            // In a real implementation, you'd want to preserve the current state
+            return { logs: [], hosts: [], failed_hosts: [], successful_hosts: 0, total_hosts: 0 };
+        };
+
+        const mergeTableData = (existingData, newData) => {
+            // Merge the data, preferring new data but keeping successful connections from existing
+            return newData; // Simplified - just use new data for now
+        };
+
+        const buildLogSelectionTable = (data) => {
+            // Extract the table building logic into a separate function
+            const contentContainer = document.createElement('div');
+            contentContainer.className = 'h-full flex flex-col';
+            
+            // Add summary information at the top
+            if (data.failed_hosts && data.failed_hosts.length > 0) {
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'mb-4 p-3 bg-yellow-900/30 border border-yellow-600 rounded-md text-yellow-200 flex-shrink-0';
+                warningDiv.innerHTML = `
+                    <h4 class="font-semibold mb-2">⚠️ Host Connection Issues</h4>
+                    <p class="text-sm mb-2">Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts.</p>
+                    <details class="text-xs">
+                        <summary class="cursor-pointer hover:text-yellow-100">Show failed hosts...</summary>
+                        <ul class="mt-2 ml-4 list-disc">
+                            ${data.failed_hosts.map(h => `<li>${h.host_name}: ${h.error}</li>`).join('')}
+                        </ul>
+                    </details>
+                `;
+                contentContainer.appendChild(warningDiv);
+            }
+
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'flex-1 overflow-auto border border-gray-600 rounded-md';
+
+            const table = document.createElement('table');
+            table.className = 'min-w-full divide-y divide-gray-700';
+
+            const thead = document.createElement('thead');
+            thead.className = 'bg-gray-700 sticky top-0 z-10';
+            const headerRow = document.createElement('tr');
+            
+            // Header: Log Name + Host Names
+            let headerHTML = '<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider bg-gray-700">Log Name</th>';
+            data.hosts.forEach(host => {
+                headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider bg-gray-700">${host.host_name}</th>`;
+            });
+            headerRow.innerHTML = headerHTML;
+            thead.appendChild(headerRow);
+            
+            const tbody = document.createElement('tbody');
+            tbody.className = 'bg-gray-800 divide-y divide-gray-700';
+
+            // Process the logs data
+            data.logs.forEach(log => {
+                const row = document.createElement('tr');
+                
+                let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${log.name}</td>`;
+                
+                data.hosts.forEach(host => {
+                    const hostData = log.hosts[host.host_id];
+                    if (hostData) {
+                        const checked = scheduledSources.some(s => s.name === log.name && s.type === log.type && s.host === host.host_id) ? 'checked' : '';
+                        rowHTML += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400"><input type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500" value='${JSON.stringify({ name: log.name, type: log.type, host: host.host_id })}' ${checked}/></td>`;
+                    } else {
+                        rowHTML += '<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">-</td>';
+                    }
+                });
+                row.innerHTML = rowHTML;
+                tbody.appendChild(row);
+            });
+
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableContainer.appendChild(table);
+            contentContainer.appendChild(tableContainer);
+            logSelectionList.appendChild(contentContainer);
+        };
+
+        selectLogsBtn.addEventListener('click', async () => {
+            logSelectionTitle.textContent = 'Select Logs to Monitor from All Hosts';
+            logSelectionList.innerHTML = '';
+            logSelectionModal.classList.remove('hidden');
+            
+            // Show progress section
+            logSelectionProgress.classList.remove('hidden');
+            logSelectionProgressDetails.innerHTML = '';
+            updateLogSelectionProgress('Initializing scan of all configured hosts...', 5);
+            
+            console.log('Starting log selection modal - connecting to /sources/table/stream');
+            
+            let collectedData = null;
+            let hasError = false;
+            
+            try {
+                updateLogSelectionProgress('Fetching logs from all hosts...', 10);
+                
+                // Use Server-Sent Events for streaming progress
+                const eventSource = new EventSource('/sources/table/stream');
+                console.log('EventSource created, connection state:', eventSource.readyState);
+                
+                const streamPromise = new Promise((resolve, reject) => {
+                    let messageCount = 0;
+                    let partialSources = [];
+                    let partialHosts = [];
+                    let partialFailedHosts = [];
+                    let totalHosts = 0;
+                    
+                    eventSource.onopen = function(event) {
+                        console.log('EventSource connection opened');
+                    };
+                    
+                    eventSource.onmessage = function(event) {
+                        messageCount++;
+                        console.log(`SSE Message #${messageCount}:`, event.data);
+                        
+                        try {
+                            const data = JSON.parse(event.data);
+                            
+                            if (data.status === 'progress') {
+                                updateLogSelectionProgress(data.message, data.progress || 0);
+                                
+                                // Extract host information from progress messages
+                                if (data.message.includes('Found') && data.message.includes('hosts to scan')) {
+                                    const match = data.message.match(/Found (\d+) hosts/);
+                                    if (match) totalHosts = parseInt(match[1]);
+                                }
+                                
+                                // Track successful host connections
+                                if (data.message.includes('✅') && data.message.includes('Found') && data.message.includes('log sources')) {
+                                    const hostMatch = data.message.match(/✅ ([^:]+): Found (\d+) log sources/);
+                                    if (hostMatch) {
+                                        const hostName = hostMatch[1];
+                                        const sourceCount = parseInt(hostMatch[2]);
+                                        console.log(`Tracked successful host: ${hostName} with ${sourceCount} sources`);
+                                        
+                                        // Add to partial hosts list if not already there
+                                        if (!partialHosts.find(h => h.host_name === hostName)) {
+                                            partialHosts.push({
+                                                host_id: hostName === 'Localhost' ? 'local' : hostName.toLowerCase(),
+                                                host_name: hostName
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                // Track failed hosts
+                                if (data.message.includes('❌')) {
+                                    const failMatch = data.message.match(/❌ ([^:]+): (.+)/);
+                                    if (failMatch) {
+                                        const hostName = failMatch[1];
+                                        const error = failMatch[2];
+                                        partialFailedHosts.push({
+                                            host_id: hostName === 'Localhost' ? 'local' : hostName.toLowerCase(),
+                                            host_name: hostName,
+                                            error: error
+                                        });
+                                    }
+                                }
+                            } else if (data.status === 'complete') {
+                                console.log('SSE Complete - final data:', data.data);
+                                collectedData = data.data;
+                                eventSource.close();
+                                resolve(data.data);
+                            } else if (data.status === 'error') {
+                                console.error('SSE Error status received:', data.message);
+                                eventSource.close();
+                                hasError = true;
+                                // Don't reject immediately - we might have partial data
+                                if (collectedData) {
+                                    resolve(collectedData);
+                                } else {
+                                    reject(new Error(data.message));
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE data:', e, 'Raw data:', event.data);
+                        }
+                    };
+                    
+                    eventSource.onerror = function(event) {
+                        console.error('EventSource error:', event);
+                        console.log('EventSource readyState:', eventSource.readyState);
+                        eventSource.close();
+                        
+                        // If we have partial data, use it
+                        if (collectedData) {
+                            console.log('Using partial data despite connection error:', collectedData);
+                            resolve(collectedData);
+                        } else if (partialHosts.length > 0) {
+                            console.log('Creating partial data from collected progress info');
+                            const partialData = {
+                                logs: [], // We don't have detailed log info, but we have host info
+                                hosts: partialHosts,
+                                failed_hosts: partialFailedHosts,
+                                total_hosts: totalHosts || partialHosts.length + partialFailedHosts.length,
+                                successful_hosts: partialHosts.length
+                            };
+                            resolve(partialData);
+                        } else {
+                            reject(new Error('Connection error while fetching logs'));
+                        }
+                    };
+                    
+                    // Timeout after 60 seconds
+                    setTimeout(() => {
+                        if (eventSource.readyState !== EventSource.CLOSED) {
+                            console.log('SSE timeout reached, current state:', eventSource.readyState);
+                            console.log('Partial hosts collected:', partialHosts);
+                            console.log('Failed hosts:', partialFailedHosts);
+                            eventSource.close();
+                            
+                            // If we have partial data, use it
+                            if (collectedData) {
+                                console.log('Using partial data due to timeout:', collectedData);
+                                resolve(collectedData);
+                            } else if (partialHosts.length > 0) {
+                                console.log('Creating partial data from timeout with collected progress info');
+                                // Add the host that was being processed when timeout occurred to failed hosts
+                                const lastMessage = logSelectionProgressDetails.lastElementChild?.textContent || '';
+                                if (lastMessage.includes('Connecting to')) {
+                                    const connectingMatch = lastMessage.match(/Connecting to ([^.]+)/);
+                                    if (connectingMatch) {
+                                        const timedOutHost = connectingMatch[1];
+                                        if (!partialFailedHosts.find(h => h.host_name === timedOutHost)) {
+                                            partialFailedHosts.push({
+                                                host_id: timedOutHost === 'Localhost' ? 'local' : timedOutHost.toLowerCase(),
+                                                host_name: timedOutHost,
+                                                error: 'Connection timed out'
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                const partialData = {
+                                    logs: [], // We don't have detailed log info, but we have host info
+                                    hosts: partialHosts,
+                                    failed_hosts: partialFailedHosts,
+                                    total_hosts: totalHosts || partialHosts.length + partialFailedHosts.length,
+                                    successful_hosts: partialHosts.length
+                                };
+                                resolve(partialData);
+                            } else {
+                                reject(new Error('Timeout while fetching logs'));
+                            }
+                        }
+                    }, 60000);
+                });
+                
+                const data = await streamPromise;
+                console.log('Stream promise resolved with data:', data);
+                updateLogSelectionProgress(`Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts`, 95);
+                
+                if (data.failed_hosts && data.failed_hosts.length > 0) {
+                    data.failed_hosts.forEach(host => {
+                        updateLogSelectionProgress(`⚠️ Failed to connect to ${host.host_name}: ${host.error}`, 50);
+                    });
+                }
+                
+                updateLogSelectionProgress(`Found ${data.logs.length} unique logs across all hosts`, 70);
+                
+                if (data.logs.length === 0) {
+                    logSelectionList.innerHTML = '<div class="text-center p-4 text-gray-500">No logs found on any accessible hosts.</div>';
+                    logSelectionProgress.classList.add('hidden');
+                    return;
+                }
+                
+                updateLogSelectionProgress('Building log selection table...', 80);
+
+                // Create container with summary info
+                const contentContainer = document.createElement('div');
+                contentContainer.className = 'h-full flex flex-col';
+                
+                // Add summary information at the top
+                if (data.failed_hosts && data.failed_hosts.length > 0) {
+                    const warningDiv = document.createElement('div');
+                    warningDiv.className = 'mb-4 p-3 bg-yellow-900/30 border border-yellow-600 rounded-md text-yellow-200 flex-shrink-0';
+                    warningDiv.innerHTML = `
+                        <h4 class="font-semibold mb-2">⚠️ Host Connection Issues</h4>
+                        <p class="text-sm mb-2">Successfully connected to ${data.successful_hosts}/${data.total_hosts} hosts.</p>
+                        <details class="text-xs">
+                            <summary class="cursor-pointer hover:text-yellow-100">Show failed hosts...</summary>
+                            <ul class="mt-2 ml-4 list-disc">
+                                ${data.failed_hosts.map(h => `<li>${h.host_name}: ${h.error}</li>`).join('')}
+                            </ul>
+                        </details>
+                    `;
+                    contentContainer.appendChild(warningDiv);
+                }
+
+                const tableContainer = document.createElement('div');
+                tableContainer.className = 'flex-1 overflow-auto border border-gray-600 rounded-md';
+
+                const table = document.createElement('table');
+                table.className = 'min-w-full divide-y divide-gray-700';
+
+                const thead = document.createElement('thead');
+                thead.className = 'bg-gray-700 sticky top-0 z-10';
+                const headerRow = document.createElement('tr');
+                
+                // Header: Log Name + Host Names
+                let headerHTML = '<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider bg-gray-700">Log Name</th>';
+                data.hosts.forEach(host => {
+                    headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider bg-gray-700">${host.host_name}</th>`;
+                });
+                headerRow.innerHTML = headerHTML;
+                thead.appendChild(headerRow);
+                
+                const tbody = document.createElement('tbody');
+                tbody.className = 'bg-gray-800 divide-y divide-gray-700';
+
+                // Process the logs data (which is already in the correct format from /sources/table)
+                data.logs.forEach(log => {
+                    const row = document.createElement('tr');
+                    
+                    let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${log.name}</td>`;
+                    
+                    data.hosts.forEach(host => {
+                        const hostData = log.hosts[host.host_id];
+                        if (hostData) {
+                            const checked = scheduledSources.some(s => s.name === log.name && s.type === log.type && s.host === host.host_id) ? 'checked' : '';
+                            rowHTML += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400"><input type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500" value='${JSON.stringify({ name: log.name, type: log.type, host: host.host_id })}' ${checked}/></td>`;
+                        } else {
+                            rowHTML += '<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">-</td>';
+                        }
+                    });
+                    row.innerHTML = rowHTML;
+                    tbody.appendChild(row);
+                });
+
+                table.appendChild(thead);
+                table.appendChild(tbody);
+                tableContainer.appendChild(table);
+                contentContainer.appendChild(tableContainer);
+                logSelectionList.appendChild(contentContainer);
+                
+                updateLogSelectionProgress(`✅ Table ready with ${data.logs.length} logs from ${data.successful_hosts} hosts`, 100);
+                
+                // Hide progress after a short delay, but keep it visible if there are failed hosts
+                if (data.failed_hosts && data.failed_hosts.length > 0) {
+                    // Show retry section instead of hiding progress
+                    setTimeout(() => {
+                        showRetrySection(data.failed_hosts);
+                    }, 1000);
+                } else {
+                    setTimeout(() => {
+                        logSelectionProgress.classList.add('hidden');
+                    }, 2000);
+                }
+            } catch (error) {
+                updateLogSelectionProgress(`❌ Error: ${error.message}`, 0);
+                logSelectionList.innerHTML = '<div class="text-center p-4 text-red-400">Failed to load logs from hosts.</div>';
+                setTimeout(() => {
+                    logSelectionProgress.classList.add('hidden');
+                }, 3000);
+            }
+        });
+
+        saveLogSelectionBtn.addEventListener('click', () => {
+            const selectedLogs = Array.from(logSelectionList.querySelectorAll('input:checked')).map(cb => JSON.parse(cb.value));
+            scheduledSources = selectedLogs;
+            selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+            logSelectionModal.classList.add('hidden');
+        });
+
+        cancelLogSelectionBtn.addEventListener('click', () => logSelectionModal.classList.add('hidden'));
+
+        startScheduleBtn.addEventListener('click', async () => {
+            const interval = parseInt(scheduleIntervalInput.value);
+            const apiKey = apiKeyInput.value.trim();
+            const webhookUrl = discordWebhookInput.value.trim();
+
+            if (scheduledSources.length === 0) { showToast('Select at least one log to monitor.', 'error'); return; }
+            if (!interval || interval < 1) { showToast('Interval must be at least 1 hour.', 'error'); return; }
+            if (!apiKey || !webhookUrl) { showToast('OpenAI key and Discord webhook are required.', 'error'); return; }
+
+            try {
+                const data = await fetchApi('/schedule/start', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sources: scheduledSources, interval, api_key: apiKey, webhook_url: webhookUrl })
+                });
+                showToast(data.message);
+                updateSchedulerStatus();
+            } catch (error) {}
+        });
+
+        stopScheduleBtn.addEventListener('click', async () => {
+            try {
+                const data = await fetchApi('/schedule/stop', { method: 'POST' });
+                showToast(data.message);
+                updateSchedulerStatus();
+            } catch (error) {}
+        });
+        
+        runNowBtn.addEventListener('click', async () => {
+            if (scheduledSources.length === 0) { showToast('Please select logs for the schedule first.', 'error'); return; }
+            if (!apiKeyInput.value.trim() || !discordWebhookInput.value.trim()) { showToast('OpenAI key and Discord webhook must be set to run analysis.', 'error'); return; }
+            runNowBtn.disabled = true; runNowBtn.textContent = '...';
+            try {
+                await fetchApi('/schedule/run_now', { method: 'POST' });
+                showToast('Immediate analysis triggered.');
+            } catch(error) {}
+            finally { runNowBtn.disabled = false; runNowBtn.textContent = 'Run Now'; }
+        });
+
+        testDiscordBtn.addEventListener('click', async () => {
+            const webhookUrl = discordWebhookInput.value.trim();
+            if (!webhookUrl) { showToast('Enter a Discord webhook URL.', 'error'); return; }
+            testDiscordBtn.disabled = true; testDiscordBtn.textContent = '...';
+            try {
+                await fetchApi('/test_discord', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ webhook_url: webhookUrl })
+                });
+                showToast('Test message sent successfully!');
+            } catch (error) {} 
+            finally { testDiscordBtn.disabled = false; testDiscordBtn.textContent = 'Test'; }
+        });
+
+        // Event listeners for search/filter/sort removed - not needed for current UI
+
+        // --- VIEW MODE LISTENERS ---
+        // View mode listeners removed - buttons don't exist in current UI
+
+        // --- SEARCH FUNCTIONALITY ---
+        const performSearch = async () => {
+            const query = searchInput.value.trim();
+            if (!query) {
+                showToast('Please enter a search query', 'error');
+                return;
+            }
+
+            searchBtn.disabled = true;
+            searchBtn.textContent = 'Searching...';
+            searchResultsList.innerHTML = '';
+
+            try {
+                const scope = searchScope.value === 'selected' && currentLogName ? 
+                    (currentLogType === 'file' ? `file:${currentLogName}` : `journal:${currentLogName}`) : 'all';
+                
+                const hostFilter = searchScope.value === 'selected' && currentHostId ? [currentHostId] : [];
+
+                const searchData = {
+                    query: query,
+                    scope: scope,
+                    host_filter: hostFilter,
+                    case_sensitive: caseSensitiveCheckbox.checked
+                };
+
+                const results = await fetchApi('/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(searchData)
+                });
+
+                displaySearchResults(results, query);
+            } catch (error) {
+                searchResultsList.innerHTML = `
+                    <div class="p-4 text-red-500 text-center">
+                        <p>Search failed: ${error.message}</p>
+                    </div>
+                `;
+                searchResultsContainer.classList.remove('hidden');
+            } finally {
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search';
+            }
+        };
+
+        const displaySearchResults = (results, query) => {
+            searchResultsList.innerHTML = '';
+            
+            if (results.failed_hosts && results.failed_hosts.length > 0) {
+                const failedDiv = document.createElement('div');
+                failedDiv.className = 'mb-3 p-2 bg-yellow-100 border border-yellow-300 rounded text-yellow-800 text-xs';
+                failedDiv.innerHTML = `⚠️ Could not search ${results.failed_hosts.length} host(s): ${results.failed_hosts.map(h => h.host_name).join(', ')}`;
+                searchResultsList.appendChild(failedDiv);
+            }
+
+            if (results.total_matches === 0) {
+                const noResultsDiv = document.createElement('div');
+                noResultsDiv.className = 'p-4 text-gray-500 text-center';
+                noResultsDiv.innerHTML = `No matches found for "${query}"`;
+                searchResultsList.appendChild(noResultsDiv);
+            } else {
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'mb-3 text-sm text-gray-600';
+                headerDiv.innerHTML = `Found ${results.total_matches} match${results.total_matches !== 1 ? 'es' : ''} for "${query}"`;
+                searchResultsList.appendChild(headerDiv);
+
+                results.results.forEach(result => {
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = 'mb-2 p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors';
+                    
+                    // Highlight the search term in the content
+                    const highlightedContent = result.content.replace(
+                        new RegExp(`(${escapeRegExp(query)})`, caseSensitiveCheckbox.checked ? 'g' : 'gi'),
+                        '<mark class="bg-yellow-200">$1</mark>'
+                    );
+                    
+                    resultDiv.innerHTML = `
+                        <div class="flex items-start justify-between mb-2">
+                            <div class="flex-1">
+                                <div class="flex items-center space-x-2 mb-1">
+                                    <span class="font-medium text-gray-800">${result.log_name}</span>
+                                    <span class="text-xs px-2 py-1 rounded ${
+                                        result.log_type === 'file' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+                                    }">${result.log_type}</span>
+                                    <span class="text-xs text-gray-500">on ${result.host_name}</span>
+                                </div>
+                                <div class="text-sm text-gray-600 font-mono bg-gray-100 p-2 rounded">
+                                    ${result.line_number ? `Line ${result.line_number}: ` : ''}${highlightedContent}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    resultDiv.addEventListener('click', () => {
+                        loadLogContent(result.log_name, result.log_type, result.host_id, result.host_name);
+                        // Update current log info for "selected log only" searches
+                        currentLogName = result.log_name;
+                        currentLogType = result.log_type;
+                        currentHostId = result.host_id;
+                        // Close search results
+                        searchResultsContainer.classList.add('hidden');
+                    });
+                    
+                    searchResultsList.appendChild(resultDiv);
+                });
+            }
+            
+            searchResultsContainer.classList.remove('hidden');
+        };
+
+        const escapeRegExp = (string) => {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        };
+
+        // Search event listeners
+        searchBtn.addEventListener('click', performSearch);
+        
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+        
+        closeSearchResults.addEventListener('click', () => {
+            searchResultsContainer.classList.add('hidden');
+        });
+
+        // Update search scope when log is selected
+        const originalLoadLogContent = loadLogContent;
+        const enhancedLoadLogContent = async (logName, logType, hostId, hostName) => {
+            await originalLoadLogContent(logName, logType, hostId, hostName);
+            // Update current log info for search
+            currentLogName = logName;
+            currentLogType = logType;
+            currentHostId = hostId;
+        };
+        
+        // Replace the original function
+        window.loadLogContent = enhancedLoadLogContent;
+
+        // Add event listener for the 0-byte logs toggle
+        const showEmptyLogsCheckbox = document.getElementById('show-empty-logs');
+        showEmptyLogsCheckbox.addEventListener('change', filterLogsBySize);
+
+        // --- INITIALIZATION ---
+        apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
+        discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
+        populateHostCards();
+    });
+    </script>
+</body>
+</html>

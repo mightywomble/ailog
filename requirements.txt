@@ -1,0 +1,24 @@
+# AI Log Viewer - Python Dependencies
+
+# Web Framework
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# OpenAI API (using gemini-2.5-flash as preferred)
+# Note: User prefers gemini-2.5-flash over google module
+openai==1.3.7
+
+# HTTP Requests
+requests==2.31.0
+
+# Background Task Scheduler
+APScheduler==3.10.4
+
+# Additional dependencies that may be needed
+# (these are often included with Python but listed for completeness)
+# Standard library modules used: subprocess, shlex, os, datetime, json, atexit, threading, uuid, concurrent.futures, time, functools
+
+# Development/Optional dependencies
+# Uncomment if needed for development
+# gunicorn==21.2.0  # For production deployment
+# python-dotenv==1.0.0  # For environment variable management
