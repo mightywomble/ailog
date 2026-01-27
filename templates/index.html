@@ -273,27 +273,70 @@
                     
                     <!-- Analysis Provider Selection -->
                     <div>
-                        <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Active AI Provider</h4>
-                        <p id="current-provider-display" class="text-sm font-bold text-gray-700 mt-3 mb-4">Currently: <span class="text-blue-600">None Selected</span></p>
+                        <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Select AI Provider</h4>
                         
-                        <div class="space-y-2">
-                            <!-- Use OpenAI Button -->
-                            <div class="p-3 bg-gray-50 rounded-md border border-gray-200">
-                                <p class="text-xs font-medium text-gray-600 mb-2">OpenAI (GPT-3.5)</p>
-                                <button id="use-openai-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                                    Use OpenAI
+                        <div class="mt-4">
+                            <label for="ai-provider-dropdown" class="block text-sm font-medium text-gray-700 mb-2">Choose AI Provider</label>
+                            <div class="flex gap-2">
+                                <select id="ai-provider-dropdown" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 text-sm">
+                                    <option value="openai">OpenAI (GPT-3.5)</option>
+                                    <option value="ollama">Ollama (Local)</option>
+                                </select>
+                                <button id="select-provider-btn" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors">
+                                    Select
                                 </button>
-                                <p id="openai-status" class="text-xs text-gray-500 mt-1">No API key configured</p>
+                            </div>
+                        </div>
+                        
+                        <!-- OpenAI Configuration -->
+                        <div id="openai-config-section" class="mt-6 hidden">
+                            <h5 class="font-medium text-gray-800 mb-3 text-sm">OpenAI Configuration</h5>
+                            <div>
+                                <label for="api-key-input-provider" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                                <input type="password" id="api-key-input-provider" class="w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="sk-...">
+                            </div>
+                            <button id="save-openai-btn" class="w-full mt-3 bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 text-sm rounded-md font-medium transition-colors">
+                                Save OpenAI Configuration
+                            </button>
+                            <p id="openai-save-status" class="text-xs text-gray-600 mt-2"></p>
+                        </div>
+                        
+                        <!-- Ollama Configuration -->
+                        <div id="ollama-config-section" class="mt-6 hidden">
+                            <h5 class="font-medium text-gray-800 mb-3 text-sm">Ollama Configuration</h5>
+                            <div>
+                                <label for="ollama-url-input-provider" class="block text-sm font-medium text-gray-700 mb-1">Ollama API URL</label>
+                                <div class="flex gap-2">
+                                    <input type="text" id="ollama-url-input-provider" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="https://ollama.paedave.com">
+                                    <button id="test-ollama-btn-provider" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors">
+                                        Test
+                                    </button>
+                                </div>
+                                <p id="ollama-test-status-provider" class="text-xs mt-2"></p>
                             </div>
                             
-                            <!-- Use Ollama Button -->
-                            <div class="p-3 bg-gray-50 rounded-md border border-gray-200">
-                                <p class="text-xs font-medium text-gray-600 mb-2">Ollama (Local)</p>
-                                <button id="use-ollama-btn" class="w-full bg-orange-600 hover:bg-orange-500 text-white px-3 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                                    Use Ollama
+                            <!-- List Models Section (hidden until URL is saved) -->
+                            <div id="ollama-models-section" class="mt-4 hidden">
+                                <button id="list-models-btn-provider" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 text-sm rounded-md font-medium transition-colors mb-3">
+                                    List Models
                                 </button>
-                                <p id="ollama-status" class="text-xs text-gray-500 mt-1">No model configured</p>
+                                
+                                <label for="ollama-model-select-provider" class="block text-sm font-medium text-gray-700 mb-2">Select Model</label>
+                                <div class="flex gap-2">
+                                    <select id="ollama-model-select-provider" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 text-sm">
+                                        <option value="">-- No models loaded --</option>
+                                    </select>
+                                    <button id="test-model-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors">
+                                        Test
+                                    </button>
+                                </div>
+                                <p id="model-test-status" class="text-xs mt-2"></p>
                             </div>
+                        </div>
+                        
+                        <!-- Current Provider Display -->
+                        <div id="current-provider-display-section" class="mt-6 p-3 bg-blue-50 rounded-md border border-blue-200 hidden">
+                            <p class="text-sm font-semibold text-blue-800">Active Provider: <span id="active-provider-text">None</span></p>
                         </div>
                     </div>
                 </div>
@@ -453,13 +496,31 @@
         const ollamaModelSection = document.getElementById('ollama-model-section');
         const listModelsBtn = document.getElementById('list-models-btn');
         const addOllamaBtn = document.getElementById('add-ollama-btn');
-        const ollamaModelSelect = document.getElementById('ollama-model-select');
+        const aiProviderDropdown = document.getElementById('ai-provider-dropdown');
+        const selectProviderBtn = document.getElementById('select-provider-btn');
+        const openaiConfigSection = document.getElementById('openai-config-section');
+        const ollamaConfigSection = document.getElementById('ollama-config-section');
+        const apiKeyInputProvider = document.getElementById('api-key-input-provider');
+        const saveOpenaiBtn = document.getElementById('save-openai-btn');
+        const openaiSaveStatus = document.getElementById('openai-save-status');
+        const ollamaUrlInputProvider = document.getElementById('ollama-url-input-provider');
+        const testOllamaBtnProvider = document.getElementById('test-ollama-btn-provider');
+        const ollamaTestStatusProvider = document.getElementById('ollama-test-status-provider');
+        const ollamaModelsSection = document.getElementById('ollama-models-section');
+        const listModelsBtnProvider = document.getElementById('list-models-btn-provider');
+        const ollamaModelSelectProvider = document.getElementById('ollama-model-select-provider');
+        const testModelBtn = document.getElementById('test-model-btn');
+        const modelTestStatus = document.getElementById('model-test-status');
+        const currentProviderDisplaySection = document.getElementById('current-provider-display-section');
+        const activeProviderText = document.getElementById('active-provider-text');
         const ollamaConfigStatus = document.getElementById('ollama-config-status');
-        const useOpenaiBtn = document.getElementById('use-openai-btn');
-        const useOllamaBtn = document.getElementById('use-ollama-btn');
-        const currentProviderDisplay = document.getElementById('current-provider-display');
-        const openaiStatus = document.getElementById('openai-status');
-        const ollamaStatus = document.getElementById('ollama-status');
+        const ollamaModelSelect = document.getElementById('ollama-model-select');
+        const ollamaUrlInput = document.getElementById('ollama-url-input');
+        const testOllamaBtn = document.getElementById('test-ollama-btn');
+        const ollamaTestStatus = document.getElementById('ollama-test-status');
+        const ollamaModelSection = document.getElementById('ollama-model-section');
+        const listModelsBtn = document.getElementById('list-models-btn');
+        const addOllamaBtn = document.getElementById('add-ollama-btn');
         
         const schedulerStatusDiv = document.getElementById('scheduler-status');
         const scheduleIntervalInput = document.getElementById('schedule-interval-input');
@@ -914,62 +975,218 @@
         // Initialize provider indicator on page load
         updateProviderIndicator();
         
-        // Function to update provider button states
-        const updateProviderButtonStates = () => {
-            const openaiKey = localStorage.getItem('openai_api_key');
-            const ollamaUrl = localStorage.getItem('ollama_url');
-            const ollamaModel = localStorage.getItem('ollama_model');
-            const currentProvider = localStorage.getItem('analysis_provider') || 'openai';
-            
-            // Update OpenAI button
-            if (openaiKey) {
-                useOpenaiBtn.disabled = false;
-                openaiStatus.textContent = currentProvider === 'openai' ? '✓ Active' : 'API key configured';
-                openaiStatus.className = currentProvider === 'openai' ? 'text-xs text-green-600 font-bold mt-1' : 'text-xs text-gray-600 mt-1';
-            } else {
-                useOpenaiBtn.disabled = true;
-                openaiStatus.textContent = 'No API key configured';
-                openaiStatus.className = 'text-xs text-gray-500 mt-1';
-            }
-            
-            // Update Ollama button
-            if (ollamaUrl && ollamaModel) {
-                useOllamaBtn.disabled = false;
-                ollamaStatus.textContent = currentProvider === 'ollama' ? `✓ Active (${ollamaModel})` : `Model configured (${ollamaModel})`;
-                ollamaStatus.className = currentProvider === 'ollama' ? 'text-xs text-green-600 font-bold mt-1' : 'text-xs text-gray-600 mt-1';
-            } else {
-                useOllamaBtn.disabled = true;
-                ollamaStatus.textContent = 'No model configured';
-                ollamaStatus.className = 'text-xs text-gray-500 mt-1';
-            }
-            
-            // Update current provider display
-            if (currentProvider === 'ollama' && ollamaModel) {
-                currentProviderDisplay.innerHTML = `Currently: <span class="text-orange-600 font-bold">Ollama (${ollamaModel})</span>`;
-            } else if (currentProvider === 'openai' && openaiKey) {
-                currentProviderDisplay.innerHTML = `Currently: <span class="text-blue-600 font-bold">OpenAI</span>`;
-            } else {
-                currentProviderDisplay.innerHTML = `Currently: <span class="text-gray-600">None Selected</span>`;
-            }
-        };
         
-        // Add event listeners for Use AI buttons
-        useOpenaiBtn.addEventListener('click', () => {
-            localStorage.setItem('analysis_provider', 'openai');
-            updateProviderIndicator();
-            updateProviderButtonStates();
-            showToast('OpenAI selected as AI provider');
+        // --- NEW AI PROVIDER SELECTION WORKFLOW ---
+        
+        // Select Provider button: Show the appropriate config section
+        selectProviderBtn.addEventListener('click', () => {
+            const selectedProvider = aiProviderDropdown.value;
+            
+            // Hide both sections
+            openaiConfigSection.classList.add('hidden');
+            ollamaConfigSection.classList.add('hidden');
+            currentProviderDisplaySection.classList.add('hidden');
+            
+            // Show the selected provider's section
+            if (selectedProvider === 'openai') {
+                openaiConfigSection.classList.remove('hidden');
+                apiKeyInputProvider.value = localStorage.getItem('openai_api_key') || '';
+            } else if (selectedProvider === 'ollama') {
+                ollamaConfigSection.classList.remove('hidden');
+                ollamaUrlInputProvider.value = localStorage.getItem('ollama_url') || '';
+            }
         });
         
-        useOllamaBtn.addEventListener('click', () => {
-            localStorage.setItem('analysis_provider', 'ollama');
-            updateProviderIndicator();
-            updateProviderButtonStates();
-            showToast('Ollama selected as AI provider');
+        // Save OpenAI Configuration
+        saveOpenaiBtn.addEventListener('click', async () => {
+            const apiKey = apiKeyInputProvider.value.trim();
+            if (!apiKey) {
+                openaiSaveStatus.textContent = '❌ API key cannot be empty';
+                openaiSaveStatus.className = 'text-xs text-red-600 mt-2';
+                openaiSaveStatus.classList.remove('hidden');
+                return;
+            }
+            
+            saveOpenaiBtn.disabled = true;
+            openaiSaveStatus.textContent = 'Saving...';
+            openaiSaveStatus.className = 'text-xs text-yellow-600 mt-2';
+            openaiSaveStatus.classList.remove('hidden');
+            
+            try {
+                localStorage.setItem('openai_api_key', apiKey);
+                localStorage.setItem('analysis_provider', 'openai');
+                
+                openaiSaveStatus.textContent = '✅ OpenAI configured successfully';
+                openaiSaveStatus.className = 'text-xs text-green-600 mt-2';
+                
+                // Update current provider display
+                activeProviderText.textContent = 'OpenAI';
+                currentProviderDisplaySection.classList.remove('hidden');
+                
+                // Update header indicator
+                updateProviderIndicator();
+                
+                showToast('OpenAI configured as AI provider');
+            } catch (error) {
+                openaiSaveStatus.textContent = `❌ ${error.message}`;
+                openaiSaveStatus.className = 'text-xs text-red-600 mt-2';
+            } finally {
+                saveOpenaiBtn.disabled = false;
+            }
         });
         
-        // Initialize button states
-        updateProviderButtonStates();
+        // Test Ollama URL
+        testOllamaBtnProvider.addEventListener('click', async () => {
+            const url = ollamaUrlInputProvider.value.trim();
+            if (!url) {
+                ollamaTestStatusProvider.textContent = 'Please enter an Ollama URL';
+                ollamaTestStatusProvider.className = 'text-xs text-red-600 mt-2';
+                ollamaTestStatusProvider.classList.remove('hidden');
+                return;
+            }
+            
+            testOllamaBtnProvider.disabled = true;
+            testOllamaBtnProvider.textContent = 'Testing...';
+            ollamaTestStatusProvider.textContent = 'Testing connection...';
+            ollamaTestStatusProvider.className = 'text-xs text-yellow-600 mt-2';
+            ollamaTestStatusProvider.classList.remove('hidden');
+            
+            try {
+                const res = await fetchApi('/ollama/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ollama_url: url })
+                });
+                
+                if (res.success) {
+                    ollamaTestStatusProvider.textContent = `✅ ${res.message}`;
+                    ollamaTestStatusProvider.className = 'text-xs text-green-600 mt-2';
+                    testOllamaBtnProvider.className = 'bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
+                    testOllamaBtnProvider.textContent = 'Connected';
+                    
+                    // Save URL and show models section
+                    localStorage.setItem('ollama_url', url);
+                    ollamaModelsSection.classList.remove('hidden');
+                } else {
+                    throw new Error(res.error);
+                }
+            } catch (error) {
+                ollamaTestStatusProvider.textContent = `❌ ${error.message}`;
+                ollamaTestStatusProvider.className = 'text-xs text-red-600 mt-2';
+                testOllamaBtnProvider.disabled = false;
+                testOllamaBtnProvider.textContent = 'Retry';
+            }
+        });
+        
+        // List Models button in provider section
+        listModelsBtnProvider.addEventListener('click', async () => {
+            const url = ollamaUrlInputProvider.value.trim();
+            if (!url) {
+                showToast('Please test Ollama connection first', 'error');
+                return;
+            }
+            
+            listModelsBtnProvider.disabled = true;
+            listModelsBtnProvider.textContent = 'Loading...';
+            ollamaModelSelectProvider.innerHTML = '<option value="">Loading models...</option>';
+            
+            try {
+                const data = await fetchApi('/ollama/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ollama_url: url })
+                });
+                
+                const models = data.models || [];
+                
+                if (models.length === 0) {
+                    ollamaModelSelectProvider.innerHTML = '<option value="">No models available</option>';
+                    return;
+                }
+                
+                ollamaModelSelectProvider.innerHTML = '';
+                models.forEach(modelName => {
+                    const option = document.createElement('option');
+                    option.value = modelName;
+                    option.textContent = modelName;
+                    ollamaModelSelectProvider.appendChild(option);
+                });
+                
+                showToast(`Found ${models.length} model(s)`);
+            } catch (error) {
+                ollamaModelSelectProvider.innerHTML = `<option value="">Error: ${error.message}</option>`;
+                showToast(`Error loading models: ${error.message}`, 'error');
+            } finally {
+                listModelsBtnProvider.disabled = false;
+                listModelsBtnProvider.textContent = 'List Models';
+            }
+        });
+        
+        // Test Model button in provider section
+        testModelBtn.addEventListener('click', async () => {
+            const model = ollamaModelSelectProvider.value;
+            const url = ollamaUrlInputProvider.value.trim();
+            
+            if (!model) {
+                modelTestStatus.textContent = '❌ Please select a model';
+                modelTestStatus.className = 'text-xs text-red-600 mt-2';
+                modelTestStatus.classList.remove('hidden');
+                return;
+            }
+            
+            testModelBtn.disabled = true;
+            testModelBtn.textContent = 'Testing...';
+            modelTestStatus.textContent = 'Testing model...';
+            modelTestStatus.className = 'text-xs text-yellow-600 mt-2';
+            modelTestStatus.classList.remove('hidden');
+            
+            try {
+                const res = await fetchApi('/ollama/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ollama_url: url, model: model })
+                });
+                
+                if (res.success) {
+                    modelTestStatus.textContent = `✅ Model test successful`;
+                    modelTestStatus.className = 'text-xs text-green-600 mt-2';
+                    testModelBtn.className = 'bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
+                    testModelBtn.textContent = 'Verified';
+                    
+                    // Save configuration
+                    localStorage.setItem('ollama_url', url);
+                    localStorage.setItem('ollama_model', model);
+                    localStorage.setItem('analysis_provider', 'ollama');
+                    
+                    // Update current provider display
+                    activeProviderText.textContent = `Ollama (${model})`;
+                    currentProviderDisplaySection.classList.remove('hidden');
+                    
+                    // Save to backend
+                    try {
+                        await fetchApi('/ollama/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ollama_url: url, ollama_model: model })
+                        });
+                    } catch (e) {
+                        console.log('Note: Ollama config save handled via localStorage');
+                    }
+                    
+                    // Update header indicator
+                    updateProviderIndicator();
+                    
+                    showToast('Ollama configured successfully');
+                } else {
+                    throw new Error(res.error);
+                }
+            } catch (error) {
+                modelTestStatus.textContent = `❌ ${error.message}`;
+                modelTestStatus.className = 'text-xs text-red-600 mt-2';
+                testModelBtn.disabled = false;
+                testModelBtn.textContent = 'Retry';
+            }
+        });
         
         // --- HOST MANAGEMENT ---
         const openHostModal = (host = null) => {
@@ -1033,7 +1250,6 @@
              populateHostList();
              updateSchedulerStatus();
              loadSettingsFromBackend();
-             updateProviderButtonStates();
         });
         closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
         addNewHostBtn.addEventListener('click', () => openHostModal());
@@ -1253,9 +1469,8 @@
                 addOllamaBtn.textContent = 'Updated';
                 addOllamaBtn.className = 'bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
                 
-                // Update provider indicators and button states
+                // Update provider indicator
                 updateProviderIndicator();
-                updateProviderButtonStates();
                 
                 showToast('Ollama configuration saved!');
             } catch (error) {
@@ -1927,7 +2142,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
         startScheduleBtn.addEventListener('click', async () => {
             const interval = parseInt(scheduleIntervalInput.value);
             const webhookUrl = discordWebhookInput.value.trim();
-            const provider = analysisProviderSelect.value;
+            const provider = localStorage.getItem('analysis_provider') || 'openai';
 
             if (scheduledSources.length === 0) { showToast('Select at least one log to monitor.', 'error'); return; }
             if (!interval || interval < 1) { showToast('Interval must be at least 1 hour.', 'error'); return; }
