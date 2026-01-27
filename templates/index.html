@@ -52,6 +52,9 @@
     <header class="glass-container mx-4 mt-4 p-4 shadow-lg flex items-center justify-between flex-wrap gap-2">
         <h1 class="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">AI Log Viewer</h1>
         <div class="flex items-center space-x-4">
+            <div id="ai-provider-indicator" class="bg-blue-100/80 border border-blue-300 text-blue-800 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">
+                <span id="provider-label">Loading...</span>
+            </div>
             <button id="settings-btn" class="button text-sm px-4 py-2">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 Settings
@@ -426,6 +429,7 @@
         const discordWebhookInput = document.getElementById('discord-webhook-input');
         const testDiscordBtn = document.getElementById('test-discord-btn');
         const saveCredentialsBtn = document.getElementById('save-credentials-btn');
+        const providerLabel = document.getElementById('provider-label');
         
         // Ollama elements
         const ollamaUrlInput = document.getElementById('ollama-url-input');
@@ -858,6 +862,19 @@
         };
         
         // --- SETTINGS MANAGEMENT ---
+        const updateProviderIndicator = () => {
+            const provider = localStorage.getItem('analysis_provider') || 'openai';
+            const ollamaModel = localStorage.getItem('ollama_model');
+            
+            if (provider === 'ollama' && ollamaModel) {
+                providerLabel.textContent = `Ollama (${ollamaModel})`;
+            } else if (provider === 'openai') {
+                providerLabel.textContent = 'OpenAI';
+            } else {
+                providerLabel.textContent = 'No AI Provider';
+            }
+        };
+        
         const loadSettingsFromBackend = async () => {
             try {
                 const ollamaConfig = await fetchApi('/ollama/config', { method: 'GET' });
@@ -870,10 +887,14 @@
                     ollamaConfigStatus.textContent = `✅ Configured with model: ${ollamaConfig.ollama_model}`;
                     ollamaModelSection.classList.remove('hidden');
                 }
+                updateProviderIndicator();
             } catch (error) {
                 console.log('No Ollama config in backend yet');
             }
         };
+        
+        // Initialize provider indicator on page load
+        updateProviderIndicator();
         
         // --- HOST MANAGEMENT ---
         const openHostModal = (host = null) => {
@@ -1029,10 +1050,15 @@
                             ollama_model: ollamaModelSelect.value 
                         })
                     });
+                    localStorage.setItem('ollama_url', ollamaUrlInput.value.trim());
+                    localStorage.setItem('ollama_model', ollamaModelSelect.value);
                 } catch (error) {
                     console.log('Note: Ollama config save handled separately');
                 }
             }
+            
+            // Update provider indicator
+            updateProviderIndicator();
             
             showToast('Credentials saved!');
             settingsModal.classList.add('hidden');
@@ -1152,6 +1178,9 @@
                 addOllamaBtn.textContent = 'Updated';
                 addOllamaBtn.className = 'bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
                 
+                // Update provider indicator
+                updateProviderIndicator();
+                
                 showToast('Ollama configuration saved!');
             } catch (error) {
                 showToast(`Failed to save Ollama config: ${error.message}`, 'error');
@@ -1192,15 +1221,30 @@
                 // Create a pre element with black text for log content
                 logContentContainer.innerHTML = `<pre class="text-sm text-black font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
-                // Show AI Analyse button if either provider is configured
-                const provider = localStorage.getItem('analysis_provider') || 'openai';
-                const hasOpenAI = localStorage.getItem('openai_api_key');
-                const hasOllama = localStorage.getItem('ollama_url') && localStorage.getItem('ollama_model');
+                // Check if we have content to analyze
+                if (!data.content) {
+                    return;
+                }
                 
-                const canAnalyse = ((provider === 'openai' && hasOpenAI) || (provider === 'ollama' && hasOllama)) && data.content;
-                if (canAnalyse) {
-                     aiAnalyseBtn.classList.remove('hidden');
-                     if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                // Show AI Analyse button if the currently selected provider is configured
+                const provider = localStorage.getItem('analysis_provider') || 'openai';
+                const openaiKey = localStorage.getItem('openai_api_key');
+                const ollamaUrl = localStorage.getItem('ollama_url');
+                const ollamaModel = localStorage.getItem('ollama_model');
+                
+                let shouldShowButton = false;
+                
+                if (provider === 'ollama') {
+                    shouldShowButton = !!(ollamaUrl && ollamaModel);
+                } else {
+                    shouldShowButton = !!openaiKey;
+                }
+                
+                if (shouldShowButton) {
+                    aiAnalyseBtn.classList.remove('hidden');
+                    if (data.will_be_truncated) {
+                        truncationWarning.classList.remove('hidden');
+                    }
                 }
             } catch (error) {
                 logContentTitle.textContent = `Error loading ${currentLogName}`;
