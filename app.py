@@ -819,6 +819,100 @@ def test_host_connection():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+# --- OLLAMA INTEGRATION ROUTES ---
+@app.route('/ollama/test', methods=['POST'])
+def test_ollama():
+    """Test connection to Ollama instance"""
+    data = request.get_json()
+    ollama_url = data.get('ollama_url', '').strip()
+    if not ollama_url:
+        return jsonify({'success': False, 'error': 'Ollama URL is required.'}), 400
+    
+    # Ensure URL is properly formatted
+    if not ollama_url.startswith('http'):
+        ollama_url = f'http://{ollama_url}'
+    
+    try:
+        # Test connectivity by fetching models list
+        response = requests.get(f'{ollama_url}/api/tags', timeout=5)
+        response.raise_for_status()
+        models = response.json().get('models', [])
+        return jsonify({'success': True, 'message': f'Connection successful! Found {len(models)} model(s).', 'models': models})
+    except requests.exceptions.ConnectionError:
+        return jsonify({'success': False, 'error': 'Could not connect to Ollama instance. Check URL and ensure Ollama is running.'}), 400
+    except requests.exceptions.Timeout:
+        return jsonify({'success': False, 'error': 'Connection timed out. Check if Ollama is running and accessible.'}), 400
+    except requests.exceptions.RequestException as e:
+        return jsonify({'success': False, 'error': f'Connection error: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/ollama/models', methods=['GET'])
+def get_ollama_models():
+    """Fetch available models from configured Ollama instance"""
+    config = load_config()
+    ollama_url = config.get('ollama_url', '').strip()
+    if not ollama_url:
+        return jsonify({'error': 'Ollama URL not configured.'}), 400
+    
+    if not ollama_url.startswith('http'):
+        ollama_url = f'http://{ollama_url}'
+    
+    try:
+        response = requests.get(f'{ollama_url}/api/tags', timeout=5)
+        response.raise_for_status()
+        models = response.json().get('models', [])
+        model_names = [m.get('name', 'unknown') for m in models]
+        return jsonify({'models': model_names})
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
+
+@app.route('/ollama/config', methods=['POST', 'GET'])
+def ollama_config():
+    """Save or retrieve Ollama configuration"""
+    if request.method == 'POST':
+        data = request.get_json()
+        ollama_url = data.get('ollama_url', '').strip()
+        ollama_model = data.get('ollama_model', '').strip()
+        
+        if not ollama_url or not ollama_model:
+            return jsonify({'error': 'Both Ollama URL and model are required.'}), 400
+        
+        config = load_config()
+        config['ollama_url'] = ollama_url if ollama_url.startswith('http') else f'http://{ollama_url}'
+        config['ollama_model'] = ollama_model
+        save_config(config)
+        return jsonify({'message': 'Ollama configuration saved.'})
+    else:  # GET
+        config = load_config()
+        return jsonify({
+            'ollama_url': config.get('ollama_url', ''),
+            'ollama_model': config.get('ollama_model', '')
+        })
+
+def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
+    """Analyze log using Ollama"""
+    if not ollama_url.startswith('http'):
+        ollama_url = f'http://{ollama_url}'
+    
+    truncated_content = log_content
+    if len(log_content) > MAX_CHAR_COUNT:
+        truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+    
+    prompt = f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"
+    
+    try:
+        response = requests.post(
+            f'{ollama_url}/api/generate',
+            json={'model': ollama_model, 'prompt': prompt, 'stream': False},
+            timeout=60
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result.get('response', 'No response from Ollama')
+    except Exception as e:
+        raise Exception(f'Ollama analysis failed: {str(e)}')
+
 # --- ANALYSIS & SCHEDULER ROUTES (RESTORED) ---
 def save_config(config):
     with open(CONFIG_FILE, 'w') as f: json.dump(config, f, indent=4)
@@ -831,25 +925,56 @@ def load_config():
 @app.route('/analyse', methods=['POST'])
 def analyse_log():
     data = request.get_json()
-    log_content, log_name, api_key = data.get('log_content'), data.get('log_name'), data.get('api_key')
-    webhook_url = data.get('webhook_url') 
-    if not api_key: return jsonify({'error': 'OpenAI API key not provided.'}), 400
-    if not log_content: return jsonify({'error': 'Missing log_content.'}), 400
+    log_content = data.get('log_content')
+    log_name = data.get('log_name')
+    webhook_url = data.get('webhook_url')
+    provider = data.get('provider', 'openai')  # 'openai' or 'ollama'
     
-    truncated_content = log_content
-    if len(log_content) > MAX_CHAR_COUNT:
-        truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+    if not log_content:
+        return jsonify({'error': 'Missing log_content.'}), 400
+    
+    analysis = None
     
     try:
-        client = openai.OpenAI(api_key=api_key)
-        response = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": "You are a helpful assistant that analyses log files."}, {"role": "user", "content": f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"}])
-        analysis = response.choices[0].message.content
+        if provider == 'ollama':
+            # Use Ollama
+            config = load_config()
+            ollama_url = config.get('ollama_url')
+            ollama_model = config.get('ollama_model')
+            
+            if not ollama_url or not ollama_model:
+                return jsonify({'error': 'Ollama not configured. Please set up Ollama in Settings.'}), 400
+            
+            analysis = analyse_with_ollama(log_content, log_name, ollama_url, ollama_model)
+        else:
+            # Use OpenAI (default)
+            api_key = data.get('api_key')
+            if not api_key:
+                return jsonify({'error': 'OpenAI API key not provided.'}), 400
+            
+            truncated_content = log_content
+            if len(log_content) > MAX_CHAR_COUNT:
+                truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+            
+            client = openai.OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that analyses log files."},
+                    {"role": "user", "content": f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"}
+                ]
+            )
+            analysis = response.choices[0].message.content
+        
+        # Check for alerts and send Discord notification if needed
         discord_sent = False
-        if webhook_url and any(keyword in analysis.lower() for keyword in DISCORD_ALERT_KEYWORDS):
+        if webhook_url and analysis and any(keyword in analysis.lower() for keyword in DISCORD_ALERT_KEYWORDS):
             send_discord_notification(webhook_url, log_name, 'local', analysis)
             discord_sent = True
+        
         return jsonify({'analysis': analysis, 'discord_sent': discord_sent})
-    except Exception as e: return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
 
 @app.route('/test_discord', methods=['POST'])
 def test_discord():
@@ -865,13 +990,26 @@ def test_discord():
 def _do_analysis_task():
     print("--- Commencing scheduled log analysis task ---")
     config = load_config()
-    api_key, webhook_url, sources = config.get('api_key'), config.get('webhook_url'), config.get('sources', [])
-    if not all([api_key, webhook_url, sources]):
-        print("Scheduled analysis aborted: Missing config.")
+    webhook_url, sources = config.get('webhook_url'), config.get('sources', [])
+    provider = config.get('analysis_provider', 'openai')  # Get configured provider
+    
+    if not all([webhook_url, sources]):
+        print("Scheduled analysis aborted: Missing webhook URL or sources.")
         return
+    
+    # Validate provider is configured
+    if provider == 'ollama':
+        if not config.get('ollama_url') or not config.get('ollama_model'):
+            print("Scheduled analysis aborted: Ollama not configured.")
+            return
+    else:
+        if not config.get('api_key'):
+            print("Scheduled analysis aborted: OpenAI API key not configured.")
+            return
+    
     for source in sources:
         log_name, log_type, host = source.get('name'), source.get('type'), source.get('host', 'local')
-        print(f"Analyzing {log_type}: {log_name} on {host}")
+        print(f"Analyzing {log_type}: {log_name} on {host} using {provider}")
         try:
             command = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))} 2>/dev/null | tail -n 500" if log_name.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))}"
             if log_type != 'file': command = f"sudo journalctl -u {shlex.quote(log_name)} -n 500 --no-pager"
@@ -884,10 +1022,21 @@ def _do_analysis_task():
             if len(log_content) > MAX_CHAR_COUNT:
                 truncated_content = f"[--- Log truncated... ---]\n" + log_content[-MAX_CHAR_COUNT:]
 
-            client = openai.OpenAI(api_key=api_key)
-            prompt = "Analyse this log for any errors and create a summary report, troubleshooting tips and any other advice relating to any other issues found."
-            response = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": "You are a helpful assistant that analyses log files for potential issues."}, {"role": "user", "content": f"{prompt}\n\n--- LOG for {log_name} on {host} ---\n{truncated_content}"}])
-            analysis = response.choices[0].message.content
+            # Use configured provider for analysis
+            if provider == 'ollama':
+                analysis = analyse_with_ollama(log_content, f"{log_name} on {host}", config.get('ollama_url'), config.get('ollama_model'))
+            else:
+                prompt = "Analyse this log for any errors and create a summary report, troubleshooting tips and any other advice relating to any other issues found."
+                client = openai.OpenAI(api_key=config.get('api_key'))
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that analyses log files for potential issues."},
+                        {"role": "user", "content": f"{prompt}\n\n--- LOG for {log_name} on {host} ---\n{truncated_content}"}
+                    ]
+                )
+                analysis = response.choices[0].message.content
+            
             if any(keyword in analysis.lower() for keyword in DISCORD_ALERT_KEYWORDS):
                 print(f"Issue found in {log_name} on {host}. Sending alert to Discord.")
                 send_discord_notification(webhook_url, log_name, host, analysis)
