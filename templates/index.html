@@ -214,121 +214,156 @@
         </main>
     </div>
 
-    <!-- Settings Modal -->
+    <!-- Settings Modal with Sidebar Navigation -->
     <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-<div class="glass-container p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-6">
-<h3 class="text-xl font-semibold text-gray-800">Settings</h3>
-<button id="close-settings-btn" class="text-gray-600 hover:text-gray-800 text-2xl leading-none">&times;</button>
+        <div class="glass-container w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <!-- Header -->
+            <div class="flex justify-between items-center p-6 border-b border-white/10">
+                <h3 class="text-xl font-semibold text-white">Settings</h3>
+                <button id="close-settings-btn" class="text-gray-300 hover:text-white text-2xl leading-none">&times;</button>
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <!-- AI Provider Selection Column -->
-                <div class="space-y-4 glass-container p-4">
-                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">AI Provider Selection</h4>
+
+            <!-- Main Content -->
+            <div class="flex flex-1 overflow-hidden">
+                <!-- Sidebar Navigation -->
+                <aside class="w-48 bg-white/5 border-r border-white/10 flex flex-col">
+                    <nav class="flex-1 overflow-y-auto">
+                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent active" data-section="ai-provider">
+                            <span class="text-sm font-medium text-gray-200">🤖 AI Provider</span>
+                        </button>
+                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="prompts">
+                            <span class="text-sm font-medium text-gray-200">✏️ AI Prompts</span>
+                        </button>
+                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="notifications">
+                            <span class="text-sm font-medium text-gray-200">🔔 Notifications</span>
+                        </button>
+                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="scheduled-analysis">
+                            <span class="text-sm font-medium text-gray-200">📅 Scheduled Analysis</span>
+                        </button>
+                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="remote-hosts">
+                            <span class="text-sm font-medium text-gray-200">🌐 Remote Hosts</span>
+                        </button>
+                    </nav>
+                </aside>
+
+                <!-- Content Panels -->
+                <div class="flex-1 overflow-y-auto p-6 space-y-4">
                     
-                    <div>
-                        <label for="provider-dropdown" class="block text-sm font-medium text-gray-700 mb-2">Select Default AI Provider</label>
-                        <select id="provider-dropdown" class="w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2 text-sm">
-                            <option value="openai">OpenAI (GPT-3.5)</option>
-                            <option value="ollama">Ollama (Local)</option>
-                        </select>
-                    </div>
-                    
-                    <!-- OpenAI Configuration Section -->
-                    <div id="openai-config-panel" class="border-t border-gray-300 pt-4 hidden">
-                        <h5 class="font-medium text-gray-800 mb-3">OpenAI Configuration</h5>
-                        <div class="mb-3">
-                            <label for="openai-api-key" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                            <div class="flex space-x-2">
-                                <input type="password" id="openai-api-key" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="sk-...">
-                                <button id="test-openai-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
-                            </div>
-                            <p id="openai-test-status" class="text-xs mt-2"></p>
-                        </div>
-                    </div>
-                    
-                    <!-- Ollama Configuration Section -->
-                    <div id="ollama-config-panel" class="border-t border-gray-300 pt-4 hidden">
-                        <h5 class="font-medium text-gray-800 mb-3">Ollama Configuration</h5>
-                        <div class="mb-3">
-                            <label for="ollama-api-url" class="block text-sm font-medium text-gray-700 mb-1">Ollama API URL</label>
-                            <div class="flex space-x-2">
-                                <input type="text" id="ollama-api-url" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="http://localhost:11434">
-                                <button id="test-ollama-url-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
-                            </div>
-                            <p id="ollama-url-test-status" class="text-xs mt-2"></p>
+                    <!-- AI Provider Section -->
+                    <section id="ai-provider-section" class="settings-section space-y-4 hidden">
+                        <h4 class="font-semibold text-lg text-white">AI Provider Selection</h4>
+                        <div>
+                            <label for="provider-dropdown" class="block text-sm font-medium text-gray-300 mb-2">Select Default AI Provider</label>
+                            <select id="provider-dropdown" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white">
+                                <option value="openai">OpenAI (GPT-3.5)</option>
+                                <option value="ollama">Ollama (Local)</option>
+                            </select>
                         </div>
                         
-                        <!-- Models Section (hidden until URL is tested) -->
-                        <div id="ollama-models-panel" class="mt-4 hidden pt-4 border-t border-gray-300">
-                            <div class="flex space-x-2 mb-3">
-                                <button id="get-models-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors flex-1">Get Models</button>
+                        <!-- OpenAI Configuration Section -->
+                        <div id="openai-config-panel" class="border-t border-white/10 pt-4 hidden">
+                            <h5 class="font-medium text-white mb-3">OpenAI Configuration</h5>
+                            <div class="mb-3">
+                                <label for="openai-api-key" class="block text-sm font-medium text-gray-300 mb-1">API Key</label>
+                                <div class="flex space-x-2">
+                                    <input type="password" id="openai-api-key" class="flex-grow bg-white/10 border border-white/20 rounded-md px-3 py-2 placeholder-gray-500 text-white" placeholder="sk-...">
+                                    <button id="test-openai-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
+                                </div>
+                                <p id="openai-test-status" class="text-xs mt-2"></p>
                             </div>
-                            <label for="ollama-model-select" class="block text-sm font-medium text-gray-700 mb-1">Select Model</label>
+                        </div>
+                        
+                        <!-- Ollama Configuration Section -->
+                        <div id="ollama-config-panel" class="border-t border-white/10 pt-4 hidden">
+                            <h5 class="font-medium text-white mb-3">Ollama Configuration</h5>
+                            <div class="mb-3">
+                                <label for="ollama-api-url" class="block text-sm font-medium text-gray-300 mb-1">Ollama API URL</label>
+                                <div class="flex space-x-2">
+                                    <input type="text" id="ollama-api-url" class="flex-grow bg-white/10 border border-white/20 rounded-md px-3 py-2 placeholder-gray-500 text-white" placeholder="http://localhost:11434">
+                                    <button id="test-ollama-url-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
+                                </div>
+                                <p id="ollama-url-test-status" class="text-xs mt-2"></p>
+                            </div>
+                            
+                            <!-- Models Section (hidden until URL is tested) -->
+                            <div id="ollama-models-panel" class="mt-4 hidden pt-4 border-t border-white/10">
+                                <div class="flex space-x-2 mb-3">
+                                    <button id="get-models-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors flex-1">Get Models</button>
+                                </div>
+                                <label class="block text-sm font-medium text-gray-300 mb-3">Select Model</label>
+                                <div id="ollama-models-list" class="grid grid-cols-2 gap-3 mb-4">
+                                    <!-- Models will be rendered here as radio buttons -->
+                                </div>
+                                <button id="test-ollama-model-btn" class="w-full bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test Selected Model</button>
+                                <p id="ollama-model-test-status" class="text-xs mt-2"></p>
+                            </div>
+                        </div>
+                        
+                        <!-- Current Configuration Status -->
+                        <div id="current-config-status" class="border-t border-white/10 pt-4 hidden">
+                            <div class="p-3 bg-green-500/20 rounded-md border border-green-500/30">
+                                <p class="text-sm font-semibold text-green-400">✅ Active Provider</p>
+                                <p id="active-provider-name" class="text-sm text-green-300 mt-1"></p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- AI Prompts Section (Placeholder) -->
+                    <section id="prompts-section" class="settings-section space-y-4">
+                        <h4 class="font-semibold text-lg text-white">AI Prompts</h4>
+                        <p class="text-sm text-gray-300">Customize the prompts used for AI log analysis. This feature allows you to tailor the behavior of the AI analysis to match your specific needs and terminology.</p>
+                        <div class="bg-blue-500/20 border border-blue-500/30 rounded-md p-4">
+                            <p class="text-sm text-blue-300">🔧 <strong>Coming Soon:</strong> Custom prompt configuration interface will be available in the next release.</p>
+                        </div>
+                    </section>
+
+                    <!-- Notifications Section -->
+                    <section id="notifications-section" class="settings-section space-y-4 hidden">
+                        <h4 class="font-semibold text-lg text-white">Notifications</h4>
+                        <div>
+                            <label for="discord-webhook-input" class="block text-sm font-medium text-gray-300 mb-1">Discord Webhook URL</label>
                             <div class="flex space-x-2">
-                                <select id="ollama-model-select" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 text-sm">
-                                    <option value="">-- No models loaded --</option>
-                                </select>
-                                <button id="test-ollama-model-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
+                                <input type="password" id="discord-webhook-input" class="flex-grow w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder-gray-500" placeholder="https://discord.com/api/webhooks/...">
+                                <button id="test-discord-btn" class="button px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-wait">Test</button>
                             </div>
-                            <p id="ollama-model-test-status" class="text-xs mt-2"></p>
                         </div>
-                    </div>
-                    
-                    <!-- Current Configuration Status -->
-                    <div id="current-config-status" class="border-t border-gray-300 pt-4 hidden">
-                        <div class="p-3 bg-green-50 rounded-md border border-green-200">
-                            <p class="text-sm font-semibold text-green-800">✅ Active Provider</p>
-                            <p id="active-provider-name" class="text-sm text-green-700 mt-1"></p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Notifications Column -->
-                <div class="space-y-6 glass-container p-4">
-                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Notifications</h4>
-                    <div>
-                        <label for="discord-webhook-input" class="block text-sm font-medium text-gray-700 mb-1">Discord Webhook URL</label>
-                        <div class="flex space-x-2">
-                            <input type="password" id="discord-webhook-input" class="flex-grow w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2" placeholder="https://discord.com/api/webhooks/...">
-                            <button id="test-discord-btn" class="button px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-wait">Test</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Second Row: Hosts and Scheduler -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-                <!-- Hosts Column -->
-                <div class="space-y-4 glass-container p-4 flex flex-col">
-                    <div class="flex justify-between items-center border-b border-gray-300 pb-2">
-                         <h4 class="font-semibold text-lg text-gray-800">Remote Hosts</h4>
-                         <button id="add-new-host-btn" class="button px-3 py-1 text-sm">Add New</button>
-                    </div>
-                    <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
-                </div>
-                <!-- Scheduler Column -->
-                <div class="space-y-4 glass-container p-4 flex flex-col">
-                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Scheduled Analysis</h4>
-                    <p class="text-xs text-black font-bold">Scheduled analysis can now run on any configured host.</p>
-                    <div id="scheduler-status" class="text-sm text-gray-600 p-2 rounded-md bg-white/80">Loading status...</div>
-                    <div class="flex-grow">
+                    </section>
+
+                    <!-- Scheduled Analysis Section -->
+                    <section id="scheduled-analysis-section" class="settings-section space-y-4 hidden">
+                        <h4 class="font-semibold text-lg text-white">Scheduled Analysis</h4>
+                        <p class="text-xs text-gray-300 font-bold">Scheduled analysis can now run on any configured host.</p>
+                        <div id="scheduler-status" class="text-sm text-gray-300 p-2 rounded-md bg-white/5 border border-white/10">Loading status...</div>
                         <button id="select-logs-btn" class="button w-full mb-4 px-4 py-2 text-sm">Select Logs for Schedule...</button>
-                        <span id="selected-log-count" class="text-sm text-black font-bold block text-center">0 logs selected</span>
-                    </div>
-                    <div>
-                        <label for="schedule-interval-input" class="block text-sm font-medium text-gray-700 mb-1">Run every (hours)</label>
-                        <input type="number" id="schedule-interval-input" class="w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2" min="1" max="100" value="12">
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 pt-2">
-                         <button id="start-schedule-btn" class="button px-4 py-2 text-sm">Start</button>
-                         <button id="stop-schedule-btn" class="button px-4 py-2 text-sm">Stop</button>
-                         <button id="run-now-btn" class="button px-4 py-2 text-sm">Run Now</button>
-                    </div>
+                        <div>
+                            <span id="selected-log-count" class="text-sm text-gray-300 font-bold block text-center mb-3">0 logs selected</span>
+                        </div>
+                        <div>
+                            <label for="schedule-interval-input" class="block text-sm font-medium text-gray-300 mb-1">Run every (hours)</label>
+                            <input type="number" id="schedule-interval-input" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white" min="1" max="100" value="12">
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 pt-2">
+                            <button id="start-schedule-btn" class="button px-4 py-2 text-sm">Start</button>
+                            <button id="stop-schedule-btn" class="button px-4 py-2 text-sm">Stop</button>
+                            <button id="run-now-btn" class="button px-4 py-2 text-sm">Run Now</button>
+                        </div>
+                    </section>
+
+                    <!-- Remote Hosts Section -->
+                    <section id="remote-hosts-section" class="settings-section space-y-4 hidden">
+                        <div class="flex justify-between items-center">
+                            <h4 class="font-semibold text-lg text-white">Remote Hosts</h4>
+                            <button id="add-new-host-btn" class="button px-3 py-1 text-sm">Add New</button>
+                        </div>
+                        <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                    </section>
+
                 </div>
             </div>
-             <div class="mt-8 flex justify-end">
-                <button id="save-credentials-btn" class="button px-6 py-2">Save Credentials & Close</button>
+
+            <!-- Footer -->
+            <div class="border-t border-white/10 p-6 flex justify-end">
+                <button id="save-credentials-btn" class="button px-6 py-2">Save & Close</button>
             </div>
         </div>
     </div>
@@ -981,7 +1016,11 @@
                 ollamaApiUrlInput.value = savedUrl;
                 if (savedUrl && savedModel) {
                     ollamaModelsPanel.classList.remove('hidden');
-                    ollamaModelSelectDropdown.value = savedModel;
+                    // Set the radio button to the saved model
+                    const savedModelRadio = document.querySelector(`input[name="ollama-model"][value="${savedModel}"]`);
+                    if (savedModelRadio) {
+                        savedModelRadio.checked = true;
+                    }
                     activeProviderName.textContent = `Ollama (${savedModel})`;
                     currentConfigStatus.classList.remove('hidden');
                 }
@@ -1104,7 +1143,8 @@
         const loadOllamaModels = async (url) => {
             getModelsBtn.disabled = true;
             getModelsBtn.textContent = 'Loading...';
-            ollamaModelSelectDropdown.innerHTML = '<option value="">Loading models...</option>';
+            const modelsList = document.getElementById('ollama-models-list');
+            modelsList.innerHTML = '<div class="col-span-2 text-sm text-gray-400">Loading models...</div>';
             
             try {
                 const data = await fetchApi('/ollama/models', {
@@ -1116,21 +1156,31 @@
                 const models = data.models || [];
                 
                 if (models.length === 0) {
-                    ollamaModelSelectDropdown.innerHTML = '<option value="">No models available</option>';
+                    modelsList.innerHTML = '<div class="col-span-2 text-sm text-gray-400">No models available</div>';
                     return;
                 }
                 
-                ollamaModelSelectDropdown.innerHTML = '';
-                models.forEach(modelName => {
-                    const option = document.createElement('option');
-                    option.value = modelName;
-                    option.textContent = modelName;
-                    ollamaModelSelectDropdown.appendChild(option);
+                modelsList.innerHTML = '';
+                models.forEach((modelName, index) => {
+                    const radioId = `ollama-model-${index}`;
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-3 p-3 rounded-md border border-white/10 hover:bg-white/5 cursor-pointer transition-colors';
+                    label.innerHTML = `
+                        <input type="radio" id="${radioId}" name="ollama-model" value="${modelName}" class="w-4 h-4 cursor-pointer">
+                        <span class="text-sm text-gray-200 flex-1">${modelName}</span>
+                    `;
+                    
+                    const input = label.querySelector('input[type="radio"]');
+                    input.addEventListener('change', () => {
+                        testOllamaModelBtn.disabled = false;
+                    });
+                    
+                    modelsList.appendChild(label);
                 });
                 
                 showToast(`Found ${models.length} model(s)`);
             } catch (error) {
-                ollamaModelSelectDropdown.innerHTML = `<option value="">Error: ${error.message}</option>`;
+                modelsList.innerHTML = `<div class="col-span-2 text-sm text-red-400">Error: ${error.message}</div>`;
                 showToast(`Error loading models: ${error.message}`, 'error');
             } finally {
                 getModelsBtn.disabled = false;
@@ -1140,7 +1190,8 @@
         
         // Test Ollama Model button
         testOllamaModelBtn.addEventListener('click', async () => {
-            const model = ollamaModelSelectDropdown.value;
+            const selectedRadio = document.querySelector('input[name="ollama-model"]:checked');
+            const model = selectedRadio ? selectedRadio.value : '';
             const url = ollamaApiUrlInput.value.trim();
             
             if (!model) {
@@ -1257,12 +1308,50 @@
 
         // --- EVENT LISTENERS ---
 
+        // --- SETTINGS MODAL SIDEBAR NAVIGATION ---
+        const settingsNavBtns = document.querySelectorAll('.settings-nav-btn');
+        const settingsSections = document.querySelectorAll('.settings-section');
+        
+        const switchSettingsSection = (sectionId) => {
+            // Hide all sections
+            settingsSections.forEach(section => section.classList.add('hidden'));
+            
+            // Remove active state from all buttons
+            settingsNavBtns.forEach(btn => {
+                btn.classList.remove('active', 'bg-white/20', 'border-l-indigo-400');
+                btn.classList.add('border-l-transparent');
+            });
+            
+            // Show selected section
+            const selectedSection = document.getElementById(`${sectionId}-section`);
+            if (selectedSection) {
+                selectedSection.classList.remove('hidden');
+            }
+            
+            // Mark button as active
+            const activeBtn = document.querySelector(`.settings-nav-btn[data-section="${sectionId}"]`);
+            if (activeBtn) {
+                activeBtn.classList.add('active', 'bg-white/20', 'border-l-indigo-400');
+                activeBtn.classList.remove('border-l-transparent');
+            }
+        };
+        
+        // Add click listeners to sidebar buttons
+        settingsNavBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const section = btn.dataset.section;
+                switchSettingsSection(section);
+            });
+        });
+        
         settingsBtn.addEventListener('click', () => {
              settingsModal.classList.remove('hidden');
              populateHostList();
              updateSchedulerStatus();
              loadCurrentProviderConfig();
              loadSettingsFromBackend();
+             // Ensure AI Provider section is shown by default
+             switchSettingsSection('ai-provider');
         });
         closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
         addNewHostBtn.addEventListener('click', () => openHostModal());
@@ -1340,31 +1429,10 @@
         });
         
         saveCredentialsBtn.addEventListener('click', async () => {
-            localStorage.setItem('openai_api_key', apiKeyInput.value.trim() || '');
-            localStorage.setItem('discord_webhook_url', discordWebhookInput.value.trim() || '');
-            
-            // Also save to backend config if Ollama is configured
-            if (ollamaUrlInput.value.trim() && ollamaModelSelect.value) {
-                try {
-                    await fetchApi('/ollama/config', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            ollama_url: ollamaUrlInput.value.trim(), 
-                            ollama_model: ollamaModelSelect.value 
-                        })
-                    });
-                    localStorage.setItem('ollama_url', ollamaUrlInput.value.trim());
-                    localStorage.setItem('ollama_model', ollamaModelSelect.value);
-                } catch (error) {
-                    console.log('Note: Ollama config save handled separately');
-                }
-            }
-            
-            // Update provider indicator
-            updateProviderIndicator();
-            
-            showToast('Credentials saved!');
+            // Note: Individual handlers (testOpenaiBtn, testOllamaModelBtn, testDiscordBtn) 
+            // already save credentials to localStorage when tested
+            // This button just closes the modal
+            showToast('Settings saved!');
             settingsModal.classList.add('hidden');
         });
         

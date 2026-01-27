@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-01-27 | v2.3.0 | Settings Modal Redesign, Sidebar Navigation, Radio Button Models, Dark Theme, Bug Fixes | ✅ Complete |
 | 2026-01-27 | v2.2.0 | Unified AI Provider Settings, DOM Element Fixes, Host Card Styling, Multi-Model Support | ✅ Complete |
 | 2026-01-15 | v2.1.0 | Global Search, Multi-Host Enhancements, Progress Tracking | ✅ Complete |
 | 2025-12-01 | v2.0.0 | Multi-Host Architecture, SSH Integration, Concurrent Processing | ✅ Complete |
@@ -196,13 +197,20 @@ The interface features a clean, modern design with:
 
 ### 🔧 Initial Setup
 
-1. **Configure Credentials**:
+1. **Configure AI Provider**:
    - Click the **Settings** ⚙️ icon in the header
-   - Enter your **OpenAI API Key** for AI analysis
-   - Add your **Discord Webhook URL** for notifications
-   - Click **Save Credentials & Close**
+   - Navigate to **AI Provider** section (default view)
+   - Select your provider:
+     - **OpenAI**: Enter your API key and click **Test**
+     - **Ollama**: Enter API URL, test connection, get models, select model
+   - Provider configuration is saved automatically when tested
 
-2. **Add Remote Hosts**:
+2. **Configure Notifications** (Optional):
+   - In Settings → **Notifications**
+   - Enter your **Discord Webhook URL**
+   - Click **Test** to verify the connection
+
+3. **Add Remote Hosts**:
    - In Settings → **Remote Hosts** → **Add New**
    - Fill in host details:
      - **Friendly Name**: "Production Server", "Database Host", etc.
@@ -211,6 +219,9 @@ The interface features a clean, modern design with:
      - **Description**: Optional host description
    - Click **Test Connection** to verify SSH and sudo access
    - On success (green indicator), click **Save Host**
+
+4. **Close Settings**:
+   - Click **Save & Close** to return to the main interface
 
 ### 🔍 Search Functionality
 
@@ -319,6 +330,27 @@ The application provides detailed startup logs showing:
 5. **Scheduling**: APScheduler for automated monitoring tasks
 
 ## 📝 Recent Updates
+
+### v2.3.0 - Settings Modal Redesign & UX Improvements
+- 🎨 **Sidebar Navigation**: Redesigned settings modal with intuitive sidebar menu
+  - Five menu sections: AI Provider, AI Prompts, Notifications, Scheduled Analysis, Remote Hosts
+  - Clean separation of concerns with content panels
+  - Active state indicators with indigo borders
+- 🎯 **Dark Theme Support**: Updated settings modal to match main application dark theme
+  - Dark semi-transparent glass-effect backgrounds
+  - White/light gray text for better readability
+  - Dark input fields with white borders
+  - Consistent styling with overall application aesthetic
+- 📻 **Model Selection Redesign**: Ollama model selection improved
+  - Changed from dropdown to 2-column radio button grid
+  - Larger clickable areas with hover effects
+  - Better visual hierarchy and user experience
+- 🔧 **AI Prompts Placeholder**: New section for future custom prompt configuration
+  - Coming Soon interface ready for prompt customization feature
+- 🐛 **Bug Fixes**: Fixed critical issues with settings modal
+  - Resolved "Save & Close" button TypeError
+  - Removed dependencies on non-existent DOM elements
+  - Simplified credentials handling workflow
 
 ### v2.2.0 - Unified AI Provider Settings & UI Improvements
 - 🔧 **Unified AI Provider Selection**: Single dropdown to select between OpenAI and Ollama
