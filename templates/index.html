@@ -857,6 +857,24 @@
             });
         };
         
+        // --- SETTINGS MANAGEMENT ---
+        const loadSettingsFromBackend = async () => {
+            try {
+                const ollamaConfig = await fetchApi('/ollama/config', { method: 'GET' });
+                if (ollamaConfig.ollama_url) {
+                    ollamaUrlInput.value = ollamaConfig.ollama_url;
+                    localStorage.setItem('ollama_url', ollamaConfig.ollama_url);
+                }
+                if (ollamaConfig.ollama_model) {
+                    localStorage.setItem('ollama_model', ollamaConfig.ollama_model);
+                    ollamaConfigStatus.textContent = `✅ Configured with model: ${ollamaConfig.ollama_model}`;
+                    ollamaModelSection.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.log('No Ollama config in backend yet');
+            }
+        };
+        
         // --- HOST MANAGEMENT ---
         const openHostModal = (host = null) => {
             hostForm.reset();
@@ -918,6 +936,7 @@
              settingsModal.classList.remove('hidden');
              populateHostList();
              updateSchedulerStatus();
+             loadSettingsFromBackend();
         });
         closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
         addNewHostBtn.addEventListener('click', () => openHostModal());
@@ -994,10 +1013,27 @@
             } catch(error) {}
         });
         
-        saveCredentialsBtn.addEventListener('click', () => {
+        saveCredentialsBtn.addEventListener('click', async () => {
             localStorage.setItem('openai_api_key', apiKeyInput.value.trim() || '');
             localStorage.setItem('discord_webhook_url', discordWebhookInput.value.trim() || '');
             localStorage.setItem('analysis_provider', analysisProviderSelect.value);
+            
+            // Also save to backend config if Ollama is configured
+            if (ollamaUrlInput.value.trim() && ollamaModelSelect.value) {
+                try {
+                    await fetchApi('/ollama/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            ollama_url: ollamaUrlInput.value.trim(), 
+                            ollama_model: ollamaModelSelect.value 
+                        })
+                    });
+                } catch (error) {
+                    console.log('Note: Ollama config save handled separately');
+                }
+            }
+            
             showToast('Credentials saved!');
             settingsModal.classList.add('hidden');
         });
@@ -1161,7 +1197,8 @@
                 const hasOpenAI = localStorage.getItem('openai_api_key');
                 const hasOllama = localStorage.getItem('ollama_url') && localStorage.getItem('ollama_model');
                 
-                if ((provider === 'openai' && hasOpenAI || provider === 'ollama' && hasOllama) && data.content) {
+                const canAnalyse = ((provider === 'openai' && hasOpenAI) || (provider === 'ollama' && hasOllama)) && data.content;
+                if (canAnalyse) {
                      aiAnalyseBtn.classList.remove('hidden');
                      if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
                 }
