@@ -1429,31 +1429,10 @@
         });
         
         saveCredentialsBtn.addEventListener('click', async () => {
-            localStorage.setItem('openai_api_key', apiKeyInput.value.trim() || '');
-            localStorage.setItem('discord_webhook_url', discordWebhookInput.value.trim() || '');
-            
-            // Also save to backend config if Ollama is configured
-            if (ollamaUrlInput.value.trim() && ollamaModelSelect.value) {
-                try {
-                    await fetchApi('/ollama/config', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            ollama_url: ollamaUrlInput.value.trim(), 
-                            ollama_model: ollamaModelSelect.value 
-                        })
-                    });
-                    localStorage.setItem('ollama_url', ollamaUrlInput.value.trim());
-                    localStorage.setItem('ollama_model', ollamaModelSelect.value);
-                } catch (error) {
-                    console.log('Note: Ollama config save handled separately');
-                }
-            }
-            
-            // Update provider indicator
-            updateProviderIndicator();
-            
-            showToast('Credentials saved!');
+            // Note: Individual handlers (testOpenaiBtn, testOllamaModelBtn, testDiscordBtn) 
+            // already save credentials to localStorage when tested
+            // This button just closes the modal
+            showToast('Settings saved!');
             settingsModal.classList.add('hidden');
         });
         
