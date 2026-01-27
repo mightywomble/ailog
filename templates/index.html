@@ -402,8 +402,8 @@
     document.addEventListener('DOMContentLoaded', () => {
         // --- ELEMENT SELECTORS ---
         const sourceListContainer = document.getElementById('log-table-container');
-        const logTitle = document.getElementById('log-title');
-        const logContent = document.getElementById('log-content');
+        const logTitle = document.getElementById('log-table-title');
+        const logContent = document.getElementById('log-content-container');
         const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
         const truncationWarning = document.getElementById('truncation-warning');
         // Removed non-existent elements: searchBox, sortControls, filterControls
@@ -562,7 +562,7 @@
         const fetchTableView = async () => {
             sourceListContainer.innerHTML = '';
             logTitle.textContent = 'Loading logs from all hosts...';
-            logContent.textContent = '';
+            logContent.innerHTML = '';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
             progressContainer.classList.remove('hidden');
@@ -657,7 +657,7 @@
         const loadLogContent = async (logName, logType, hostId, hostName) => {
             currentLogName = logName;
             logTitle.textContent = `Loading: ${logName} from ${hostName}...`;
-            logContent.textContent = 'Fetching log data...';
+            logContent.innerHTML = '<div class="text-center text-gray-500 mt-16">Fetching log data...</div>';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
 
@@ -671,7 +671,7 @@
                 
                 currentLogContent = data.content;
                 logTitle.textContent = `${logName} on ${hostName}`;
-                logContent.textContent = data.content || 'Log source is empty.';
+                logContent.innerHTML = `<pre class="text-sm text-black font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
                 if (localStorage.getItem('openai_api_key') && data.content) {
                      aiAnalyseBtn.classList.remove('hidden');
@@ -679,7 +679,7 @@
                 }
             } catch (error) {
                 logTitle.textContent = `Error loading ${logName}`;
-                logContent.textContent = error.message;
+                logContent.innerHTML = `<div class="text-center text-red-500 mt-16">${error.message}</div>`;
                 showToast(error.message, 'error');
             }
         };
@@ -1368,7 +1368,8 @@
             settingsModal.classList.add('hidden');
         });
         
-        // Ollama test button
+        // Ollama test button (legacy - only if element exists)
+        if (testOllamaBtn) {
         testOllamaBtn.addEventListener('click', async () => {
             const url = ollamaUrlInput.value.trim();
             if (!url) {
@@ -1412,6 +1413,7 @@
                 testOllamaBtn.textContent = 'Retry';
             }
         });
+        }
 
         sourceListContainer.addEventListener('click', async (event) => {
             const link = event.target.closest('.log-link');
