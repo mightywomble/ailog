@@ -873,6 +873,44 @@ def get_ollama_models():
     except Exception as e:
         return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
 
+@app.route('/ai/config', methods=['GET'])
+def get_ai_config():
+    """Get current AI provider configuration"""
+    config = load_config()
+    provider = config.get('analysis_provider', 'openai')
+    
+    result = {'provider': provider}
+    
+    if provider == 'openai':
+        result['openai_configured'] = bool(config.get('openai_api_key'))
+    elif provider == 'ollama':
+        result['ollama_configured'] = bool(config.get('ollama_url') and config.get('ollama_model'))
+        result['ollama_model'] = config.get('ollama_model', '')
+    
+    return jsonify(result)
+
+@app.route('/openai/config', methods=['POST', 'GET'])
+def openai_config():
+    """Save or retrieve OpenAI configuration"""
+    if request.method == 'POST':
+        data = request.get_json()
+        api_key = data.get('api_key', '').strip()
+        
+        if not api_key:
+            return jsonify({'error': 'OpenAI API key is required.'}), 400
+        
+        config = load_config()
+        config['openai_api_key'] = api_key
+        config['analysis_provider'] = 'openai'  # Set as default provider
+        save_config(config)
+        return jsonify({'message': 'OpenAI configuration saved.'})
+    else:  # GET
+        config = load_config()
+        return jsonify({
+            'api_key': config.get('openai_api_key', ''),
+            'analysis_provider': config.get('analysis_provider', 'openai')
+        })
+
 @app.route('/ollama/config', methods=['POST', 'GET'])
 def ollama_config():
     """Save or retrieve Ollama configuration"""
@@ -887,13 +925,15 @@ def ollama_config():
         config = load_config()
         config['ollama_url'] = ollama_url if ollama_url.startswith('http') else f'http://{ollama_url}'
         config['ollama_model'] = ollama_model
+        config['analysis_provider'] = 'ollama'  # Set as default provider
         save_config(config)
         return jsonify({'message': 'Ollama configuration saved.'})
     else:  # GET
         config = load_config()
         return jsonify({
             'ollama_url': config.get('ollama_url', ''),
-            'ollama_model': config.get('ollama_model', '')
+            'ollama_model': config.get('ollama_model', ''),
+            'analysis_provider': config.get('analysis_provider', 'openai')
         })
 
 def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
