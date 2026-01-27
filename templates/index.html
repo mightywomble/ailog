@@ -1156,7 +1156,12 @@
                 // Create a pre element with black text for log content
                 logContentContainer.innerHTML = `<pre class="text-sm text-black font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
-                if (localStorage.getItem('openai_api_key') && data.content) {
+                // Show AI Analyse button if either provider is configured
+                const provider = localStorage.getItem('analysis_provider') || 'openai';
+                const hasOpenAI = localStorage.getItem('openai_api_key');
+                const hasOllama = localStorage.getItem('ollama_url') && localStorage.getItem('ollama_model');
+                
+                if ((provider === 'openai' && hasOpenAI || provider === 'ollama' && hasOllama) && data.content) {
                      aiAnalyseBtn.classList.remove('hidden');
                      if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
                 }
