@@ -847,19 +847,25 @@ def test_ollama():
     except Exception as e:
         return jsonify({'success': False, 'error': f'Unexpected error: {str(e)}'}), 500
 
-@app.route('/ollama/models', methods=['GET'])
+@app.route('/ollama/models', methods=['POST'])
 def get_ollama_models():
-    """Fetch available models from configured Ollama instance"""
-    config = load_config()
-    ollama_url = config.get('ollama_url', '').strip()
+    """Fetch available models from Ollama instance - backend proxy to avoid CORS"""
+    data = request.get_json()
+    ollama_url = data.get('ollama_url', '').strip()
+    
     if not ollama_url:
-        return jsonify({'error': 'Ollama URL not configured.'}), 400
+        # Fall back to config if not provided
+        config = load_config()
+        ollama_url = config.get('ollama_url', '').strip()
+    
+    if not ollama_url:
+        return jsonify({'error': 'Ollama URL not provided.'}), 400
     
     if not ollama_url.startswith('http'):
         ollama_url = f'http://{ollama_url}'
     
     try:
-        response = requests.get(f'{ollama_url}/api/tags', timeout=5)
+        response = requests.get(f'{ollama_url}/api/tags', timeout=10)
         response.raise_for_status()
         models = response.json().get('models', [])
         model_names = [m.get('name', 'unknown') for m in models]

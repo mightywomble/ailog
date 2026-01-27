@@ -1047,16 +1047,17 @@
             }
         });
         
-        // Load Ollama models
+        // Load Ollama models via backend (to avoid CORS)
         const loadOllamaModels = async (url) => {
-            const formattedUrl = url.startsWith('http') ? url : `http://${url}`;
             ollamaModelSelect.innerHTML = '<option value="">Loading models...</option>';
             
             try {
-                const response = await fetch(`${formattedUrl}/api/tags`);
-                if (!response.ok) throw new Error('Failed to fetch models');
+                const data = await fetchApi('/ollama/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ollama_url: url })
+                });
                 
-                const data = await response.json();
                 const models = data.models || [];
                 
                 if (models.length === 0) {
@@ -1065,10 +1066,10 @@
                 }
                 
                 ollamaModelSelect.innerHTML = '';
-                models.forEach(model => {
+                models.forEach(modelName => {
                     const option = document.createElement('option');
-                    option.value = model.name;
-                    option.textContent = model.name;
+                    option.value = modelName;
+                    option.textContent = modelName;
                     ollamaModelSelect.appendChild(option);
                 });
                 
