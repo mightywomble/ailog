@@ -290,13 +290,11 @@
                                 <div class="flex space-x-2 mb-3">
                                     <button id="get-models-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors flex-1">Get Models</button>
                                 </div>
-                                <label for="ollama-model-select" class="block text-sm font-medium text-gray-300 mb-1">Select Model</label>
-                                <div class="flex space-x-2">
-                                    <select id="ollama-model-select" class="flex-grow bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white">
-                                        <option value="">-- No models loaded --</option>
-                                    </select>
-                                    <button id="test-ollama-model-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
+                                <label class="block text-sm font-medium text-gray-300 mb-3">Select Model</label>
+                                <div id="ollama-models-list" class="grid grid-cols-2 gap-3 mb-4">
+                                    <!-- Models will be rendered here as radio buttons -->
                                 </div>
+                                <button id="test-ollama-model-btn" class="w-full bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test Selected Model</button>
                                 <p id="ollama-model-test-status" class="text-xs mt-2"></p>
                             </div>
                         </div>
@@ -1018,7 +1016,11 @@
                 ollamaApiUrlInput.value = savedUrl;
                 if (savedUrl && savedModel) {
                     ollamaModelsPanel.classList.remove('hidden');
-                    ollamaModelSelectDropdown.value = savedModel;
+                    // Set the radio button to the saved model
+                    const savedModelRadio = document.querySelector(`input[name="ollama-model"][value="${savedModel}"]`);
+                    if (savedModelRadio) {
+                        savedModelRadio.checked = true;
+                    }
                     activeProviderName.textContent = `Ollama (${savedModel})`;
                     currentConfigStatus.classList.remove('hidden');
                 }
@@ -1141,7 +1143,8 @@
         const loadOllamaModels = async (url) => {
             getModelsBtn.disabled = true;
             getModelsBtn.textContent = 'Loading...';
-            ollamaModelSelectDropdown.innerHTML = '<option value="">Loading models...</option>';
+            const modelsList = document.getElementById('ollama-models-list');
+            modelsList.innerHTML = '<div class="col-span-2 text-sm text-gray-400">Loading models...</div>';
             
             try {
                 const data = await fetchApi('/ollama/models', {
@@ -1153,21 +1156,31 @@
                 const models = data.models || [];
                 
                 if (models.length === 0) {
-                    ollamaModelSelectDropdown.innerHTML = '<option value="">No models available</option>';
+                    modelsList.innerHTML = '<div class="col-span-2 text-sm text-gray-400">No models available</div>';
                     return;
                 }
                 
-                ollamaModelSelectDropdown.innerHTML = '';
-                models.forEach(modelName => {
-                    const option = document.createElement('option');
-                    option.value = modelName;
-                    option.textContent = modelName;
-                    ollamaModelSelectDropdown.appendChild(option);
+                modelsList.innerHTML = '';
+                models.forEach((modelName, index) => {
+                    const radioId = `ollama-model-${index}`;
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-3 p-3 rounded-md border border-white/10 hover:bg-white/5 cursor-pointer transition-colors';
+                    label.innerHTML = `
+                        <input type="radio" id="${radioId}" name="ollama-model" value="${modelName}" class="w-4 h-4 cursor-pointer">
+                        <span class="text-sm text-gray-200 flex-1">${modelName}</span>
+                    `;
+                    
+                    const input = label.querySelector('input[type="radio"]');
+                    input.addEventListener('change', () => {
+                        testOllamaModelBtn.disabled = false;
+                    });
+                    
+                    modelsList.appendChild(label);
                 });
                 
                 showToast(`Found ${models.length} model(s)`);
             } catch (error) {
-                ollamaModelSelectDropdown.innerHTML = `<option value="">Error: ${error.message}</option>`;
+                modelsList.innerHTML = `<div class="col-span-2 text-sm text-red-400">Error: ${error.message}</div>`;
                 showToast(`Error loading models: ${error.message}`, 'error');
             } finally {
                 getModelsBtn.disabled = false;
@@ -1177,7 +1190,8 @@
         
         // Test Ollama Model button
         testOllamaModelBtn.addEventListener('click', async () => {
-            const model = ollamaModelSelectDropdown.value;
+            const selectedRadio = document.querySelector('input[name="ollama-model"]:checked');
+            const model = selectedRadio ? selectedRadio.value : '';
             const url = ollamaApiUrlInput.value.trim();
             
             if (!model) {
