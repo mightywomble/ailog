@@ -2,6 +2,15 @@
 
 A comprehensive, modern web application for viewing and analyzing system logs from `/var/log` and `journalctl` across both **local** and **remote** servers. This advanced platform combines real-time log viewing, powerful search capabilities, AI-powered analysis, and proactive alerting in a sleek, responsive interface designed for developers and system administrators.
 
+## 📋 Version History
+
+| Date | Version | Major Changes | Status |
+|------|---------|---------------|--------|
+| 2026-01-27 | v2.2.0 | Unified AI Provider Settings, DOM Element Fixes, Host Card Styling, Multi-Model Support | ✅ Complete |
+| 2026-01-15 | v2.1.0 | Global Search, Multi-Host Enhancements, Progress Tracking | ✅ Complete |
+| 2025-12-01 | v2.0.0 | Multi-Host Architecture, SSH Integration, Concurrent Processing | ✅ Complete |
+| 2025-10-15 | v1.0.0 | Initial Release, Log Viewing, AI Analysis, Discord Alerts | ✅ Complete |
+
 ### ⚠️ Security Warning
 
 This application is designed for use on a trusted, internal development network only. It runs commands with `sudo` on local and remote machines and provides access to potentially sensitive log data.
@@ -310,6 +319,27 @@ The application provides detailed startup logs showing:
 5. **Scheduling**: APScheduler for automated monitoring tasks
 
 ## 📝 Recent Updates
+
+### v2.2.0 - Unified AI Provider Settings & UI Improvements
+- 🔧 **Unified AI Provider Selection**: Single dropdown to select between OpenAI and Ollama
+- 🤖 **Ollama Integration**: Full support for local Ollama models with:
+  - API URL configuration with connection testing
+  - Dynamic model discovery and selection
+  - Model availability verification
+  - Persistent configuration saved to config.json
+- 🔑 **OpenAI Configuration**: Simplified API key management with validation
+- 🎨 **Host Card Styling**: Improved visibility with better contrast and animations
+  - White/opaque backgrounds for better readability
+  - Animated green connection indicators
+  - Enhanced selected and hover states
+  - Better shadow and border styling
+- 🐛 **DOM Element Fixes**: Fixed null reference errors preventing host card display
+  - Corrected logTitle and logContent element references
+  - Added null checks for legacy elements
+  - Fixed testOllamaBtn conditional initialization
+- 📱 **Provider Indicator**: Toolbar badge showing active AI provider and model
+- 💾 **Configuration Persistence**: AI provider settings persisted across app restarts
+- ✅ **Status Validation**: Real-time configuration status display in Settings modal
 
 ### v2.1.0 - Advanced Search & Multi-Host Enhancements
 - ✨ **Global Search**: Search across all logs from all hosts simultaneously

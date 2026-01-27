@@ -52,6 +52,9 @@
     <header class="glass-container mx-4 mt-4 p-4 shadow-lg flex items-center justify-between flex-wrap gap-2">
         <h1 class="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">AI Log Viewer</h1>
         <div class="flex items-center space-x-4">
+            <div id="ai-provider-indicator" class="bg-blue-100/80 border border-blue-300 text-blue-800 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">
+                <span id="provider-label">Loading...</span>
+            </div>
             <button id="settings-btn" class="button text-sm px-4 py-2">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 Settings
@@ -218,14 +221,72 @@
 <h3 class="text-xl font-semibold text-gray-800">Settings</h3>
 <button id="close-settings-btn" class="text-gray-600 hover:text-gray-800 text-2xl leading-none">&times;</button>
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- Credentials Column -->
-                <div class="space-y-6 glass-container p-4">
-                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Credentials</h4>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- AI Provider Selection Column -->
+                <div class="space-y-4 glass-container p-4">
+                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">AI Provider Selection</h4>
+                    
                     <div>
-                        <label for="api-key-input" class="block text-sm font-medium text-gray-700 mb-1">OpenAI API Key</label>
-                        <input type="password" id="api-key-input" class="w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="sk-...">
+                        <label for="provider-dropdown" class="block text-sm font-medium text-gray-700 mb-2">Select Default AI Provider</label>
+                        <select id="provider-dropdown" class="w-full bg-white/80 border border-gray-300 rounded-md px-3 py-2 text-sm">
+                            <option value="openai">OpenAI (GPT-3.5)</option>
+                            <option value="ollama">Ollama (Local)</option>
+                        </select>
                     </div>
+                    
+                    <!-- OpenAI Configuration Section -->
+                    <div id="openai-config-panel" class="border-t border-gray-300 pt-4 hidden">
+                        <h5 class="font-medium text-gray-800 mb-3">OpenAI Configuration</h5>
+                        <div class="mb-3">
+                            <label for="openai-api-key" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                            <div class="flex space-x-2">
+                                <input type="password" id="openai-api-key" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="sk-...">
+                                <button id="test-openai-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
+                            </div>
+                            <p id="openai-test-status" class="text-xs mt-2"></p>
+                        </div>
+                    </div>
+                    
+                    <!-- Ollama Configuration Section -->
+                    <div id="ollama-config-panel" class="border-t border-gray-300 pt-4 hidden">
+                        <h5 class="font-medium text-gray-800 mb-3">Ollama Configuration</h5>
+                        <div class="mb-3">
+                            <label for="ollama-api-url" class="block text-sm font-medium text-gray-700 mb-1">Ollama API URL</label>
+                            <div class="flex space-x-2">
+                                <input type="text" id="ollama-api-url" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 placeholder-gray-500" placeholder="http://localhost:11434">
+                                <button id="test-ollama-url-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
+                            </div>
+                            <p id="ollama-url-test-status" class="text-xs mt-2"></p>
+                        </div>
+                        
+                        <!-- Models Section (hidden until URL is tested) -->
+                        <div id="ollama-models-panel" class="mt-4 hidden pt-4 border-t border-gray-300">
+                            <div class="flex space-x-2 mb-3">
+                                <button id="get-models-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors flex-1">Get Models</button>
+                            </div>
+                            <label for="ollama-model-select" class="block text-sm font-medium text-gray-700 mb-1">Select Model</label>
+                            <div class="flex space-x-2">
+                                <select id="ollama-model-select" class="flex-grow bg-white/80 border border-gray-300 rounded-md px-3 py-2 text-sm">
+                                    <option value="">-- No models loaded --</option>
+                                </select>
+                                <button id="test-ollama-model-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
+                            </div>
+                            <p id="ollama-model-test-status" class="text-xs mt-2"></p>
+                        </div>
+                    </div>
+                    
+                    <!-- Current Configuration Status -->
+                    <div id="current-config-status" class="border-t border-gray-300 pt-4 hidden">
+                        <div class="p-3 bg-green-50 rounded-md border border-green-200">
+                            <p class="text-sm font-semibold text-green-800">✅ Active Provider</p>
+                            <p id="active-provider-name" class="text-sm text-green-700 mt-1"></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Notifications Column -->
+                <div class="space-y-6 glass-container p-4">
+                    <h4 class="font-semibold text-lg text-gray-800 border-b border-gray-300 pb-2">Notifications</h4>
                     <div>
                         <label for="discord-webhook-input" class="block text-sm font-medium text-gray-700 mb-1">Discord Webhook URL</label>
                         <div class="flex space-x-2">
@@ -234,6 +295,10 @@
                         </div>
                     </div>
                 </div>
+            </div>
+            
+            <!-- Second Row: Hosts and Scheduler -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
                 <!-- Hosts Column -->
                 <div class="space-y-4 glass-container p-4 flex flex-col">
                     <div class="flex justify-between items-center border-b border-gray-300 pb-2">
@@ -337,8 +402,8 @@
     document.addEventListener('DOMContentLoaded', () => {
         // --- ELEMENT SELECTORS ---
         const sourceListContainer = document.getElementById('log-table-container');
-        const logTitle = document.getElementById('log-title');
-        const logContent = document.getElementById('log-content');
+        const logTitle = document.getElementById('log-table-title');
+        const logContent = document.getElementById('log-content-container');
         const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
         const truncationWarning = document.getElementById('truncation-warning');
         // Removed non-existent elements: searchBox, sortControls, filterControls
@@ -377,6 +442,35 @@
         const discordWebhookInput = document.getElementById('discord-webhook-input');
         const testDiscordBtn = document.getElementById('test-discord-btn');
         const saveCredentialsBtn = document.getElementById('save-credentials-btn');
+        const providerLabel = document.getElementById('provider-label');
+        
+        // AI Provider Selection Elements (NEW UNIFIED WORKFLOW)
+        const providerDropdown = document.getElementById('provider-dropdown');
+        const openaiConfigPanel = document.getElementById('openai-config-panel');
+        const ollamaConfigPanel = document.getElementById('ollama-config-panel');
+        const openaiApiKeyInput = document.getElementById('openai-api-key');
+        const testOpenaiBtn = document.getElementById('test-openai-btn');
+        const openaiTestStatus = document.getElementById('openai-test-status');
+        const ollamaApiUrlInput = document.getElementById('ollama-api-url');
+        const testOllamaUrlBtn = document.getElementById('test-ollama-url-btn');
+        const ollamaUrlTestStatus = document.getElementById('ollama-url-test-status');
+        const ollamaModelsPanel = document.getElementById('ollama-models-panel');
+        const getModelsBtn = document.getElementById('get-models-btn');
+        const ollamaModelSelectDropdown = document.getElementById('ollama-model-select');
+        const testOllamaModelBtn = document.getElementById('test-ollama-model-btn');
+        const ollamaModelTestStatus = document.getElementById('ollama-model-test-status');
+        const currentConfigStatus = document.getElementById('current-config-status');
+        const activeProviderName = document.getElementById('active-provider-name');
+        
+        // Legacy elements (for compatibility) - note: apiKeyInput already declared above
+        const ollamaUrlInput = document.getElementById('ollama-url-input');
+        const testOllamaBtn = document.getElementById('test-ollama-btn');
+        const ollamaTestStatus = document.getElementById('ollama-test-status');
+        const ollamaModelSection = document.getElementById('ollama-model-section');
+        const listModelsBtn = document.getElementById('list-models-btn');
+        const addOllamaBtn = document.getElementById('add-ollama-btn');
+        const ollamaConfigStatus = document.getElementById('ollama-config-status');
+        const ollamaModelSelect = document.getElementById('ollama-model-select');
         
         const schedulerStatusDiv = document.getElementById('scheduler-status');
         const scheduleIntervalInput = document.getElementById('schedule-interval-input');
@@ -468,7 +562,7 @@
         const fetchTableView = async () => {
             sourceListContainer.innerHTML = '';
             logTitle.textContent = 'Loading logs from all hosts...';
-            logContent.textContent = '';
+            logContent.innerHTML = '';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
             progressContainer.classList.remove('hidden');
@@ -563,7 +657,7 @@
         const loadLogContent = async (logName, logType, hostId, hostName) => {
             currentLogName = logName;
             logTitle.textContent = `Loading: ${logName} from ${hostName}...`;
-            logContent.textContent = 'Fetching log data...';
+            logContent.innerHTML = '<div class="text-center text-gray-500 mt-16">Fetching log data...</div>';
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
 
@@ -577,7 +671,7 @@
                 
                 currentLogContent = data.content;
                 logTitle.textContent = `${logName} on ${hostName}`;
-                logContent.textContent = data.content || 'Log source is empty.';
+                logContent.innerHTML = `<pre class="text-sm text-black font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
                 if (localStorage.getItem('openai_api_key') && data.content) {
                      aiAnalyseBtn.classList.remove('hidden');
@@ -585,7 +679,7 @@
                 }
             } catch (error) {
                 logTitle.textContent = `Error loading ${logName}`;
-                logContent.textContent = error.message;
+                logContent.innerHTML = `<div class="text-center text-red-500 mt-16">${error.message}</div>`;
                 showToast(error.message, 'error');
             }
         };
@@ -632,18 +726,18 @@
         
         const createHostCard = (hostId, hostData) => {
             const card = document.createElement('div');
-            card.className = 'host-card p-3 rounded-lg border border-gray-300 cursor-pointer hover:bg-gray-50 transition-all';
+            card.className = 'host-card p-3 rounded-lg border-2 border-indigo-200 bg-white/90 cursor-pointer hover:bg-white hover:border-indigo-400 transition-all shadow-sm';
             card.dataset.hostId = hostId;
             
             card.innerHTML = `
                 <div class="flex items-center justify-between">
                     <div class="flex-1">
-                        <h3 class="font-semibold text-gray-800">${hostData.friendly_name}</h3>
-                        <p class="text-sm text-gray-600">${hostData.description || 'No description'}</p>
-                        <p class="text-xs text-gray-500 font-mono">${hostData.user}@${hostData.ip}</p>
+                        <h3 class="font-bold text-gray-900">${hostData.friendly_name}</h3>
+                        <p class="text-sm text-gray-700">${hostData.description || 'No description'}</p>
+                        <p class="text-xs text-gray-600 font-mono">${hostData.user}@${hostData.ip}</p>
                     </div>
                     <div class="flex items-center space-x-2">
-                        <div class="connection-indicator w-3 h-3 rounded-full bg-gray-400"></div>
+                        <div class="connection-indicator w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
                     </div>
                 </div>
             `;
@@ -658,11 +752,11 @@
             // Update card selection visuals
             hostListContainer.querySelectorAll('.host-card').forEach(card => {
                 if (card.dataset.hostId === hostId) {
-                    card.classList.add('bg-indigo-100', 'border-indigo-500');
-                    card.classList.remove('border-gray-300');
+                    card.classList.add('bg-indigo-200', 'border-indigo-600', 'shadow-md');
+                    card.classList.remove('bg-white/90', 'border-indigo-200', 'shadow-sm');
                 } else {
-                    card.classList.remove('bg-indigo-100', 'border-indigo-500');
-                    card.classList.add('border-gray-300');
+                    card.classList.add('bg-white/90', 'border-indigo-200', 'shadow-sm');
+                    card.classList.remove('bg-indigo-200', 'border-indigo-600', 'shadow-md');
                 }
             });
             
@@ -796,6 +890,316 @@
             });
         };
         
+        // --- SETTINGS MANAGEMENT ---
+        const updateProviderIndicator = () => {
+            const provider = localStorage.getItem('analysis_provider') || 'openai';
+            const ollamaModel = localStorage.getItem('ollama_model');
+            
+            if (provider === 'ollama' && ollamaModel) {
+                providerLabel.textContent = `🤖 Ollama (${ollamaModel})`;
+            } else if (provider === 'openai') {
+                const apiKey = localStorage.getItem('openai_api_key');
+                providerLabel.textContent = apiKey ? '🔑 OpenAI' : 'No Provider';
+            } else {
+                providerLabel.textContent = 'No Provider';
+            }
+        };
+        
+        const loadSettingsFromBackend = async () => {
+            try {
+                // Load AI config from backend
+                const aiConfig = await fetchApi('/ai/config');
+                const provider = aiConfig.provider || 'openai';
+                
+                // Update localStorage with config from backend
+                localStorage.setItem('analysis_provider', provider);
+                
+                if (provider === 'openai' && aiConfig.openai_configured) {
+                    // OpenAI is configured
+                    console.log('OpenAI is configured on backend');
+                } else if (provider === 'ollama' && aiConfig.ollama_configured) {
+                    // Ollama is configured
+                    const ollamaConfig = await fetchApi('/ollama/config', { method: 'GET' });
+                    if (ollamaConfig.ollama_url) {
+                        localStorage.setItem('ollama_url', ollamaConfig.ollama_url);
+                    }
+                    if (ollamaConfig.ollama_model) {
+                        localStorage.setItem('ollama_model', ollamaConfig.ollama_model);
+                    }
+                    console.log(`Ollama is configured on backend with model: ${aiConfig.ollama_model}`);
+                }
+                
+                updateProviderIndicator();
+            } catch (error) {
+                console.log('Could not load AI config from backend, using localStorage');
+                updateProviderIndicator();
+            }
+        };
+        
+        // Initialize provider indicator on page load - async load from backend
+        (async () => {
+            await loadSettingsFromBackend();
+        })();
+        
+        // Load current provider configuration on settings open
+        const loadCurrentProviderConfig = async () => {
+            try {
+                const aiConfig = await fetchApi('/ai/config');
+                providerDropdown.value = aiConfig.provider;
+                showProviderConfigPanel(aiConfig.provider, aiConfig);
+            } catch (error) {
+                console.log('Could not load AI config from backend');
+                providerDropdown.value = localStorage.getItem('analysis_provider') || 'openai';
+                showProviderConfigPanel(providerDropdown.value);
+            }
+        };
+        
+        // --- UNIFIED AI PROVIDER SELECTION WORKFLOW ---
+        
+        // Show/hide config panels based on dropdown selection
+        const showProviderConfigPanel = (provider, config = null) => {
+            // Hide all panels first
+            openaiConfigPanel.classList.add('hidden');
+            ollamaConfigPanel.classList.add('hidden');
+            currentConfigStatus.classList.add('hidden');
+            
+            if (provider === 'openai') {
+                openaiConfigPanel.classList.remove('hidden');
+                // Load from localStorage or backend
+                const savedKey = localStorage.getItem('openai_api_key') || '';
+                if (config && config.openai_configured) {
+                    activeProviderName.textContent = 'OpenAI (GPT-3.5)';
+                    currentConfigStatus.classList.remove('hidden');
+                } else if (savedKey) {
+                    openaiApiKeyInput.value = savedKey;
+                }
+            } else if (provider === 'ollama') {
+                ollamaConfigPanel.classList.remove('hidden');
+                // Load from localStorage or backend
+                const savedUrl = localStorage.getItem('ollama_url') || '';
+                const savedModel = localStorage.getItem('ollama_model') || '';
+                ollamaApiUrlInput.value = savedUrl;
+                if (savedUrl && savedModel) {
+                    ollamaModelsPanel.classList.remove('hidden');
+                    ollamaModelSelectDropdown.value = savedModel;
+                    activeProviderName.textContent = `Ollama (${savedModel})`;
+                    currentConfigStatus.classList.remove('hidden');
+                }
+            }
+        };
+        
+        providerDropdown.addEventListener('change', (e) => {
+            showProviderConfigPanel(e.target.value);
+        });
+        
+        // --- OPENAI CONFIGURATION WORKFLOW ---
+        testOpenaiBtn.addEventListener('click', async () => {
+            const apiKey = openaiApiKeyInput.value.trim();
+            if (!apiKey) {
+                openaiTestStatus.textContent = '❌ API key cannot be empty';
+                openaiTestStatus.className = 'text-xs text-red-600 mt-2';
+                return;
+            }
+            
+            testOpenaiBtn.disabled = true;
+            testOpenaiBtn.textContent = 'Testing...';
+            openaiTestStatus.textContent = 'Testing API key...';
+            openaiTestStatus.className = 'text-xs text-yellow-600 mt-2';
+            
+            try {
+                // Try a simple API call to test the key (using /ai/config endpoint which validates)
+                const client = new (function() {
+                    this.testKey = async function(key) {
+                        // We'll test by trying to save the config
+                        const res = await fetchApi('/openai/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ api_key: key })
+                        });
+                        return res;
+                    };
+                })();
+                
+                const res = await client.testKey(apiKey);
+                
+                openaiTestStatus.textContent = '✅ API key is valid!';
+                openaiTestStatus.className = 'text-xs text-green-600 mt-2';
+                testOpenaiBtn.className = 'bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
+                testOpenaiBtn.textContent = 'Verified';
+                testOpenaiBtn.disabled = true;
+                
+                // Save to localStorage
+                localStorage.setItem('openai_api_key', apiKey);
+                localStorage.setItem('analysis_provider', 'openai');
+                
+                // Update indicator
+                activeProviderName.textContent = 'OpenAI (GPT-3.5)';
+                currentConfigStatus.classList.remove('hidden');
+                updateProviderIndicator();
+                
+                showToast('OpenAI configured as default AI provider');
+            } catch (error) {
+                openaiTestStatus.textContent = `❌ ${error.message}`;
+                openaiTestStatus.className = 'text-xs text-red-600 mt-2';
+                testOpenaiBtn.disabled = false;
+                testOpenaiBtn.textContent = 'Retry Test';
+            }
+        });
+        
+        // --- OLLAMA CONFIGURATION WORKFLOW ---
+        testOllamaUrlBtn.addEventListener('click', async () => {
+            const url = ollamaApiUrlInput.value.trim();
+            if (!url) {
+                ollamaUrlTestStatus.textContent = '❌ Ollama URL cannot be empty';
+                ollamaUrlTestStatus.className = 'text-xs text-red-600 mt-2';
+                return;
+            }
+            
+            testOllamaUrlBtn.disabled = true;
+            testOllamaUrlBtn.textContent = 'Testing...';
+            ollamaUrlTestStatus.textContent = 'Testing connection...';
+            ollamaUrlTestStatus.className = 'text-xs text-yellow-600 mt-2';
+            
+            try {
+                const res = await fetchApi('/ollama/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ollama_url: url })
+                });
+                
+                if (res.success) {
+                    ollamaUrlTestStatus.textContent = `✅ Connection successful! Found ${res.models?.length || 0} model(s)`;
+                    ollamaUrlTestStatus.className = 'text-xs text-green-600 mt-2';
+                    testOllamaUrlBtn.className = 'bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
+                    testOllamaUrlBtn.textContent = 'Connected';
+                    
+                    // Show models panel and auto-load models
+                    localStorage.setItem('ollama_url', url);
+                    ollamaModelsPanel.classList.remove('hidden');
+                    
+                    // Auto-load models
+                    await loadOllamaModels(url);
+                } else {
+                    throw new Error(res.error);
+                }
+            } catch (error) {
+                ollamaUrlTestStatus.textContent = `❌ ${error.message}`;
+                ollamaUrlTestStatus.className = 'text-xs text-red-600 mt-2';
+                testOllamaUrlBtn.disabled = false;
+                testOllamaUrlBtn.textContent = 'Retry Test';
+            }
+        });
+        
+        // Get Models button
+        getModelsBtn.addEventListener('click', async () => {
+            const url = ollamaApiUrlInput.value.trim();
+            if (!url) {
+                showToast('Please test the Ollama connection first', 'error');
+                return;
+            }
+            await loadOllamaModels(url);
+        });
+        
+        // Load Ollama models helper function
+        const loadOllamaModels = async (url) => {
+            getModelsBtn.disabled = true;
+            getModelsBtn.textContent = 'Loading...';
+            ollamaModelSelectDropdown.innerHTML = '<option value="">Loading models...</option>';
+            
+            try {
+                const data = await fetchApi('/ollama/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ollama_url: url })
+                });
+                
+                const models = data.models || [];
+                
+                if (models.length === 0) {
+                    ollamaModelSelectDropdown.innerHTML = '<option value="">No models available</option>';
+                    return;
+                }
+                
+                ollamaModelSelectDropdown.innerHTML = '';
+                models.forEach(modelName => {
+                    const option = document.createElement('option');
+                    option.value = modelName;
+                    option.textContent = modelName;
+                    ollamaModelSelectDropdown.appendChild(option);
+                });
+                
+                showToast(`Found ${models.length} model(s)`);
+            } catch (error) {
+                ollamaModelSelectDropdown.innerHTML = `<option value="">Error: ${error.message}</option>`;
+                showToast(`Error loading models: ${error.message}`, 'error');
+            } finally {
+                getModelsBtn.disabled = false;
+                getModelsBtn.textContent = 'Get Models';
+            }
+        };
+        
+        // Test Ollama Model button
+        testOllamaModelBtn.addEventListener('click', async () => {
+            const model = ollamaModelSelectDropdown.value;
+            const url = ollamaApiUrlInput.value.trim();
+            
+            if (!model) {
+                ollamaModelTestStatus.textContent = '❌ Please select a model';
+                ollamaModelTestStatus.className = 'text-xs text-red-600 mt-2';
+                return;
+            }
+            
+            testOllamaModelBtn.disabled = true;
+            testOllamaModelBtn.textContent = 'Testing...';
+            ollamaModelTestStatus.textContent = 'Testing model availability...';
+            ollamaModelTestStatus.className = 'text-xs text-yellow-600 mt-2';
+            
+            try {
+                const res = await fetchApi('/ollama/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ollama_url: url, model: model })
+                });
+                
+                if (res.success) {
+                    ollamaModelTestStatus.textContent = '✅ Model is available and working!';
+                    ollamaModelTestStatus.className = 'text-xs text-green-600 mt-2';
+                    testOllamaModelBtn.className = 'bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
+                    testOllamaModelBtn.textContent = 'Verified';
+                    testOllamaModelBtn.disabled = true;
+                    
+                    // Save to backend and localStorage
+                    localStorage.setItem('ollama_url', url);
+                    localStorage.setItem('ollama_model', model);
+                    localStorage.setItem('analysis_provider', 'ollama');
+                    
+                    try {
+                        await fetchApi('/ollama/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ollama_url: url, ollama_model: model })
+                        });
+                    } catch (e) {
+                        console.log('Config saved to localStorage, backend sync may have failed');
+                    }
+                    
+                    // Update indicator
+                    activeProviderName.textContent = `Ollama (${model})`;
+                    currentConfigStatus.classList.remove('hidden');
+                    updateProviderIndicator();
+                    
+                    showToast('Ollama configured as default AI provider');
+                } else {
+                    throw new Error(res.error);
+                }
+            } catch (error) {
+                ollamaModelTestStatus.textContent = `❌ ${error.message}`;
+                ollamaModelTestStatus.className = 'text-xs text-red-600 mt-2';
+                testOllamaModelBtn.disabled = false;
+                testOllamaModelBtn.textContent = 'Retry Test';
+            }
+        });
+        
         // --- HOST MANAGEMENT ---
         const openHostModal = (host = null) => {
             hostForm.reset();
@@ -857,6 +1261,8 @@
              settingsModal.classList.remove('hidden');
              populateHostList();
              updateSchedulerStatus();
+             loadCurrentProviderConfig();
+             loadSettingsFromBackend();
         });
         closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
         addNewHostBtn.addEventListener('click', () => openHostModal());
@@ -933,12 +1339,81 @@
             } catch(error) {}
         });
         
-        saveCredentialsBtn.addEventListener('click', () => {
+        saveCredentialsBtn.addEventListener('click', async () => {
             localStorage.setItem('openai_api_key', apiKeyInput.value.trim() || '');
             localStorage.setItem('discord_webhook_url', discordWebhookInput.value.trim() || '');
+            
+            // Also save to backend config if Ollama is configured
+            if (ollamaUrlInput.value.trim() && ollamaModelSelect.value) {
+                try {
+                    await fetchApi('/ollama/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            ollama_url: ollamaUrlInput.value.trim(), 
+                            ollama_model: ollamaModelSelect.value 
+                        })
+                    });
+                    localStorage.setItem('ollama_url', ollamaUrlInput.value.trim());
+                    localStorage.setItem('ollama_model', ollamaModelSelect.value);
+                } catch (error) {
+                    console.log('Note: Ollama config save handled separately');
+                }
+            }
+            
+            // Update provider indicator
+            updateProviderIndicator();
+            
             showToast('Credentials saved!');
             settingsModal.classList.add('hidden');
         });
+        
+        // Ollama test button (legacy - only if element exists)
+        if (testOllamaBtn) {
+        testOllamaBtn.addEventListener('click', async () => {
+            const url = ollamaUrlInput.value.trim();
+            if (!url) {
+                ollamaTestStatus.textContent = 'Please enter an Ollama URL';
+                ollamaTestStatus.className = 'text-xs text-red-600 mt-2';
+                ollamaTestStatus.classList.remove('hidden');
+                return;
+            }
+            
+            testOllamaBtn.disabled = true;
+            testOllamaBtn.textContent = 'Testing...';
+            ollamaTestStatus.textContent = 'Testing connection...';
+            ollamaTestStatus.className = 'text-xs text-yellow-600 mt-2';
+            ollamaTestStatus.classList.remove('hidden');
+            
+            try {
+                const res = await fetchApi('/ollama/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ollama_url: url })
+                });
+                
+                if (res.success) {
+                    ollamaTestStatus.textContent = `✅ ${res.message}`;
+                    ollamaTestStatus.className = 'text-xs text-green-600 mt-2';
+                    testOllamaBtn.className = 'bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50';
+                    testOllamaBtn.textContent = 'Connected';
+                    
+                    // Show model selection section
+                    ollamaModelSection.classList.remove('hidden');
+                    
+                    // Auto-load models
+                    await loadOllamaModels(url);
+                } else {
+                    throw new Error(res.error);
+                }
+            } catch (error) {
+                ollamaTestStatus.textContent = `❌ ${error.message}`;
+                ollamaTestStatus.className = 'text-xs text-red-600 mt-2';
+                testOllamaBtn.disabled = false;
+                testOllamaBtn.textContent = 'Retry';
+            }
+        });
+        }
 
         sourceListContainer.addEventListener('click', async (event) => {
             const link = event.target.closest('.log-link');
@@ -974,9 +1449,30 @@
                 // Create a pre element with black text for log content
                 logContentContainer.innerHTML = `<pre class="text-sm text-black font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
-                if (localStorage.getItem('openai_api_key') && data.content) {
-                     aiAnalyseBtn.classList.remove('hidden');
-                     if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                // Check if we have content to analyze
+                if (!data.content) {
+                    return;
+                }
+                
+                // Show AI Analyse button if the currently selected provider is configured
+                const provider = localStorage.getItem('analysis_provider') || 'openai';
+                const openaiKey = localStorage.getItem('openai_api_key');
+                const ollamaUrl = localStorage.getItem('ollama_url');
+                const ollamaModel = localStorage.getItem('ollama_model');
+                
+                let shouldShowButton = false;
+                
+                if (provider === 'ollama') {
+                    shouldShowButton = !!(ollamaUrl && ollamaModel);
+                } else {
+                    shouldShowButton = !!openaiKey;
+                }
+                
+                if (shouldShowButton) {
+                    aiAnalyseBtn.classList.remove('hidden');
+                    if (data.will_be_truncated) {
+                        truncationWarning.classList.remove('hidden');
+                    }
                 }
             } catch (error) {
                 logContentTitle.textContent = `Error loading ${currentLogName}`;
@@ -986,45 +1482,70 @@
         });
 
 aiAnalyseBtn.addEventListener('click', async () => {
-            const apiKey = localStorage.getItem('openai_api_key');
-            if (!apiKey) {
-                showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
-                return;
-            }
+            const provider = localStorage.getItem('analysis_provider') || 'openai';
+            
             if (!currentLogContent) {
                 showToast('No log content to analyse.', 'error');
                 return;
             }
+            
+            // Validate provider config
+            if (provider === 'ollama') {
+                const ollamaUrl = localStorage.getItem('ollama_url');
+                const ollamaModel = localStorage.getItem('ollama_model');
+                if (!ollamaUrl || !ollamaModel) {
+                    showToast('Ollama is not configured. Please set it up in Settings.', 'error');
+                    return;
+                }
+            } else {
+                const apiKey = localStorage.getItem('openai_api_key');
+                if (!apiKey) {
+                    showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
+                    return;
+                }
+            }
 
             aiAnalyseBtn.textContent = 'Analysing...';
             aiAnalyseBtn.disabled = true;
-            aiContentWrapper.innerHTML = '<p>Contacting AI assistant...</p>';
+            
+            // Show analysis in modal
+            const aiAnalysisModal = document.getElementById('ai-analysis-modal');
+            const aiAnalysisContent = document.getElementById('ai-analysis-content');
+            const closeAiModalBtn = document.getElementById('close-ai-modal-btn');
+            
+            aiAnalysisContent.innerHTML = '<p>Contacting AI assistant...</p>';
+            aiAnalysisModal.classList.remove('hidden');
 
             try {
+                const requestBody = {
+                    log_content: currentLogContent,
+                    log_name: currentLogName,
+                    webhook_url: localStorage.getItem('discord_webhook_url'),
+                    provider: provider
+                };
+                
+                // Add provider-specific auth
+                if (provider === 'openai') {
+                    requestBody.api_key = localStorage.getItem('openai_api_key');
+                }
+                
                 const data = await fetchApi('/analyse', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ log_content: currentLogContent, log_name: currentLogName, api_key: apiKey, webhook_url: localStorage.getItem('discord_webhook_url') })
+                    body: JSON.stringify(requestBody)
                 });
+                
                 if (data.discord_sent) showToast('Issue detected! Alert sent to Discord.', 'info');
 
-                // Show analysis in modal
-                const aiAnalysisModal = document.getElementById('ai-analysis-modal');
-                const aiAnalysisContent = document.getElementById('ai-analysis-content');
-                const closeAiModalBtn = document.getElementById('close-ai-modal-btn');
-
                 aiAnalysisContent.innerHTML = data.analysis.replace(/\n/g, '<br>');
-                aiAnalysisModal.classList.remove('hidden');
-
+                
                 closeAiModalBtn.addEventListener('click', () => {
                     aiAnalysisModal.classList.add('hidden');
                 });
+                
+                showToast(`Analysis complete using ${provider.toUpperCase()}`);
             } catch (error) {
-                // Show error in modal as well
-                const aiAnalysisModal = document.getElementById('ai-analysis-modal');
-                const aiAnalysisContent = document.getElementById('ai-analysis-content');
                 aiAnalysisContent.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
-                aiAnalysisModal.classList.remove('hidden');
             } finally {
                 aiAnalyseBtn.textContent = 'AI Analyse';
                 aiAnalyseBtn.disabled = false;
@@ -1557,17 +2078,43 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
         startScheduleBtn.addEventListener('click', async () => {
             const interval = parseInt(scheduleIntervalInput.value);
-            const apiKey = apiKeyInput.value.trim();
             const webhookUrl = discordWebhookInput.value.trim();
+            const provider = localStorage.getItem('analysis_provider') || 'openai';
 
             if (scheduledSources.length === 0) { showToast('Select at least one log to monitor.', 'error'); return; }
             if (!interval || interval < 1) { showToast('Interval must be at least 1 hour.', 'error'); return; }
-            if (!apiKey || !webhookUrl) { showToast('OpenAI key and Discord webhook are required.', 'error'); return; }
+            if (!webhookUrl) { showToast('Discord webhook is required.', 'error'); return; }
+            
+            // Validate provider-specific requirements
+            if (provider === 'ollama') {
+                const ollamaUrl = localStorage.getItem('ollama_url');
+                const ollamaModel = localStorage.getItem('ollama_model');
+                if (!ollamaUrl || !ollamaModel) { 
+                    showToast('Ollama is not configured. Please set it up first.', 'error'); 
+                    return; 
+                }
+            } else {
+                const apiKey = apiKeyInput.value.trim();
+                if (!apiKey) { showToast('OpenAI API key is required.', 'error'); return; }
+            }
 
             try {
+                const payload = { 
+                    sources: scheduledSources, 
+                    interval, 
+                    webhook_url: webhookUrl,
+                    analysis_provider: provider
+                };
+                
+                // Add provider-specific credentials
+                if (provider === 'openai') {
+                    payload.api_key = apiKeyInput.value.trim();
+                }
+                
                 const data = await fetchApi('/schedule/start', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sources: scheduledSources, interval, api_key: apiKey, webhook_url: webhookUrl })
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
                 });
                 showToast(data.message);
                 updateSchedulerStatus();
@@ -1757,8 +2304,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
         showEmptyLogsCheckbox.addEventListener('change', filterLogsBySize);
 
         // --- INITIALIZATION ---
-        apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
-        discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
+        if (apiKeyInput) apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
+        if (discordWebhookInput) discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
         populateHostCards();
     });
     </script>
