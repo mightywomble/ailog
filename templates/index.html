@@ -2304,8 +2304,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
         showEmptyLogsCheckbox.addEventListener('change', filterLogsBySize);
 
         // --- INITIALIZATION ---
-        apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
-        discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
+        if (apiKeyInput) apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
+        if (discordWebhookInput) discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
         populateHostCards();
     });
     </script>
