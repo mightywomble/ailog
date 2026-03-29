@@ -470,15 +470,15 @@ async function proceedToStep3() {
         const sessionData = await sessionResp.json();
         const sessionId = sessionData.session_id;
         
-        const payload = {
+        const collectPayload = {
             ips: wizardData.validatedHosts.map(h => h.ip),
             usernames: wizardData.validatedHosts.map(h => h.user)
         };
         
         if (wizardData.sshKeyId) {
-            payload.ssh_key_id = wizardData.sshKeyId;
+            collectPayload.ssh_key_id = wizardData.sshKeyId;
         } else if (wizardData.keyContent) {
-            payload.key_content = wizardData.keyContent;
+            collectPayload.key_content = wizardData.keyContent;
         }
         
         logDiv.innerHTML = '';

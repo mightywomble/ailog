@@ -888,7 +888,7 @@ def get_ollama_models():
     except Exception as e:
         return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
 
-@app.route('/ai/config', methods=['POST'])
+@app.route('/ai/config', methods=['GET'])
 def get_ai_config():
     """Get current AI provider configuration"""
     config = load_config()
