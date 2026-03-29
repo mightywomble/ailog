@@ -779,7 +779,7 @@ def get_journal_content(unit):
         return jsonify({'error': f"Could not read journal for unit '{unit}' on '{hostname}': {e}"}), 500
 
 # --- HOST MANAGEMENT ROUTES ---
-@app.route('/hosts', methods=['POST'])
+@app.route('/hosts', methods=['GET'])
 def get_hosts():
     print("[DEBUG] /hosts endpoint called")
     hosts_data = load_hosts()

@@ -378,7 +378,7 @@ async function proceedToStep2() {
         const response = await fetch(`/wizard/session/${sessionId}/validate-hosts-stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(collectPayload)
         });
         
         const reader = response.body.getReader();
@@ -487,7 +487,7 @@ async function proceedToStep3() {
         const response = await fetch(`/wizard/session/${sessionId}/collect-info-stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(collectPayload)
         });
         
         const reader = response.body.getReader();
