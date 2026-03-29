@@ -374,7 +374,7 @@ async function proceedToStep2() {
         const response = await fetch(`/wizard/session/${sessionId}/validate-hosts-stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(collectPayload)
+            body: JSON.stringify(payload)
         });
         
         const reader = response.body.getReader();
@@ -392,7 +392,13 @@ async function proceedToStep2() {
                 if (!line.startsWith('data: ')) continue;
                 
                     const jsonStr = line.substring(6);
-                    const data = JSON.parse(jsonStr);
+                    let data;
+                    try {
+                        data = JSON.parse(jsonStr);
+                    } catch (e) {
+                        console.error('Step 3 JSON parse error:', e, jsonStr);
+                        continue;
+                    }
             
             if (data.error) {
                 resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
@@ -421,9 +427,11 @@ async function proceedToStep2() {
                 resultElements[data.ip] = resultDiv;
                 
                 if (data.status === 'success') {
+                    // Use the username entered in step 1, not something derived from the IP
+                    const defaultUser = (wizardData.usernames && wizardData.usernames.length > 0) ? wizardData.usernames[0] : 'root';
                     wizardData.validatedHosts.push({
                         ip: data.ip,
-                        user: data.ip.split('@')[1] || 'root'
+                        user: defaultUser
                     });
                 }
             } else if (data.type === 'complete') {
@@ -456,11 +464,6 @@ async function proceedToStep3() {
     logDiv.innerHTML = '<p class="text-gray-600">Starting system information collection...</p>';
     
     try {
-        // Create wizard session
-        const sessionResp = await fetch('/wizard/session/create', { method: 'POST' });
-        const sessionData = await sessionResp.json();
-        const sessionId = sessionData.session_id;
-        
         const collectPayload = {
             ips: wizardData.validatedHosts.map(h => h.ip),
             usernames: wizardData.validatedHosts.map(h => h.user)
@@ -475,72 +478,41 @@ async function proceedToStep3() {
         logDiv.innerHTML = '';
         const ipSections = {};
         
-        const response = await fetch(`/wizard/session/${sessionId}/collect-info-stream`, {
+        // Use non-streaming endpoint for simplicity and robustness
+        const response = await fetch('/wizard/collect-info', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(collectPayload)
         });
-        
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n\n');
-            
-            for (const line of lines) {
-                if (!line.trim()) continue;
-                if (!line.startsWith('data: ')) continue;
-                
-                    const jsonStr = line.substring(6);
-                    const data = JSON.parse(jsonStr);
-            
-            if (data.error) {
-                logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
-                
-                return;
-            }
-            
-            if (data.type === 'start') {
-                logDiv.innerHTML = '<p class="text-gray-600">Initializing collection...</p>';
-            } else if (data.type === 'progress') {
-                const progressBar = document.getElementById('collectionProgressBar');
-                const progressText = document.getElementById('collectionProgressText');
-                progressBar.style.width = `${((data.current) / data.total) * 100}%`;
-                progressText.textContent = `${data.current + 1}/${data.total}`;
-            } else if (data.type === 'log') {
-                if (!ipSections[data.ip]) {
-                    const section = document.createElement('div');
-                    section.className = 'border-b pb-2 mb-2';
-                    section.innerHTML = `<p class="font-medium text-blue-600">${data.ip}</p>`;
-                    logDiv.appendChild(section);
-                    ipSections[data.ip] = section;
-                }
-                
-                const logLine = document.createElement('p');
-                logLine.className = 'text-xs text-gray-700';
-                logLine.innerHTML = `<span class="text-gray-500">${new Date(data.timestamp).toLocaleTimeString()}</span> ${data.message}`;
-                ipSections[data.ip].appendChild(logLine);
-                logDiv.scrollTop = logDiv.scrollHeight;
-            } else if (data.type === 'host_complete') {
-                const progressBar = document.getElementById('collectionProgressBar');
-                const progressText = document.getElementById('collectionProgressText');
-                progressBar.style.width = `${(data.current / data.total) * 100}%`;
-                progressText.textContent = `${data.current}/${data.total}`;
-            } else if (data.type === 'complete') {
-                
-                wizardData.collectedInfo = data.results;
-                document.getElementById('collectionProgressBar').style.width = '100%';
-            } else if (data.type === 'error') {
-                logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
-                
-            }
+
+        const data = await response.json();
+
+        if (data.error) {
+            logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
+            return;
         }
-        
-        }
+
+        // Simulate logs for each host
+        (data.results || []).forEach((result, index) => {
+            const ip = result.ip;
+            if (!ipSections[ip]) {
+                const section = document.createElement('div');
+                section.className = 'border-b pb-2 mb-2';
+                section.innerHTML = `<p class="font-medium text-blue-600">${ip}</p>`;
+                logDiv.appendChild(section);
+                ipSections[ip] = section;
+            }
+
+            const timestamp = new Date().toLocaleTimeString();
+            const logLine = document.createElement('p');
+            logLine.className = 'text-xs text-gray-700';
+            logLine.innerHTML = `<span class="text-gray-500">${timestamp}</span> Collected system info and services.`;
+            ipSections[ip].appendChild(logLine);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        });
+
+        wizardData.collectedInfo = data.results || [];
+        document.getElementById('collectionProgressBar').style.width = '100%';
 
     } catch (error) {
         logDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;

@@ -775,16 +775,171 @@
                         <p class="text-sm text-gray-700">${hostData.description || 'No description'}</p>
                         <p class="text-xs text-gray-600 font-mono">${hostData.user}@${hostData.ip}</p>
                     </div>
-                    <div class="flex items-center space-x-2">
+                    <div class="flex items-center space-x-3">
+                        <button class="host-info-btn w-8 h-8 rounded-full bg-blue-50 hover:bg-blue-100 flex items-center justify-center text-blue-600" title="View host info" data-host-id="${hostId}">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"></path>
+                            </svg>
+                        </button>
+                        <button class="host-logs-btn w-8 h-8 rounded-full bg-gray-50 hover:bg-gray-100 flex items-center justify-center text-gray-700" title="View logs" data-host-id="${hostId}">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6M5 7h14M5 5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2H5z"></path>
+                            </svg>
+                        </button>
                         <div class="connection-indicator w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
                     </div>
                 </div>
             `;
-            
-            card.addEventListener('click', () => selectHost(hostId));
+
+            // Clicking anywhere on the card (except buttons) selects host and shows logs
+            card.addEventListener('click', (e) => {
+                if ((e.target.closest('.host-info-btn')) || (e.target.closest('.host-logs-btn'))) {
+                    return;
+                }
+                selectHost(hostId);
+            });
+
+            // Info button: show host info card
+            card.querySelector('.host-info-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                showHostInfo(hostId, hostData);
+            });
+
+            // Logs button: select host and fetch logs
+            card.querySelector('.host-logs-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                selectHost(hostId);
+            });
+
             return card;
         };
         
+
+
+        const showHostInfo = async (hostId, hostData) => {
+            const existing = document.getElementById('host-info-overlay');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'host-info-overlay';
+            overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-40';
+
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-xl shadow-2xl max-w-xl w-full p-6 relative border border-gray-200';
+
+            const baseHeader = `
+                <div class="flex items-center justify-between mb-4">
+                    <div class="min-w-0">
+                        <h2 class="text-xl font-bold text-gray-900 truncate" title="${hostData.friendly_name}">${hostData.friendly_name}</h2>
+                        <p class="text-sm text-gray-600 truncate" title="${hostData.description || 'No description'}">${hostData.description || 'No description'}</p>
+                    </div>
+                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700">
+                        ${hostId === 'local' ? 'Local' : 'Remote'}
+                    </span>
+                </div>
+            `;
+
+            card.innerHTML = baseHeader + `
+                <div class="space-y-3 text-sm text-gray-800" id="host-info-body">
+                    <p class="text-xs text-gray-500">Loading host details...</p>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button id="host-info-close" class="px-4 py-2 text-sm font-medium bg-gray-800 text-white rounded-lg hover:bg-gray-700">
+                        Close
+                    </button>
+                </div>
+            `;
+
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+
+            const close = () => overlay.remove();
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            card.querySelector('#host-info-close').addEventListener('click', close);
+
+            const bodyEl = card.querySelector('#host-info-body');
+
+            // Localhost or non-DB hosts: only basic info
+            if (hostId === 'local' || !hostId.startsWith('db-')) {
+                bodyEl.innerHTML = `
+                    <div class="flex items-center">
+                        <span class="w-6 h-6 mr-2 text-blue-500">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h18M3 17h18"></path>
+                            </svg>
+                        </span>
+                        <span class="font-mono">${hostData.user}@${hostData.ip}</span>
+                    </div>
+                    <p class="text-xs text-gray-600 mt-2">Detailed system info is only available for hosts onboarded via the wizard.</p>
+                `;
+                return;
+            }
+
+            try {
+                const dbId = parseInt(hostId.split('-')[1], 10);
+                const resp = await fetch(`/hosts/db/${dbId}/info`);
+                const info = await resp.json();
+
+                if (info.error) {
+                    bodyEl.innerHTML = `<p class="text-xs text-red-600">Error loading host info: ${info.error}</p>`;
+                    return;
+                }
+
+                const si = info.system_info || {};
+                const svcSummary = info.services_summary || { total: 0, running: 0, stopped: 0 };
+
+                const fmtBytes = (v) => {
+                    if (!v && v !== 0) return 'N/A';
+                    const gb = v / (1024 ** 3);
+                    return `${gb.toFixed(1)} GB`;
+                };
+
+                bodyEl.innerHTML = `
+                    <div class="flex items-center mb-3">
+                        <span class="w-6 h-6 mr-2 text-blue-500">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h18M3 17h18"></path>
+                            </svg>
+                        </span>
+                        <span class="font-mono truncate" title="${info.ssh_user || hostData.user}@${info.ip_address || hostData.ip}">
+                            ${(info.ssh_user || hostData.user)}@${info.ip_address || hostData.ip}
+                        </span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div class="p-3 rounded-lg bg-gray-50 space-y-1">
+                            <p class="text-xs font-semibold text-gray-500">OS / Hostname</p>
+                            <p class="text-xs text-gray-800 break-all">${si.os_version || 'Unknown OS'}</p>
+                            <p class="text-xs text-gray-700">Hostname: ${si.hostname || 'N/A'}</p>
+                            <p class="text-xs text-gray-500">Last update: ${si.last_update || 'N/A'}</p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-gray-50 space-y-1">
+                            <p class="text-xs font-semibold text-gray-500">Resources</p>
+                            <p class="text-xs text-gray-800">RAM: ${fmtBytes(si.ram_total)} total, ${fmtBytes(si.ram_used)} used</p>
+                            <p class="text-xs text-gray-800">Disk: ${fmtBytes(si.disk_total)} total, ${fmtBytes(si.disk_used)} used</p>
+                            <p class="text-xs text-gray-800">CPU: ${si.cpu_type || 'Unknown'}, cores: ${si.cpu_cores || 'N/A'}</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div class="p-3 rounded-lg bg-gray-50 space-y-1">
+                            <p class="text-xs font-semibold text-gray-500">Network</p>
+                            <p class="text-xs text-gray-800">Main IP: ${si.main_ip || 'N/A'}</p>
+                            <p class="text-xs text-gray-800">Netbird IP: ${si.netbird_ip || 'N/A'}</p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-gray-50 space-y-1">
+                            <p class="text-xs font-semibold text-gray-500">Services</p>
+                            <p class="text-xs text-gray-800">Total: ${svcSummary.total}</p>
+                            <p class="text-xs text-green-700">Running: ${svcSummary.running}</p>
+                            <p class="text-xs text-red-700">Stopped: ${svcSummary.stopped}</p>
+                        </div>
+                    </div>
+                `;
+
+            } catch (err) {
+                console.error('Error loading host info', err);
+                bodyEl.innerHTML = `<p class="text-xs text-red-600">Error loading host info: ${err.message}</p>`;
+            }
+        };
+
         const selectHost = (hostId) => {
             selectedHostId = hostId;
             

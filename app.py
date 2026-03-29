@@ -201,12 +201,43 @@ def search_host_logs(host_id, host_name, query, search_scope, case_sensitive):
 
 # --- CORE LOGIC (Refactored for Remote Execution) ---
 def execute_command(hostname, command_str, timeout=10):
+    """Execute a command either locally or against a remote host.
+
+    hostname can be:
+      - 'local' to run on this machine
+      - a config host ID from load_hosts()
+      - a database-backed host ID like 'db-<id>' created by the wizard
+    """
     ssh_prefix_args = []
     if hostname != 'local':
-        hosts = load_hosts()
+        # First try config-based hosts
+        hosts = load_hosts() or {}
         host_info = hosts.get(hostname)
+
+        # If not found in config, try database hosts with prefix db-<id>
+        if not host_info and hostname.startswith('db-'):
+            try:
+                from app import Host  # local import to avoid circulars at import time
+            except Exception:
+                Host = None
+            if Host is not None:
+                try:
+                    host_id = int(hostname.split('-', 1)[1])
+                    from flask import current_app
+                    from app import db
+                    # We assume we're in an app/request context when this is called via Flask routes
+                    host_obj = Host.query.get(host_id)
+                    if host_obj:
+                        host_info = {
+                            'user': host_obj.ssh_user or 'root',
+                            'ip': host_obj.ip_address,
+                        }
+                except Exception as e:
+                    print(f"[ERROR] Failed to resolve DB host '{hostname}': {e}")
+
         if not host_info:
-            raise ValueError(f"Host ID '{hostname}' not found in configuration.")
+            raise ValueError(f"Host ID '{hostname}' not found in configuration or database.")
+
         ssh_prefix_args = get_ssh_prefix_args(host_info['user'], host_info['ip'])
 
     cmd_list = ssh_prefix_args + [command_str] if ssh_prefix_args else [command_str]
@@ -781,8 +812,27 @@ def get_journal_content(unit):
 # --- HOST MANAGEMENT ROUTES ---
 @app.route('/hosts', methods=['GET'])
 def get_hosts():
+    """Return combined hosts from config file and database."""
     print("[DEBUG] /hosts endpoint called")
-    hosts_data = load_hosts()
+    # Load hosts from config file (original behaviour)
+    hosts_data = load_hosts() or {}
+
+    # Merge in hosts from database so wizard-added hosts appear
+    try:
+        db_hosts = Host.query.all()
+        for h in db_hosts:
+            hid = f"db-{h.id}"
+            if hid not in hosts_data:
+                hosts_data[hid] = {
+                    'friendly_name': h.friendly_name or h.hostname or h.ip_address,
+                    'ip': h.ip_address,
+                    'user': h.ssh_user or 'root',
+                    'description': h.description or 'Onboarded via wizard',
+                    'source': 'db'
+                }
+    except Exception as e:
+        print(f"[ERROR] Failed to merge DB hosts into /hosts response: {e}")
+
     print(f"[DEBUG] Returning hosts data: {hosts_data}")
     return jsonify(hosts_data)
 
@@ -807,11 +857,41 @@ def update_host(host_id):
 
 @app.route('/hosts/delete/<host_id>', methods=['DELETE'])
 def delete_host(host_id):
-    hosts = load_hosts()
+    """Delete a host from either the config file or the database.
+
+    host_id can be a config ID or a db-backed ID like 'db-<id>'.
+    """
+    # First try to delete from config-based hosts
+    hosts = load_hosts() or {}
     if host_id in hosts:
         del hosts[host_id]
         save_hosts(hosts)
-        return jsonify({'message': 'Host deleted.'})
+        return jsonify({'message': 'Host deleted from configuration.'})
+
+    # If not found in config, try database hosts with prefix db-<id>
+    if host_id.startswith('db-'):
+        try:
+            from app import Host, SystemInfo, Service, HostLog, db  # local import to avoid circulars at import time
+        except Exception:
+            Host = None
+        if Host is not None:
+            try:
+                db_id = int(host_id.split('-', 1)[1])
+                host = Host.query.get(db_id)
+                if not host:
+                    return jsonify({'error': 'Host not found.'}), 404
+
+                # Delete related records if cascading is not configured
+                SystemInfo.query.filter_by(host_id=db_id).delete()
+                Service.query.filter_by(host_id=db_id).delete()
+                HostLog.query.filter_by(host_id=db_id).delete()
+                db.session.delete(host)
+                db.session.commit()
+                return jsonify({'message': 'Host deleted from database.'})
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({'error': f'Failed to delete DB host: {str(e)}'}), 500
+
     return jsonify({'error': 'Host not found.'}), 404
 
 @app.route('/hosts/test', methods=['POST'])
@@ -1184,21 +1264,11 @@ def initialize_app():
     print(f"Starting web server on http://0.0.0.0:5001")
     print("============================")
 
-if __name__ == '__main__':
-    # Initialize application
-    initialize_app()
-    
-    # Start scheduler
-    scheduler.start()
-    startup_scheduler()
-    atexit.register(lambda: scheduler.shutdown())
-    
-    # Start Flask app
-    app.run(host='0.0.0.0', port=5001, debug=False)
+
 
 # --- NEW WIZARD & SSH KEY MANAGEMENT ENDPOINTS ---
 
-@app.route('/ssh-keys', methods=['POST'])
+@app.route('/ssh-keys', methods=['GET'])
 def get_ssh_keys():
     """Get list of stored SSH keys"""
     try:
@@ -1458,6 +1528,35 @@ def add_devices_from_wizard():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/hosts/db/<int:host_id>/info', methods=['GET'])
+def get_host_info(host_id):
+    """Return detailed host info including system info and services."""
+    try:
+        from database import Host, SystemInfo, Service
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+
+        host_dict = host.to_dict()  # already nests system_info and groups/tags
+
+        # Add services with simple summary
+        services = Service.query.filter_by(host_id=host_id).all()
+        services_list = [s.to_dict() for s in services]
+        running = [s for s in services_list if s.get('status') == 'active' or s.get('is_running')]
+        stopped = [s for s in services_list if s.get('status') not in ('active',) and not s.get('is_running')]
+
+        host_dict['services'] = services_list
+        host_dict['services_summary'] = {
+            'total': len(services_list),
+            'running': len(running),
+            'stopped': len(stopped)
+        }
+
+        return jsonify(host_dict)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/hosts/db', methods=['POST'])
 def get_hosts_db():
     """Get all hosts from database"""
@@ -1478,7 +1577,7 @@ def get_host_db(host_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/groups', methods=['POST'])
+@app.route('/groups', methods=['GET'])
 def get_groups():
     """Get all groups"""
     try:
@@ -1513,7 +1612,7 @@ def create_group():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/tags', methods=['POST'])
+@app.route('/tags', methods=['GET'])
 def get_tags():
     """Get all tags"""
     try:
@@ -1682,22 +1781,16 @@ def create_wizard_session():
 @app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['POST'])
 def validate_hosts_stream(session_id):
     """Stream SSH validation progress via SSE"""
+    # Read JSON body once so generator doesn't depend on request context
+    data = request.get_json(silent=True) or {}
+    ips = data.get('ips', []) or []
+    usernames = data.get('usernames', []) or []
+    ssh_key_id = data.get('ssh_key_id')
+    key_content = data.get('key_content')
+
+    @stream_with_context
     def generate():
         try:
-            # Get parameters from query string
-            try:
-                ips = ast.literal_eval(request.args.get('ips', '[]'))
-            except:
-                ips = []
-            
-            try:
-                usernames = ast.literal_eval(request.args.get('usernames', '[]'))
-            except:
-                usernames = []
-            
-            ssh_key_id = request.args.get('ssh_key_id', type=int, default=None)
-            key_content = request.args.get('key_content', default=None)
-            
             if not ips:
                 yield "data: " + json.dumps({'error': 'No IP addresses provided'}) + "\n\n"
                 return
@@ -1761,22 +1854,16 @@ def validate_hosts_stream(session_id):
 @app.route('/wizard/session/<session_id>/collect-info-stream', methods=['POST'])
 def collect_info_stream(session_id):
     """Stream system information collection progress via SSE"""
+    # Read JSON body once so generator doesn't depend on request context
+    data = request.get_json(silent=True) or {}
+    ips = data.get('ips', []) or []
+    usernames = data.get('usernames', []) or []
+    ssh_key_id = data.get('ssh_key_id')
+    key_content = data.get('key_content')
+
+    @stream_with_context
     def generate():
         try:
-            # Get parameters from query string
-            try:
-                ips = ast.literal_eval(request.args.get('ips', '[]'))
-            except:
-                ips = []
-            
-            try:
-                usernames = ast.literal_eval(request.args.get('usernames', '[]'))
-            except:
-                usernames = []
-            
-            ssh_key_id = request.args.get('ssh_key_id', type=int, default=None)
-            key_content = request.args.get('key_content', default=None)
-            
             if not ips:
                 yield "data: " + json.dumps({'error': 'No IP addresses provided'}) + "\n\n"
                 return
@@ -1886,3 +1973,16 @@ def test_sse():
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no'
     })
+
+if __name__ == '__main__':
+    # Initialize application
+    initialize_app()
+    
+    # Start scheduler
+    scheduler.start()
+    startup_scheduler()
+    atexit.register(lambda: scheduler.shutdown())
+    
+    # Start Flask app
+    app.run(host='0.0.0.0', port=5001, debug=False)
+    app.run(host='0.0.0.0', port=5001, debug=False)
