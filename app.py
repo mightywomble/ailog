@@ -13,6 +13,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from functools import lru_cache
+import ast
 import tempfile
 from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services
@@ -1678,16 +1679,16 @@ def create_wizard_session():
         }
     return jsonify({'session_id': session_id})
 
-@app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['POST'])
+@app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['GET'])
 def validate_hosts_stream(session_id):
     """Stream SSH validation progress via SSE"""
     def generate():
         try:
-            data = request.get_json()
-            ips = data.get('ips', [])
-            usernames = data.get('usernames', [])
-            ssh_key_id = data.get('ssh_key_id')
-            key_content = data.get('key_content')
+            # Get parameters from query string
+            ips = ast.literal_eval(request.args.get('ips', '[]'))
+            usernames = ast.literal_eval(request.args.get('usernames', '[]'))
+            ssh_key_id = request.args.get('ssh_key_id', type=int, default=None)
+            key_content = request.args.get('key_content', default=None)
             
             if not ips:
                 yield "data: " + json.dumps({'error': 'No IP addresses provided'}) + "\n\n"
@@ -1749,16 +1750,16 @@ def validate_hosts_stream(session_id):
         'X-Accel-Buffering': 'no'
     })
 
-@app.route('/wizard/session/<session_id>/collect-info-stream', methods=['POST'])
+@app.route('/wizard/session/<session_id>/collect-info-stream', methods=['GET'])
 def collect_info_stream(session_id):
     """Stream system information collection progress via SSE"""
     def generate():
         try:
-            data = request.get_json()
-            ips = data.get('ips', [])
-            usernames = data.get('usernames', [])
-            ssh_key_id = data.get('ssh_key_id')
-            key_content = data.get('key_content')
+            # Get parameters from query string
+            ips = ast.literal_eval(request.args.get('ips', '[]'))
+            usernames = ast.literal_eval(request.args.get('usernames', '[]'))
+            ssh_key_id = request.args.get('ssh_key_id', type=int, default=None)
+            key_content = request.args.get('key_content', default=None)
             
             if not ips:
                 yield "data: " + json.dumps({'error': 'No IP addresses provided'}) + "\n\n"

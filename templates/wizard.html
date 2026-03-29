@@ -60,7 +60,7 @@
 
                     <!-- SSH Key Selection -->
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-3">SSH Authentication</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-3">SSH Authentication (Private Key)</label>
                         
                         <div class="flex gap-4 mb-4">
                             <label class="flex items-center cursor-pointer">
@@ -76,7 +76,7 @@
                         <!-- File Input -->
                         <div id="keyFileDiv" class="mb-4">
                             <input type="file" id="keyFile" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                            <p class="text-xs text-gray-500 mt-1">Select your private SSH key file</p>
+                            <p class="text-xs text-gray-500 mt-1">Select your private SSH key file (usually ~/.ssh/id_rsa or similar)</p>
                         </div>
 
                         <!-- Paste Input -->
@@ -84,7 +84,7 @@
                             <textarea id="keyContent" placeholder="Paste your private key here (-----BEGIN PRIVATE KEY-----)"
                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                       rows="6"></textarea>
-                            <p class="text-xs text-gray-500 mt-1">Include the BEGIN and END lines</p>
+                            <p class="text-xs text-gray-500 mt-1">Paste your private SSH key content (include the -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY----- lines)</p>
                         </div>
 
                         <!-- Stored Keys Option -->
@@ -364,11 +364,22 @@ async function proceedToStep2() {
         resultsDiv.innerHTML = '';
         const resultElements = {};
         
-        // Open SSE stream
-        const eventSource = new EventSource(`/wizard/session/${sessionId}/validate-hosts-stream`);
+        // Prepare URL with query parameters for EventSource (GET request)
+        const ipsParam = encodeURIComponent(JSON.stringify(wizardData.ips));
+        const usersParam = encodeURIComponent(JSON.stringify(wizardData.usernames));
+        let streamUrl = `/wizard/session/${sessionId}/validate-hosts-stream?ips=${ipsParam}&usernames=${usersParam}`;
+        if (wizardData.sshKeyId) streamUrl += `&ssh_key_id=${wizardData.sshKeyId}`;
+        if (wizardData.keyContent) streamUrl += `&key_content=${encodeURIComponent(wizardData.keyContent)}`;
+        
+        const eventSource = new EventSource(streamUrl);
         
         eventSource.addEventListener('message', (event) => {
-            const data = JSON.parse(event.data);
+            try {
+                const data = JSON.parse(event.data);
+            } catch (e) {
+                console.error('Failed to parse SSE data:', event.data);
+                return;
+            }
             
             if (data.error) {
                 resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
@@ -417,12 +428,7 @@ async function proceedToStep2() {
             eventSource.close();
         };
         
-        // Send the request to start streaming
-        await fetch(`/wizard/session/${sessionId}/validate-hosts-stream`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+
     } catch (error) {
         resultsDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
     }
@@ -460,11 +466,22 @@ async function proceedToStep3() {
         logDiv.innerHTML = '';
         const ipSections = {};
         
-        // Open SSE stream
-        const eventSource = new EventSource(`/wizard/session/${sessionId}/collect-info-stream`);
+        // Prepare URL with query parameters for EventSource (GET request)
+        const ipsParam = encodeURIComponent(JSON.stringify(payload.ips));
+        const usersParam = encodeURIComponent(JSON.stringify(payload.usernames));
+        let streamUrl = `/wizard/session/${sessionId}/collect-info-stream?ips=${ipsParam}&usernames=${usersParam}`;
+        if (wizardData.sshKeyId) streamUrl += `&ssh_key_id=${wizardData.sshKeyId}`;
+        if (wizardData.keyContent) streamUrl += `&key_content=${encodeURIComponent(wizardData.keyContent)}`;
+        
+        const eventSource = new EventSource(streamUrl);
         
         eventSource.addEventListener('message', (event) => {
-            const data = JSON.parse(event.data);
+            try {
+                const data = JSON.parse(event.data);
+            } catch (e) {
+                console.error('Failed to parse SSE data:', event.data);
+                return;
+            }
             
             if (data.error) {
                 logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
@@ -513,12 +530,7 @@ async function proceedToStep3() {
             eventSource.close();
         };
         
-        // Send the request to start streaming
-        await fetch(`/wizard/session/${sessionId}/collect-info-stream`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+
     } catch (error) {
         logDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
     }
