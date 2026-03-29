@@ -391,7 +391,6 @@ async function proceedToStep2() {
                 if (!line.trim()) continue;
                 if (!line.startsWith('data: ')) continue;
                 
-                try {
                     const jsonStr = line.substring(6);
                     const data = JSON.parse(jsonStr);
             
@@ -435,11 +434,9 @@ async function proceedToStep2() {
                 resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
                 
             }
-                } catch (e) {
-                console.error('Error parsing JSON:', e);
-            }
         }
         
+        }
 
     } catch (error) {
         resultsDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
@@ -498,7 +495,6 @@ async function proceedToStep3() {
                 if (!line.trim()) continue;
                 if (!line.startsWith('data: ')) continue;
                 
-                try {
                     const jsonStr = line.substring(6);
                     const data = JSON.parse(jsonStr);
             
@@ -542,11 +538,9 @@ async function proceedToStep3() {
                 logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
                 
             }
-                } catch (e) {
-                console.error('Error parsing JSON:', e);
-            }
         }
         
+        }
 
     } catch (error) {
         logDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
