@@ -364,10 +364,6 @@ async function proceedToStep2() {
         resultsDiv.innerHTML = '';
         const resultElements = {};
         
-        const payload = {
-            ips: wizardData.ips,
-            usernames: wizardData.usernames
-        };
         
         if (wizardData.sshKeyId) {
             payload.ssh_key_id = wizardData.sshKeyId;
