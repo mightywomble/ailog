@@ -356,9 +356,8 @@
                     <!-- Remote Hosts Section -->
                     <section id="remote-hosts-section" class="settings-section space-y-4 hidden">
                         <div class="flex justify-between items-center">
-                            <h4 class="font-semibold text-lg text-white">Remote Hosts</h4>
-                            <button id="add-new-host-btn" class="button px-3 py-1 text-sm">Add New</button>
-                        </div>
+                            <h4 class="font-semibold text-lg text-white">Delete Hosts</h4>
+                                                    </div>
                         <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
                     </section>
 
@@ -1512,12 +1511,19 @@
              // Ensure AI Provider section is shown by default
              switchSettingsSection('ai-provider');
         });
-        closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
-        addNewHostBtn.addEventListener('click', () => openHostModal());
-        hostModalCancelBtn.addEventListener('click', () => {
-            hostModal.classList.add('hidden');
-            settingsModal.classList.remove('hidden');
-        });
+        if (closeSettingsBtn) {
+            closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+        }
+        // Host modal controls are optional (legacy manual host management)
+        if (typeof addNewHostBtn !== 'undefined' && addNewHostBtn) {
+            addNewHostBtn.addEventListener('click', () => openHostModal());
+        }
+        if (typeof hostModalCancelBtn !== 'undefined' && hostModalCancelBtn) {
+            hostModalCancelBtn.addEventListener('click', () => {
+                hostModal.classList.add('hidden');
+                settingsModal.classList.remove('hidden');
+            });
+        }
         
         hostListDiv.addEventListener('click', async (e) => {
             const button = e.target.closest('button');
