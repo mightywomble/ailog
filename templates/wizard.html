@@ -435,6 +435,9 @@ async function proceedToStep2() {
                 resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
                 
             }
+            } catch (e) {
+                console.error('Error parsing JSON:', e);
+            }
         });
         
         eventSource.onerror = () => {
@@ -543,6 +546,9 @@ async function proceedToStep3() {
             } else if (data.type === 'error') {
                 logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
                 
+            }
+            } catch (e) {
+                console.error('Error parsing JSON:', e);
             }
         });
         
