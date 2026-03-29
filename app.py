@@ -13,9 +13,24 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from functools import lru_cache
+import ast
+import tempfile
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag
+from wizard_helpers import test_ssh_connection, collect_system_info, collect_services
 
 # --- INITIALIZATION ---
 app = Flask(__name__)
+
+# --- DATABASE CONFIGURATION ---
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///ailog.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
+
+# Create database tables on startup
+with app.app_context():
+    db.create_all()
+
 scheduler = BackgroundScheduler(daemon=True)
 
 # --- CONFIGURATION ---
@@ -186,12 +201,43 @@ def search_host_logs(host_id, host_name, query, search_scope, case_sensitive):
 
 # --- CORE LOGIC (Refactored for Remote Execution) ---
 def execute_command(hostname, command_str, timeout=10):
+    """Execute a command either locally or against a remote host.
+
+    hostname can be:
+      - 'local' to run on this machine
+      - a config host ID from load_hosts()
+      - a database-backed host ID like 'db-<id>' created by the wizard
+    """
     ssh_prefix_args = []
     if hostname != 'local':
-        hosts = load_hosts()
+        # First try config-based hosts
+        hosts = load_hosts() or {}
         host_info = hosts.get(hostname)
+
+        # If not found in config, try database hosts with prefix db-<id>
+        if not host_info and hostname.startswith('db-'):
+            try:
+                from app import Host  # local import to avoid circulars at import time
+            except Exception:
+                Host = None
+            if Host is not None:
+                try:
+                    host_id = int(hostname.split('-', 1)[1])
+                    from flask import current_app
+                    from app import db
+                    # We assume we're in an app/request context when this is called via Flask routes
+                    host_obj = Host.query.get(host_id)
+                    if host_obj:
+                        host_info = {
+                            'user': host_obj.ssh_user or 'root',
+                            'ip': host_obj.ip_address,
+                        }
+                except Exception as e:
+                    print(f"[ERROR] Failed to resolve DB host '{hostname}': {e}")
+
         if not host_info:
-            raise ValueError(f"Host ID '{hostname}' not found in configuration.")
+            raise ValueError(f"Host ID '{hostname}' not found in configuration or database.")
+
         ssh_prefix_args = get_ssh_prefix_args(host_info['user'], host_info['ip'])
 
     cmd_list = ssh_prefix_args + [command_str] if ssh_prefix_args else [command_str]
@@ -391,7 +437,7 @@ def clear_sources_cache():
     _host_sources_cache.clear()
     return jsonify({'message': 'Cache cleared successfully'})
 
-@app.route('/sources/all', methods=['GET'])
+@app.route('/sources/all', methods=['POST'])
 def get_all_host_sources():
     """Get a simplified list of log sources from all configured hosts for selection purposes"""
     current_time = time.time()
@@ -449,7 +495,7 @@ def get_all_host_sources():
     
     return jsonify(response_data)
 
-@app.route('/sources/table', methods=['GET'])
+@app.route('/sources/table', methods=['POST'])
 def get_log_table_view():
     """Get logs organized in a table format: log names as rows, hosts as columns"""
     current_time = time.time()
@@ -766,8 +812,27 @@ def get_journal_content(unit):
 # --- HOST MANAGEMENT ROUTES ---
 @app.route('/hosts', methods=['GET'])
 def get_hosts():
+    """Return combined hosts from config file and database."""
     print("[DEBUG] /hosts endpoint called")
-    hosts_data = load_hosts()
+    # Load hosts from config file (original behaviour)
+    hosts_data = load_hosts() or {}
+
+    # Merge in hosts from database so wizard-added hosts appear
+    try:
+        db_hosts = Host.query.all()
+        for h in db_hosts:
+            hid = f"db-{h.id}"
+            if hid not in hosts_data:
+                hosts_data[hid] = {
+                    'friendly_name': h.friendly_name or h.hostname or h.ip_address,
+                    'ip': h.ip_address,
+                    'user': h.ssh_user or 'root',
+                    'description': h.description or 'Onboarded via wizard',
+                    'source': 'db'
+                }
+    except Exception as e:
+        print(f"[ERROR] Failed to merge DB hosts into /hosts response: {e}")
+
     print(f"[DEBUG] Returning hosts data: {hosts_data}")
     return jsonify(hosts_data)
 
@@ -792,11 +857,41 @@ def update_host(host_id):
 
 @app.route('/hosts/delete/<host_id>', methods=['DELETE'])
 def delete_host(host_id):
-    hosts = load_hosts()
+    """Delete a host from either the config file or the database.
+
+    host_id can be a config ID or a db-backed ID like 'db-<id>'.
+    """
+    # First try to delete from config-based hosts
+    hosts = load_hosts() or {}
     if host_id in hosts:
         del hosts[host_id]
         save_hosts(hosts)
-        return jsonify({'message': 'Host deleted.'})
+        return jsonify({'message': 'Host deleted from configuration.'})
+
+    # If not found in config, try database hosts with prefix db-<id>
+    if host_id.startswith('db-'):
+        try:
+            from app import Host, SystemInfo, Service, HostLog, db  # local import to avoid circulars at import time
+        except Exception:
+            Host = None
+        if Host is not None:
+            try:
+                db_id = int(host_id.split('-', 1)[1])
+                host = Host.query.get(db_id)
+                if not host:
+                    return jsonify({'error': 'Host not found.'}), 404
+
+                # Delete related records if cascading is not configured
+                SystemInfo.query.filter_by(host_id=db_id).delete()
+                Service.query.filter_by(host_id=db_id).delete()
+                HostLog.query.filter_by(host_id=db_id).delete()
+                db.session.delete(host)
+                db.session.commit()
+                return jsonify({'message': 'Host deleted from database.'})
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({'error': f'Failed to delete DB host: {str(e)}'}), 500
+
     return jsonify({'error': 'Host not found.'}), 404
 
 @app.route('/hosts/test', methods=['POST'])
@@ -1125,7 +1220,7 @@ def run_now():
     thread.start()
     return jsonify({'message': 'Immediate analysis triggered. Alerts will be sent for any issues found.'})
 
-@app.route('/schedule/status', methods=['GET'])
+@app.route('/schedule/status', methods=['POST'])
 def schedule_status():
     config = load_config()
     job = scheduler.get_job('scheduled_analysis')
@@ -1169,6 +1264,716 @@ def initialize_app():
     print(f"Starting web server on http://0.0.0.0:5001")
     print("============================")
 
+
+
+# --- NEW WIZARD & SSH KEY MANAGEMENT ENDPOINTS ---
+
+@app.route('/ssh-keys', methods=['GET'])
+def get_ssh_keys():
+    """Get list of stored SSH keys"""
+    try:
+        keys = SSHKey.query.all()
+        return jsonify([k.to_dict() for k in keys])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/ssh-keys/upload', methods=['POST'])
+def upload_ssh_key():
+    """Upload SSH key from file"""
+    try:
+        key_name = request.form.get('key_name')
+        uploaded_file = request.files.get('key_file')
+        
+        if not key_name or not uploaded_file:
+            return jsonify({'error': 'key_name and key_file required'}), 400
+        
+        existing = SSHKey.query.filter_by(key_name=key_name).first()
+        if existing:
+            return jsonify({'error': 'Key with this name already exists'}), 400
+        
+        key_content = uploaded_file.read().decode('utf-8')
+        
+        ssh_key = SSHKey(
+            key_name=key_name,
+            key_type='file',
+            key_content=key_content
+        )
+        db.session.add(ssh_key)
+        db.session.commit()
+        
+        return jsonify({'message': 'SSH key uploaded', 'id': ssh_key.id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/ssh-keys/save', methods=['POST'])
+def save_ssh_key():
+    """Save SSH key from pasted content"""
+    try:
+        data = request.get_json()
+        key_name = data.get('key_name')
+        key_content = data.get('key_content')
+        
+        if not key_name or not key_content:
+            return jsonify({'error': 'key_name and key_content required'}), 400
+        
+        existing = SSHKey.query.filter_by(key_name=key_name).first()
+        if existing:
+            return jsonify({'error': 'Key with this name already exists'}), 400
+        
+        ssh_key = SSHKey(
+            key_name=key_name,
+            key_type='pasted',
+            key_content=key_content
+        )
+        db.session.add(ssh_key)
+        db.session.commit()
+        
+        return jsonify({'message': 'SSH key saved', 'id': ssh_key.id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/wizard/validate-hosts', methods=['POST'])
+def validate_hosts():
+    """Validate SSH connectivity for multiple hosts"""
+    try:
+        data = request.get_json()
+        ips = data.get('ips', [])
+        usernames = data.get('usernames', [])
+        ssh_key_id = data.get('ssh_key_id')
+        key_content = data.get('key_content')
+        
+        if not ips:
+            return jsonify({'error': 'No IP addresses provided'}), 400
+        
+        ssh_key_path = None
+        if ssh_key_id:
+            ssh_key = SSHKey.query.get(ssh_key_id)
+            if ssh_key:
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                temp_file.write(ssh_key.key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)
+                ssh_key_path = temp_file.name
+        elif key_content:
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+            temp_file.write(key_content)
+            temp_file.close()
+            os.chmod(temp_file.name, 0o600)
+            ssh_key_path = temp_file.name
+        
+        results = []
+        for i, ip in enumerate(ips):
+            if len(usernames) > i:
+                user = usernames[i]
+            elif usernames:
+                user = usernames[0]
+            else:
+                user = 'root'
+            
+            result = test_ssh_connection(user, ip, ssh_key_path)
+            results.append(result)
+        
+        if ssh_key_path and os.path.exists(ssh_key_path):
+            try:
+                os.unlink(ssh_key_path)
+            except:
+                pass
+        
+        return jsonify({
+            'total': len(ips),
+            'results': results,
+            'successful': sum(1 for r in results if r['status'] == 'success')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/wizard/collect-info', methods=['POST'])
+def collect_host_info():
+    """Collect system information from validated hosts"""
+    try:
+        data = request.get_json()
+        ips = data.get('ips', [])
+        usernames = data.get('usernames', [])
+        ssh_key_id = data.get('ssh_key_id')
+        key_content = data.get('key_content')
+        
+        if not ips:
+            return jsonify({'error': 'No IP addresses provided'}), 400
+        
+        ssh_key_path = None
+        if ssh_key_id:
+            ssh_key = SSHKey.query.get(ssh_key_id)
+            if ssh_key:
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                temp_file.write(ssh_key.key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)
+                ssh_key_path = temp_file.name
+        elif key_content:
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+            temp_file.write(key_content)
+            temp_file.close()
+            os.chmod(temp_file.name, 0o600)
+            ssh_key_path = temp_file.name
+        
+        results = []
+        for i, ip in enumerate(ips):
+            if len(usernames) > i:
+                user = usernames[i]
+            elif usernames:
+                user = usernames[0]
+            else:
+                user = 'root'
+            
+            info = {
+                'ip': ip,
+                'user': user,
+                'system_info': collect_system_info(user, ip, ssh_key_path),
+                'services': collect_services(user, ip, ssh_key_path)
+            }
+            results.append(info)
+        
+        if ssh_key_path and os.path.exists(ssh_key_path):
+            try:
+                os.unlink(ssh_key_path)
+            except:
+                pass
+        
+        return jsonify({
+            'total': len(ips),
+            'results': results
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/wizard/add-devices', methods=['POST'])
+def add_devices_from_wizard():
+    """Add multiple devices from wizard with collected info"""
+    try:
+        data = request.get_json()
+        devices = data.get('devices', [])
+        ssh_key_id = data.get('ssh_key_id')
+        
+        if not devices:
+            return jsonify({'error': 'No devices provided'}), 400
+        
+        added_hosts = []
+        for device in devices:
+            try:
+                host = Host(
+                    hostname=device.get('hostname', device['ip']),
+                    friendly_name=device.get('friendly_name', device['ip']),
+                    ip_address=device['ip'],
+                    ssh_user=device.get('user', 'root'),
+                    ssh_key_id=ssh_key_id,
+                    description=device.get('description', ''),
+                    status='online'
+                )
+                db.session.add(host)
+                db.session.flush()
+                
+                if device.get('system_info'):
+                    sys_info = device['system_info']
+                    system_info = SystemInfo(
+                        host_id=host.id,
+                        os_version=sys_info.get('os_version'),
+                        hostname=sys_info.get('hostname'),
+                        ram_total=sys_info.get('ram_total'),
+                        ram_used=sys_info.get('ram_used'),
+                        disk_total=sys_info.get('disk_total'),
+                        disk_used=sys_info.get('disk_used'),
+                        cpu_type=sys_info.get('cpu_type'),
+                        cpu_cores=sys_info.get('cpu_cores'),
+                        netbird_ip=sys_info.get('netbird_ip'),
+                        main_ip=sys_info.get('main_ip')
+                    )
+                    db.session.add(system_info)
+                
+                if device.get('services'):
+                    for svc in device['services']:
+                        service = Service(
+                            host_id=host.id,
+                            service_name=svc.get('service_name'),
+                            status=svc.get('status'),
+                            is_running=svc.get('is_running', False)
+                        )
+                        db.session.add(service)
+                
+                log_content = f"Host onboarded from wizard\nIP: {device['ip']}\nUser: {device.get('user')}\nSystem Info collected: {bool(device.get('system_info'))}"
+                host_log = HostLog(
+                    host_id=host.id,
+                    log_content=log_content,
+                    log_type='setup'
+                )
+                db.session.add(host_log)
+                
+                added_hosts.append({
+                    'id': host.id,
+                    'hostname': host.hostname,
+                    'ip': host.ip_address
+                })
+            except Exception as e:
+                print(f"Error adding device {device}: {e}")
+                db.session.rollback()
+                continue
+        
+        db.session.commit()
+        return jsonify({
+            'message': f'Added {len(added_hosts)} devices',
+            'devices': added_hosts
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/hosts/db/<int:host_id>/info', methods=['GET'])
+def get_host_info(host_id):
+    """Return detailed host info including system info and services."""
+    try:
+        from database import Host, SystemInfo, Service
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+
+        host_dict = host.to_dict()  # already nests system_info and groups/tags
+
+        # Add services with simple summary
+        services = Service.query.filter_by(host_id=host_id).all()
+        services_list = [s.to_dict() for s in services]
+        running = [s for s in services_list if s.get('status') == 'active' or s.get('is_running')]
+        stopped = [s for s in services_list if s.get('status') not in ('active',) and not s.get('is_running')]
+
+        host_dict['services'] = services_list
+        host_dict['services_summary'] = {
+            'total': len(services_list),
+            'running': len(running),
+            'stopped': len(stopped)
+        }
+
+        return jsonify(host_dict)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/hosts/db', methods=['POST'])
+def get_hosts_db():
+    """Get all hosts from database"""
+    try:
+        hosts = Host.query.all()
+        return jsonify([h.to_dict() for h in hosts])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/hosts/db/<int:host_id>', methods=['POST'])
+def get_host_db(host_id):
+    """Get specific host from database with all details"""
+    try:
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+        return jsonify(host.to_dict())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/groups', methods=['GET'])
+def get_groups():
+    """Get all groups"""
+    try:
+        groups = Group.query.all()
+        return jsonify([g.to_dict() for g in groups])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/groups', methods=['POST'])
+def create_group():
+    """Create a new group"""
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        
+        if not name:
+            return jsonify({'error': 'Group name required'}), 400
+        
+        existing = Group.query.filter_by(name=name).first()
+        if existing:
+            return jsonify({'error': 'Group already exists'}), 400
+        
+        group = Group(
+            name=name,
+            description=data.get('description', '')
+        )
+        db.session.add(group)
+        db.session.commit()
+        
+        return jsonify(group.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/tags', methods=['GET'])
+def get_tags():
+    """Get all tags"""
+    try:
+        tags = Tag.query.all()
+        return jsonify([t.to_dict() for t in tags])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/tags', methods=['POST'])
+def create_tag():
+    """Create a new tag"""
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        
+        if not name:
+            return jsonify({'error': 'Tag name required'}), 400
+        
+        existing = Tag.query.filter_by(name=name).first()
+        if existing:
+            return jsonify({'error': 'Tag already exists'}), 400
+        
+        tag = Tag(
+            name=name,
+            color=data.get('color', '#3b82f6')
+        )
+        db.session.add(tag)
+        db.session.commit()
+        
+        return jsonify(tag.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/hosts/db/<int:host_id>/groups', methods=['POST'])
+def add_host_to_group(host_id):
+    """Add host to a group"""
+    try:
+        data = request.get_json()
+        group_ids = data.get('group_ids', [])
+        
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+        
+        groups = Group.query.filter(Group.id.in_(group_ids)).all()
+        host.groups = groups
+        db.session.commit()
+        
+        return jsonify(host.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/hosts/db/<int:host_id>/tags', methods=['POST'])
+def add_host_to_tags(host_id):
+    """Add tags to a host"""
+    try:
+        data = request.get_json()
+        tag_ids = data.get('tag_ids', [])
+        
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+        
+        tags = Tag.query.filter(Tag.id.in_(tag_ids)).all()
+        host.tags = tags
+        db.session.commit()
+        
+        return jsonify(host.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/export/ansible-inventory', methods=['POST'])
+def export_ansible_inventory():
+    """Generate Ansible inventory YAML"""
+    try:
+        groups = Group.query.all()
+        ungrouped = Host.query.filter(~Host.groups.any()).all()
+        
+        inventory = {'all': {'children': {}}}
+        
+        for group in groups:
+            inventory['all']['children'][group.name] = {
+                'hosts': {}
+            }
+            for host in group.hosts:
+                inventory['all']['children'][group.name]['hosts'][host.friendly_name or host.hostname] = {
+                    'ansible_host': host.ip_address,
+                    'ansible_user': host.ssh_user
+                }
+        
+        if ungrouped:
+            inventory['all']['children']['ungrouped'] = {'hosts': {}}
+            for host in ungrouped:
+                inventory['all']['children']['ungrouped']['hosts'][host.friendly_name or host.hostname] = {
+                    'ansible_host': host.ip_address,
+                    'ansible_user': host.ssh_user
+                }
+        
+        try:
+            import yaml
+            yaml_output = yaml.dump(inventory, default_flow_style=False)
+        except ImportError:
+            yaml_output = json.dumps(inventory, indent=2)
+        
+        return Response(
+            yaml_output,
+            mimetype='text/yaml',
+            headers={'Content-Disposition': 'attachment; filename=inventory.yaml'}
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/export/ssh-config', methods=['POST'])
+def export_ssh_config():
+    """Generate SSH config file"""
+    try:
+        hosts = Host.query.all()
+        
+        ssh_config = "# Auto-generated SSH config from AI Log Viewer\n"
+        ssh_config += f"# Generated: {datetime.datetime.utcnow().isoformat()}\n\n"
+        
+        for host in hosts:
+            host_name = host.friendly_name or host.hostname
+            ssh_config += f"Host {host_name}\n"
+            ssh_config += f"    HostName {host.ip_address}\n"
+            ssh_config += f"    User {host.ssh_user}\n"
+            
+            if host.ssh_key:
+                ssh_config += f"    IdentityFile ~/.ssh/{host.ssh_key.key_name}\n"
+            
+            ssh_config += f"    StrictHostKeyChecking no\n"
+            ssh_config += f"    UserKnownHostsFile=/dev/null\n"
+            ssh_config += "\n"
+        
+        return Response(
+            ssh_config,
+            mimetype='text/plain',
+            headers={'Content-Disposition': 'attachment; filename=ssh_config'}
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- SERVER-SENT EVENTS (SSE) STREAMING ENDPOINTS ---
+
+import uuid as uuid_lib
+from threading import Lock
+
+# Global dictionary to store event queues for each wizard session
+wizard_sessions = {}
+sessions_lock = Lock()
+
+@app.route('/wizard/session/create', methods=['POST'])
+def create_wizard_session():
+    """Create a new wizard session ID for streaming"""
+    session_id = str(uuid_lib.uuid4())
+    with sessions_lock:
+        wizard_sessions[session_id] = {
+            'created_at': datetime.datetime.utcnow(),
+            'status': 'active'
+        }
+    return jsonify({'session_id': session_id})
+
+@app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['POST'])
+def validate_hosts_stream(session_id):
+    """Stream SSH validation progress via SSE"""
+    # Read JSON body once so generator doesn't depend on request context
+    data = request.get_json(silent=True) or {}
+    ips = data.get('ips', []) or []
+    usernames = data.get('usernames', []) or []
+    ssh_key_id = data.get('ssh_key_id')
+    key_content = data.get('key_content')
+
+    @stream_with_context
+    def generate():
+        try:
+            if not ips:
+                yield "data: " + json.dumps({'error': 'No IP addresses provided'}) + "\n\n"
+                return
+            
+            yield "data: " + json.dumps({'type': 'start', 'total': len(ips)}) + "\n\n"
+            
+            ssh_key_path = None
+            if ssh_key_id:
+                ssh_key = SSHKey.query.get(ssh_key_id)
+                if ssh_key:
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                    temp_file.write(ssh_key.key_content)
+                    temp_file.close()
+                    os.chmod(temp_file.name, 0o600)
+                    ssh_key_path = temp_file.name
+            elif key_content:
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                temp_file.write(key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)
+                ssh_key_path = temp_file.name
+            
+            results = []
+            for i, ip in enumerate(ips):
+                if len(usernames) > i:
+                    user = usernames[i]
+                elif usernames:
+                    user = usernames[0]
+                else:
+                    user = 'root'
+                
+                timestamp = datetime.datetime.utcnow().isoformat()
+                msg = {'type': 'progress', 'current': i, 'total': len(ips), 'message': 'Testing ' + ip + '...'}
+                yield "data: " + json.dumps(msg) + "\n\n"
+                
+                result = test_ssh_connection(user, ip, ssh_key_path)
+                results.append(result)
+                
+                msg = {'type': 'result', 'ip': ip, 'status': result['status'], 'message': result['message'], 'timestamp': timestamp}
+                yield "data: " + json.dumps(msg) + "\n\n"
+            
+            if ssh_key_path and os.path.exists(ssh_key_path):
+                try:
+                    os.unlink(ssh_key_path)
+                except:
+                    pass
+            
+            success_count = sum(1 for r in results if r['status'] == 'success')
+            msg = {'type': 'complete', 'total': len(ips), 'successful': success_count, 'results': results}
+            yield "data: " + json.dumps(msg) + "\n\n"
+        
+        except Exception as e:
+            msg = {'type': 'error', 'error': str(e)}
+            yield "data: " + json.dumps(msg) + "\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+@app.route('/wizard/session/<session_id>/collect-info-stream', methods=['POST'])
+def collect_info_stream(session_id):
+    """Stream system information collection progress via SSE"""
+    # Read JSON body once so generator doesn't depend on request context
+    data = request.get_json(silent=True) or {}
+    ips = data.get('ips', []) or []
+    usernames = data.get('usernames', []) or []
+    ssh_key_id = data.get('ssh_key_id')
+    key_content = data.get('key_content')
+
+    @stream_with_context
+    def generate():
+        try:
+            if not ips:
+                yield "data: " + json.dumps({'error': 'No IP addresses provided'}) + "\n\n"
+                return
+            
+            yield "data: " + json.dumps({'type': 'start', 'total': len(ips)}) + "\n\n"
+            
+            ssh_key_path = None
+            if ssh_key_id:
+                ssh_key = SSHKey.query.get(ssh_key_id)
+                if ssh_key:
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                    temp_file.write(ssh_key.key_content)
+                    temp_file.close()
+                    os.chmod(temp_file.name, 0o600)
+                    ssh_key_path = temp_file.name
+            elif key_content:
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                temp_file.write(key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)
+                ssh_key_path = temp_file.name
+            
+            results = []
+            for i, ip in enumerate(ips):
+                if len(usernames) > i:
+                    user = usernames[i]
+                elif usernames:
+                    user = usernames[0]
+                else:
+                    user = 'root'
+                
+                timestamp = datetime.datetime.utcnow().isoformat()
+                msg = {'type': 'progress', 'current': i, 'total': len(ips), 'message': 'Collecting info from ' + ip + '...'}
+                yield "data: " + json.dumps(msg) + "\n\n"
+                
+                sys_info = collect_system_info(user, ip, ssh_key_path)
+                
+                if sys_info.get('os_version'):
+                    os_msg = sys_info['os_version'][:80]
+                    msg = {'type': 'log', 'ip': ip, 'message': 'OS: ' + os_msg, 'timestamp': timestamp}
+                    yield "data: " + json.dumps(msg) + "\n\n"
+                
+                if sys_info.get('ram_total'):
+                    ram_gb = sys_info['ram_total'] / (1024**3)
+                    ram_used_gb = sys_info.get('ram_used', 0) / (1024**3)
+                    ram_msg = 'RAM: {:.1f}GB total, {:.1f}GB used'.format(ram_gb, ram_used_gb)
+                    msg = {'type': 'log', 'ip': ip, 'message': ram_msg, 'timestamp': timestamp}
+                    yield "data: " + json.dumps(msg) + "\n\n"
+                
+                if sys_info.get('disk_total'):
+                    disk_gb = sys_info['disk_total'] / (1024**3)
+                    disk_used_gb = sys_info.get('disk_used', 0) / (1024**3)
+                    disk_msg = 'Disk: {:.1f}GB total, {:.1f}GB used'.format(disk_gb, disk_used_gb)
+                    msg = {'type': 'log', 'ip': ip, 'message': disk_msg, 'timestamp': timestamp}
+                    yield "data: " + json.dumps(msg) + "\n\n"
+                
+                if sys_info.get('cpu_type'):
+                    cpu_msg = 'CPU: ' + sys_info['cpu_type']
+                    msg = {'type': 'log', 'ip': ip, 'message': cpu_msg, 'timestamp': timestamp}
+                    yield "data: " + json.dumps(msg) + "\n\n"
+                
+                services = collect_services(user, ip, ssh_key_path)
+                running_count = sum(1 for s in services if s.get('is_running'))
+                svc_msg = 'Services: {} total, {} running'.format(len(services), running_count)
+                msg = {'type': 'log', 'ip': ip, 'message': svc_msg, 'timestamp': timestamp}
+                yield "data: " + json.dumps(msg) + "\n\n"
+                
+                results.append({
+                    'ip': ip,
+                    'user': user,
+                    'system_info': sys_info,
+                    'services': services
+                })
+                
+                msg = {'type': 'host_complete', 'ip': ip, 'current': i+1, 'total': len(ips)}
+                yield "data: " + json.dumps(msg) + "\n\n"
+            
+            if ssh_key_path and os.path.exists(ssh_key_path):
+                try:
+                    os.unlink(ssh_key_path)
+                except:
+                    pass
+            
+            msg = {'type': 'complete', 'total': len(ips), 'results': results}
+            yield "data: " + json.dumps(msg) + "\n\n"
+        
+        except Exception as e:
+            msg = {'type': 'error', 'error': str(e)}
+            yield "data: " + json.dumps(msg) + "\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+
+# Debug endpoint to test SSE
+@app.route('/wizard/test-sse')
+def test_sse():
+    """Simple test SSE endpoint"""
+    def generate():
+        yield "data: " + json.dumps({'type': 'test', 'message': 'Connected to SSE'}) + "\n\n"
+        for i in range(3):
+            yield "data: " + json.dumps({'type': 'count', 'number': i}) + "\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
 if __name__ == '__main__':
     # Initialize application
     initialize_app()
@@ -1179,4 +1984,5 @@ if __name__ == '__main__':
     atexit.register(lambda: scheduler.shutdown())
     
     # Start Flask app
+    app.run(host='0.0.0.0', port=5001, debug=False)
     app.run(host='0.0.0.0', port=5001, debug=False)

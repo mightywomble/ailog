@@ -22,3 +22,10 @@ APScheduler==3.10.4
 # Uncomment if needed for development
 # gunicorn==21.2.0  # For production deployment
 # python-dotenv==1.0.0  # For environment variable management
+
+# Database ORM
+SQLAlchemy==2.0.23
+Flask-SQLAlchemy==3.1.1
+
+# Optional: PostgreSQL support (uncomment if needed)
+# psycopg2-binary==2.9.9

@@ -183,6 +183,81 @@ sudo systemctl status logviewer
 ```
 You should see output indicating the service is `active (running)`.
 
+## 🧭 Device Onboarding Wizard & Host Info
+
+### Device Onboarding Wizard (Add Devices)
+
+The **Add Devices** wizard lets you onboard one or more remote Linux hosts in a few guided steps. It will:
+
+- Validate SSH connectivity with your chosen user + key
+- Collect system information (OS, host name, RAM, disk, CPU, IPs)
+- Enumerate systemd services
+- Store everything in the database and expose hosts in the main UI
+
+#### Requirements
+
+- Passwordless sudo for the SSH user on the target hosts for commands used to read logs and systemd state.
+- SSH key-based login from the AI Log Viewer host to the remote hosts.
+
+#### Wizard Stages
+
+1. **Device entry**
+   - Click the green **Add Devices** button in the top bar.
+   - Paste one or more hostnames or IPs (one per line).
+   - Enter the SSH username you want the app to use (for example `david`).
+   - Either:
+     - Upload a PRIVATE SSH key file, or
+     - Select a previously saved key, or
+     - Paste key content.
+
+2. **Verify SSH connectivity**
+   - The app attempts SSH connections to each host using the provided user/key.
+   - Status icons:
+     - **✓** – connection successful
+     - **⚠** – authentication or sudo warning
+     - **✗** – connection failed
+   - Only successfully validated hosts continue to collection.
+
+3. **Collect system information**
+   - For each validated host the app collects:
+     - OS version
+     - Hostname
+     - RAM total / used
+     - Disk total / used
+     - CPU type and core count
+     - Main IP and Netbird IP (if available)
+     - Full list of systemd services and running state
+   - This data is stored in the `Host`, `SystemInfo` and `Service` tables in the database.
+
+4. **Add devices**
+   - The collected data is written to the database.
+   - New hosts appear in the **Hosts** sidebar on the left.
+
+### Hosts Sidebar: Info vs Logs
+
+The **Hosts** column on the left shows all available hosts (local + wizard onboarded):
+
+Each host card shows:
+
+- Friendly name
+- Short description
+- `user@host` line (truncated with full value on hover)
+- A green connection indicator
+- Two action buttons:
+  - **Info** (blue circle icon) – open the host information card
+  - **Logs** (document icon) – load logs for that host (existing behaviour)
+
+#### Host Info card
+
+- Click the **Info** button for a wizard-onboarded host (labelled *Remote*).
+- The app calls `GET /hosts/db/<id>/info` and displays:
+  - OS version and host name
+  - RAM and disk usage (GB)
+  - CPU type and cores
+  - Main IP and Netbird IP
+  - Service counts (total, running, stopped)
+- Local or non-database hosts show a basic `user@host` line and a note that detailed info is only available for wizard-managed hosts.
+
 ## 📖 Usage Guide
 
 ### Getting Started
