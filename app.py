@@ -406,7 +406,7 @@ def clear_sources_cache():
     _host_sources_cache.clear()
     return jsonify({'message': 'Cache cleared successfully'})
 
-@app.route('/sources/all', methods=['GET'])
+@app.route('/sources/all', methods=['POST'])
 def get_all_host_sources():
     """Get a simplified list of log sources from all configured hosts for selection purposes"""
     current_time = time.time()
@@ -464,7 +464,7 @@ def get_all_host_sources():
     
     return jsonify(response_data)
 
-@app.route('/sources/table', methods=['GET'])
+@app.route('/sources/table', methods=['POST'])
 def get_log_table_view():
     """Get logs organized in a table format: log names as rows, hosts as columns"""
     current_time = time.time()
@@ -779,7 +779,7 @@ def get_journal_content(unit):
         return jsonify({'error': f"Could not read journal for unit '{unit}' on '{hostname}': {e}"}), 500
 
 # --- HOST MANAGEMENT ROUTES ---
-@app.route('/hosts', methods=['GET'])
+@app.route('/hosts', methods=['POST'])
 def get_hosts():
     print("[DEBUG] /hosts endpoint called")
     hosts_data = load_hosts()
@@ -888,7 +888,7 @@ def get_ollama_models():
     except Exception as e:
         return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
 
-@app.route('/ai/config', methods=['GET'])
+@app.route('/ai/config', methods=['POST'])
 def get_ai_config():
     """Get current AI provider configuration"""
     config = load_config()
@@ -1140,7 +1140,7 @@ def run_now():
     thread.start()
     return jsonify({'message': 'Immediate analysis triggered. Alerts will be sent for any issues found.'})
 
-@app.route('/schedule/status', methods=['GET'])
+@app.route('/schedule/status', methods=['POST'])
 def schedule_status():
     config = load_config()
     job = scheduler.get_job('scheduled_analysis')
@@ -1198,7 +1198,7 @@ if __name__ == '__main__':
 
 # --- NEW WIZARD & SSH KEY MANAGEMENT ENDPOINTS ---
 
-@app.route('/ssh-keys', methods=['GET'])
+@app.route('/ssh-keys', methods=['POST'])
 def get_ssh_keys():
     """Get list of stored SSH keys"""
     try:
@@ -1458,7 +1458,7 @@ def add_devices_from_wizard():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/hosts/db', methods=['GET'])
+@app.route('/hosts/db', methods=['POST'])
 def get_hosts_db():
     """Get all hosts from database"""
     try:
@@ -1467,7 +1467,7 @@ def get_hosts_db():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/hosts/db/<int:host_id>', methods=['GET'])
+@app.route('/hosts/db/<int:host_id>', methods=['POST'])
 def get_host_db(host_id):
     """Get specific host from database with all details"""
     try:
@@ -1478,7 +1478,7 @@ def get_host_db(host_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/groups', methods=['GET'])
+@app.route('/groups', methods=['POST'])
 def get_groups():
     """Get all groups"""
     try:
@@ -1513,7 +1513,7 @@ def create_group():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/tags', methods=['GET'])
+@app.route('/tags', methods=['POST'])
 def get_tags():
     """Get all tags"""
     try:
@@ -1588,7 +1588,7 @@ def add_host_to_tags(host_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/export/ansible-inventory', methods=['GET'])
+@app.route('/export/ansible-inventory', methods=['POST'])
 def export_ansible_inventory():
     """Generate Ansible inventory YAML"""
     try:
@@ -1629,7 +1629,7 @@ def export_ansible_inventory():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/export/ssh-config', methods=['GET'])
+@app.route('/export/ssh-config', methods=['POST'])
 def export_ssh_config():
     """Generate SSH config file"""
     try:
@@ -1679,14 +1679,22 @@ def create_wizard_session():
         }
     return jsonify({'session_id': session_id})
 
-@app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['GET'])
+@app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['POST'])
 def validate_hosts_stream(session_id):
     """Stream SSH validation progress via SSE"""
     def generate():
         try:
             # Get parameters from query string
-            ips = ast.literal_eval(request.args.get('ips', '[]'))
-            usernames = ast.literal_eval(request.args.get('usernames', '[]'))
+            try:
+                ips = ast.literal_eval(request.args.get('ips', '[]'))
+            except:
+                ips = []
+            
+            try:
+                usernames = ast.literal_eval(request.args.get('usernames', '[]'))
+            except:
+                usernames = []
+            
             ssh_key_id = request.args.get('ssh_key_id', type=int, default=None)
             key_content = request.args.get('key_content', default=None)
             
@@ -1750,14 +1758,22 @@ def validate_hosts_stream(session_id):
         'X-Accel-Buffering': 'no'
     })
 
-@app.route('/wizard/session/<session_id>/collect-info-stream', methods=['GET'])
+@app.route('/wizard/session/<session_id>/collect-info-stream', methods=['POST'])
 def collect_info_stream(session_id):
     """Stream system information collection progress via SSE"""
     def generate():
         try:
             # Get parameters from query string
-            ips = ast.literal_eval(request.args.get('ips', '[]'))
-            usernames = ast.literal_eval(request.args.get('usernames', '[]'))
+            try:
+                ips = ast.literal_eval(request.args.get('ips', '[]'))
+            except:
+                ips = []
+            
+            try:
+                usernames = ast.literal_eval(request.args.get('usernames', '[]'))
+            except:
+                usernames = []
+            
             ssh_key_id = request.args.get('ssh_key_id', type=int, default=None)
             key_content = request.args.get('key_content', default=None)
             
@@ -1856,3 +1872,17 @@ def collect_info_stream(session_id):
         'X-Accel-Buffering': 'no'
     })
 
+
+# Debug endpoint to test SSE
+@app.route('/wizard/test-sse')
+def test_sse():
+    """Simple test SSE endpoint"""
+    def generate():
+        yield "data: " + json.dumps({'type': 'test', 'message': 'Connected to SSE'}) + "\n\n"
+        for i in range(3):
+            yield "data: " + json.dumps({'type': 'count', 'number': i}) + "\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })

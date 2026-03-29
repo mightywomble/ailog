@@ -364,26 +364,44 @@ async function proceedToStep2() {
         resultsDiv.innerHTML = '';
         const resultElements = {};
         
-        // Prepare URL with query parameters for EventSource (GET request)
-        const ipsParam = encodeURIComponent(JSON.stringify(wizardData.ips));
-        const usersParam = encodeURIComponent(JSON.stringify(wizardData.usernames));
-        let streamUrl = `/wizard/session/${sessionId}/validate-hosts-stream?ips=${ipsParam}&usernames=${usersParam}`;
-        if (wizardData.sshKeyId) streamUrl += `&ssh_key_id=${wizardData.sshKeyId}`;
-        if (wizardData.keyContent) streamUrl += `&key_content=${encodeURIComponent(wizardData.keyContent)}`;
+        const payload = {
+            ips: wizardData.ips,
+            usernames: wizardData.usernames
+        };
         
-        const eventSource = new EventSource(streamUrl);
+        if (wizardData.sshKeyId) {
+            payload.ssh_key_id = wizardData.sshKeyId;
+        } else if (wizardData.keyContent) {
+            payload.key_content = wizardData.keyContent;
+        }
         
-        eventSource.addEventListener('message', (event) => {
-            try {
-                const data = JSON.parse(event.data);
-            } catch (e) {
-                console.error('Failed to parse SSE data:', event.data);
-                return;
-            }
+        const response = await fetch(`/wizard/session/${sessionId}/validate-hosts-stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n\n');
+            
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                if (!line.startsWith('data: ')) continue;
+                
+                try {
+                    const jsonStr = line.substring(6);
+                    const data = JSON.parse(jsonStr);
             
             if (data.error) {
                 resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
-                eventSource.close();
+                
                 return;
             }
             
@@ -414,18 +432,18 @@ async function proceedToStep2() {
                     });
                 }
             } else if (data.type === 'complete') {
-                eventSource.close();
+                
                 document.getElementById('progressText').textContent = `${data.successful}/${data.total}`;
                 document.getElementById('progressBar').style.width = '100%';
             } else if (data.type === 'error') {
                 resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
-                eventSource.close();
+                
             }
         });
         
         eventSource.onerror = () => {
             resultsDiv.innerHTML = `<p class="text-red-600">Connection error</p>`;
-            eventSource.close();
+            
         };
         
 
@@ -466,26 +484,33 @@ async function proceedToStep3() {
         logDiv.innerHTML = '';
         const ipSections = {};
         
-        // Prepare URL with query parameters for EventSource (GET request)
-        const ipsParam = encodeURIComponent(JSON.stringify(payload.ips));
-        const usersParam = encodeURIComponent(JSON.stringify(payload.usernames));
-        let streamUrl = `/wizard/session/${sessionId}/collect-info-stream?ips=${ipsParam}&usernames=${usersParam}`;
-        if (wizardData.sshKeyId) streamUrl += `&ssh_key_id=${wizardData.sshKeyId}`;
-        if (wizardData.keyContent) streamUrl += `&key_content=${encodeURIComponent(wizardData.keyContent)}`;
+        const response = await fetch(`/wizard/session/${sessionId}/collect-info-stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
         
-        const eventSource = new EventSource(streamUrl);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
         
-        eventSource.addEventListener('message', (event) => {
-            try {
-                const data = JSON.parse(event.data);
-            } catch (e) {
-                console.error('Failed to parse SSE data:', event.data);
-                return;
-            }
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n\n');
+            
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                if (!line.startsWith('data: ')) continue;
+                
+                try {
+                    const jsonStr = line.substring(6);
+                    const data = JSON.parse(jsonStr);
             
             if (data.error) {
                 logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
-                eventSource.close();
+                
                 return;
             }
             
@@ -516,18 +541,18 @@ async function proceedToStep3() {
                 progressBar.style.width = `${(data.current / data.total) * 100}%`;
                 progressText.textContent = `${data.current}/${data.total}`;
             } else if (data.type === 'complete') {
-                eventSource.close();
+                
                 wizardData.collectedInfo = data.results;
                 document.getElementById('collectionProgressBar').style.width = '100%';
             } else if (data.type === 'error') {
                 logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
-                eventSource.close();
+                
             }
         });
         
         eventSource.onerror = () => {
             logDiv.innerHTML = `<p class="text-red-600">Connection error</p>`;
-            eventSource.close();
+            
         };
         
 
