@@ -438,7 +438,7 @@ async function proceedToStep2() {
             } catch (e) {
                 console.error('Error parsing JSON:', e);
             }
-        });
+        }
         
         eventSource.onerror = () => {
             resultsDiv.innerHTML = `<p class="text-red-600">Connection error</p>`;
@@ -550,7 +550,7 @@ async function proceedToStep3() {
             } catch (e) {
                 console.error('Error parsing JSON:', e);
             }
-        });
+        }
         
         eventSource.onerror = () => {
             logDiv.innerHTML = `<p class="text-red-600">Connection error</p>`;
