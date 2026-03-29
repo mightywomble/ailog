@@ -1,0 +1,553 @@
+<!-- Device Onboarding Wizard Modal -->
+<div id="wizardModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 flex justify-between items-center">
+            <h2 class="text-2xl font-bold">Add Devices Wizard</h2>
+            <button onclick="closeWizard()" class="text-white hover:text-gray-200">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Progress Steps -->
+        <div class="px-6 py-4 border-b bg-gray-50">
+            <div class="flex justify-between items-center">
+                <div class="flex-1 text-center">
+                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-blue-600 text-white font-bold" id="step1-indicator">1</div>
+                    <p class="text-sm font-medium mt-2">Device Entry</p>
+                </div>
+                <div class="flex-grow h-1 bg-gray-300 mx-2"></div>
+                <div class="flex-1 text-center">
+                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-300 text-gray-600 font-bold" id="step2-indicator">2</div>
+                    <p class="text-sm font-medium mt-2">Verify Connection</p>
+                </div>
+                <div class="flex-grow h-1 bg-gray-300 mx-2"></div>
+                <div class="flex-1 text-center">
+                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-300 text-gray-600 font-bold" id="step3-indicator">3</div>
+                    <p class="text-sm font-medium mt-2">Collect Info</p>
+                </div>
+                <div class="flex-grow h-1 bg-gray-300 mx-2"></div>
+                <div class="flex-1 text-center">
+                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-300 text-gray-600 font-bold" id="step4-indicator">4</div>
+                    <p class="text-sm font-medium mt-2">Complete</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="px-6 py-6">
+            <!-- Step 1: Device Entry -->
+            <div id="step1" class="wizard-step">
+                <h3 class="text-xl font-bold mb-4">Enter Device Details</h3>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IP Addresses or Hostnames</label>
+                        <textarea id="deviceIPs" placeholder="192.168.1.10&#10;192.168.1.11&#10;server.example.com" 
+                                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  rows="4"></textarea>
+                        <p class="text-xs text-gray-500 mt-1">Enter one IP/hostname per line, or comma-separated</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">SSH Username(s)</label>
+                        <input type="text" id="sshUsername" placeholder="root or ubuntu or user@host for different users"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <p class="text-xs text-gray-500 mt-1">Single username for all, or comma-separated for each IP</p>
+                    </div>
+
+                    <!-- SSH Key Selection -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-3">SSH Authentication</label>
+                        
+                        <div class="flex gap-4 mb-4">
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" name="keyType" value="file" class="keyTypeRadio" checked>
+                                <span class="ml-2 text-sm font-medium">Select Local File</span>
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" name="keyType" value="paste" class="keyTypeRadio">
+                                <span class="ml-2 text-sm font-medium">Paste Key Content</span>
+                            </label>
+                        </div>
+
+                        <!-- File Input -->
+                        <div id="keyFileDiv" class="mb-4">
+                            <input type="file" id="keyFile" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <p class="text-xs text-gray-500 mt-1">Select your private SSH key file</p>
+                        </div>
+
+                        <!-- Paste Input -->
+                        <div id="keyPasteDiv" class="mb-4 hidden">
+                            <textarea id="keyContent" placeholder="Paste your private key here (-----BEGIN PRIVATE KEY-----)"
+                                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                      rows="6"></textarea>
+                            <p class="text-xs text-gray-500 mt-1">Include the BEGIN and END lines</p>
+                        </div>
+
+                        <!-- Stored Keys Option -->
+                        <div id="storedKeysDiv" class="mt-4">
+                            <select id="storedKeySelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                                <option value="">-- Or select a stored key --</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Connectivity Verification -->
+            <div id="step2" class="wizard-step hidden">
+                <h3 class="text-xl font-bold mb-4">Verify SSH Connectivity</h3>
+                
+                <div class="mb-4">
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div id="progressBar" class="bg-blue-600 h-2 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-2"><span id="progressText">0/0</span> devices verified</p>
+                </div>
+
+                <div id="verificationResults" class="space-y-2 max-h-64 overflow-y-auto border border-gray-300 rounded-lg p-4 bg-gray-50">
+                    <p class="text-gray-500 text-sm">Testing connections...</p>
+                </div>
+            </div>
+
+            <!-- Step 3: System Information Collection -->
+            <div id="step3" class="wizard-step hidden">
+                <h3 class="text-xl font-bold mb-4">Collecting System Information</h3>
+                
+                <div class="mb-4">
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div id="collectionProgressBar" class="bg-blue-600 h-2 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-2"><span id="collectionProgressText">0/0</span> devices scanned</p>
+                </div>
+
+                <div id="collectionLog" class="space-y-2 max-h-64 overflow-y-auto border border-gray-300 rounded-lg p-4 bg-gray-50 font-mono text-xs">
+                    <p class="text-gray-500">Collecting system information...</p>
+                </div>
+            </div>
+
+            <!-- Step 4: Completion -->
+            <div id="step4" class="wizard-step hidden">
+                <h3 class="text-xl font-bold mb-4">✓ Devices Added Successfully</h3>
+                
+                <div id="completionSummary" class="space-y-4">
+                    <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                        <p class="text-green-800 font-medium" id="completionMessage"></p>
+                    </div>
+
+                    <div>
+                        <h4 class="font-medium text-gray-700 mb-2">Added Devices:</h4>
+                        <div id="addedDevicesList" class="space-y-2">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Assign to Group (Optional)</label>
+                        <select id="groupSelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="">-- No group --</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Assign Tags (Optional)</label>
+                        <div id="tagCheckboxes" class="space-y-2">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="flex justify-between items-center px-6 py-4 border-t bg-gray-50">
+            <button onclick="previousStep()" id="prevBtn" class="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-100 hidden">
+                ← Previous
+            </button>
+            <div></div>
+            <div class="flex gap-3">
+                <button onclick="closeWizard()" id="cancelBtn" class="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-100">
+                    Cancel
+                </button>
+                <button onclick="nextStep()" id="nextBtn" class="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700">
+                    Next →
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .wizard-step {
+        animation: fadeIn 0.3s ease-in-out;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+</style>
+
+<script>
+let currentWizardStep = 1;
+let wizardData = {
+    ips: [],
+    usernames: [],
+    keyType: 'file',
+    keyContent: '',
+    sshKeyId: null,
+    validatedHosts: [],
+    collectedInfo: [],
+    addedDevices: []
+};
+
+function openWizard() {
+    document.getElementById('wizardModal').classList.remove('hidden');
+    currentWizardStep = 1;
+    loadStoredKeys();
+    loadGroups();
+    loadTags();
+    updateWizardUI();
+}
+
+function closeWizard() {
+    document.getElementById('wizardModal').classList.add('hidden');
+    currentWizardStep = 1;
+    wizardData = {
+        ips: [],
+        usernames: [],
+        keyType: 'file',
+        keyContent: '',
+        sshKeyId: null,
+        validatedHosts: [],
+        collectedInfo: [],
+        addedDevices: []
+    };
+}
+
+function updateWizardUI() {
+    // Hide all steps
+    document.querySelectorAll('.wizard-step').forEach(step => step.classList.add('hidden'));
+    
+    // Show current step
+    document.getElementById(`step${currentWizardStep}`).classList.remove('hidden');
+    
+    // Update indicators
+    for (let i = 1; i <= 4; i++) {
+        const indicator = document.getElementById(`step${i}-indicator`);
+        if (i < currentWizardStep) {
+            indicator.classList.remove('bg-gray-300', 'text-gray-600');
+            indicator.classList.add('bg-green-600', 'text-white');
+            indicator.textContent = '✓';
+        } else if (i === currentWizardStep) {
+            indicator.classList.remove('bg-gray-300', 'text-gray-600');
+            indicator.classList.add('bg-blue-600', 'text-white');
+            indicator.textContent = i;
+        } else {
+            indicator.classList.remove('bg-blue-600', 'bg-green-600', 'text-white');
+            indicator.classList.add('bg-gray-300', 'text-gray-600');
+            indicator.textContent = i;
+        }
+    }
+    
+    // Update buttons
+    document.getElementById('prevBtn').classList.toggle('hidden', currentWizardStep === 1);
+    if (currentWizardStep === 4) {
+        document.getElementById('nextBtn').textContent = 'Done';
+        document.getElementById('nextBtn').classList.remove('hidden');
+    } else {
+        document.getElementById('nextBtn').textContent = currentWizardStep === 3 ? 'Finish →' : 'Next →';
+    }
+}
+
+function previousStep() {
+    if (currentWizardStep > 1) {
+        currentWizardStep--;
+        updateWizardUI();
+    }
+}
+
+async function nextStep() {
+    if (currentWizardStep === 1) {
+        if (!validateStep1()) return;
+        await proceedToStep2();
+    } else if (currentWizardStep === 2) {
+        await proceedToStep3();
+    } else if (currentWizardStep === 3) {
+        await proceedToStep4();
+    } else if (currentWizardStep === 4) {
+        closeWizard();
+        location.reload(); // Reload to show new devices
+    }
+}
+
+function validateStep1() {
+    const ipsInput = document.getElementById('deviceIPs').value.trim();
+    const usersInput = document.getElementById('sshUsername').value.trim();
+    
+    if (!ipsInput || !usersInput) {
+        alert('Please enter IP addresses and username');
+        return false;
+    }
+    
+    // Parse IPs
+    wizardData.ips = ipsInput.split('\n').map(ip => ip.trim()).filter(ip => ip.length > 0);
+    if (wizardData.ips.length === 0) {
+        alert('No valid IP addresses found');
+        return false;
+    }
+    
+    // Parse usernames
+    const userParts = usersInput.split(',').map(u => u.trim());
+    wizardData.usernames = userParts;
+    
+    // Get key
+    wizardData.keyType = document.querySelector('input[name="keyType"]:checked').value;
+    
+    if (wizardData.keyType === 'file') {
+        const keyFile = document.getElementById('keyFile').files[0];
+        const storedKeyId = document.getElementById('storedKeySelect').value;
+        
+        if (!keyFile && !storedKeyId) {
+            alert('Please select or upload an SSH key');
+            return false;
+        }
+        
+        if (storedKeyId) {
+            wizardData.sshKeyId = parseInt(storedKeyId);
+        } else if (keyFile) {
+            // Store file content
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    wizardData.keyContent = e.target.result;
+                    resolve(true);
+                };
+                reader.readAsText(keyFile);
+            });
+        }
+    } else {
+        wizardData.keyContent = document.getElementById('keyContent').value.trim();
+        if (!wizardData.keyContent) {
+            alert('Please paste SSH key content');
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+async function proceedToStep2() {
+    currentWizardStep = 2;
+    updateWizardUI();
+    
+    const resultsDiv = document.getElementById('verificationResults');
+    resultsDiv.innerHTML = '<p class="text-gray-500 text-sm">Testing connections...</p>';
+    
+    try {
+        const payload = {
+            ips: wizardData.ips,
+            usernames: wizardData.usernames
+        };
+        
+        if (wizardData.sshKeyId) {
+            payload.ssh_key_id = wizardData.sshKeyId;
+        } else if (wizardData.keyContent) {
+            payload.key_content = wizardData.keyContent;
+        }
+        
+        const response = await fetch('/wizard/validate-hosts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        
+        resultsDiv.innerHTML = '';
+        data.results.forEach((result, idx) => {
+            const statusIcon = result.status === 'success' ? '✓' : result.status === 'auth_error' ? '⚠' : '✗';
+            const statusColor = result.status === 'success' ? 'text-green-600' : result.status === 'auth_error' ? 'text-yellow-600' : 'text-red-600';
+            
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `flex items-center justify-between p-2 border rounded ${statusColor}`;
+            resultDiv.innerHTML = `
+                <span class="font-medium">${result.ip}</span>
+                <span class="text-lg">${statusIcon}</span>
+            `;
+            resultsDiv.appendChild(resultDiv);
+            
+            if (result.status === 'success') {
+                wizardData.validatedHosts.push({
+                    ip: result.ip,
+                    user: result.user
+                });
+            }
+        });
+        
+        const progressText = document.getElementById('progressText');
+        progressText.textContent = `${wizardData.validatedHosts.length}/${data.total}`;
+        document.getElementById('progressBar').style.width = `${(wizardData.validatedHosts.length / data.total) * 100}%`;
+    } catch (error) {
+        resultsDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
+    }
+}
+
+async function proceedToStep3() {
+    if (wizardData.validatedHosts.length === 0) {
+        alert('No valid hosts to continue with');
+        return;
+    }
+    
+    currentWizardStep = 3;
+    updateWizardUI();
+    
+    const logDiv = document.getElementById('collectionLog');
+    logDiv.innerHTML = '<p class="text-gray-600">Starting system information collection...</p>';
+    
+    try {
+        const payload = {
+            ips: wizardData.validatedHosts.map(h => h.ip),
+            usernames: wizardData.validatedHosts.map(h => h.user)
+        };
+        
+        if (wizardData.sshKeyId) {
+            payload.ssh_key_id = wizardData.sshKeyId;
+        } else if (wizardData.keyContent) {
+            payload.key_content = wizardData.keyContent;
+        }
+        
+        const response = await fetch('/wizard/collect-info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        
+        wizardData.collectedInfo = data.results;
+        
+        logDiv.innerHTML = '';
+        data.results.forEach((result, idx) => {
+            const logEntry = document.createElement('div');
+            logEntry.className = 'border-b pb-2 mb-2';
+            logEntry.innerHTML = `
+                <p class="font-medium text-blue-600">${result.ip}</p>
+                <p class="text-xs">OS: ${result.system_info.os_version || 'Unknown'}</p>
+                <p class="text-xs">RAM: ${(result.system_info.ram_total / (1024**3)).toFixed(1)}GB (${(result.system_info.ram_used / (1024**3)).toFixed(1)}GB used)</p>
+                <p class="text-xs">Services: ${result.services.length} total, ${result.services.filter(s => s.is_running).length} running</p>
+            `;
+            logDiv.appendChild(logEntry);
+        });
+        
+        document.getElementById('collectionProgressText').textContent = `${data.results.length}/${data.total}`;
+        document.getElementById('collectionProgressBar').style.width = '100%';
+    } catch (error) {
+        logDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
+    }
+}
+
+async function proceedToStep4() {
+    currentWizardStep = 4;
+    updateWizardUI();
+    
+    try {
+        const devices = wizardData.collectedInfo.map((info, idx) => ({
+            ip: info.ip,
+            user: info.user,
+            hostname: info.system_info.hostname || info.ip,
+            friendly_name: info.system_info.hostname || info.ip,
+            system_info: info.system_info,
+            services: info.services
+        }));
+        
+        const payload = {
+            devices: devices
+        };
+        
+        if (wizardData.sshKeyId) {
+            payload.ssh_key_id = wizardData.sshKeyId;
+        }
+        
+        const response = await fetch('/wizard/add-devices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        
+        wizardData.addedDevices = data.devices;
+        
+        document.getElementById('completionMessage').textContent = `${data.devices.length} device(s) added successfully!`;
+        
+        const devicesList = document.getElementById('addedDevicesList');
+        devicesList.innerHTML = '';
+        data.devices.forEach(device => {
+            const li = document.createElement('div');
+            li.className = 'bg-white border border-gray-200 rounded p-2 text-sm';
+            li.innerHTML = `<p class="font-medium">${device.hostname}</p><p class="text-gray-600">${device.ip}</p>`;
+            devicesList.appendChild(li);
+        });
+    } catch (error) {
+        alert(`Error adding devices: ${error.message}`);
+    }
+}
+
+function loadStoredKeys() {
+    fetch('/ssh-keys')
+        .then(r => r.json())
+        .then(keys => {
+            const select = document.getElementById('storedKeySelect');
+            keys.forEach(key => {
+                const option = document.createElement('option');
+                option.value = key.id;
+                option.textContent = key.key_name;
+                select.appendChild(option);
+            });
+        })
+        .catch(e => console.error('Error loading SSH keys:', e));
+}
+
+function loadGroups() {
+    fetch('/groups')
+        .then(r => r.json())
+        .then(groups => {
+            const select = document.getElementById('groupSelect');
+            groups.forEach(group => {
+                const option = document.createElement('option');
+                option.value = group.id;
+                option.textContent = group.name;
+                select.appendChild(option);
+            });
+        })
+        .catch(e => console.error('Error loading groups:', e));
+}
+
+function loadTags() {
+    fetch('/tags')
+        .then(r => r.json())
+        .then(tags => {
+            const container = document.getElementById('tagCheckboxes');
+            tags.forEach(tag => {
+                const label = document.createElement('label');
+                label.className = 'flex items-center cursor-pointer';
+                label.innerHTML = `
+                    <input type="checkbox" value="${tag.id}" class="tagCheckbox">
+                    <span class="ml-2 text-sm" style="color: ${tag.color}">${tag.name}</span>
+                `;
+                container.appendChild(label);
+            });
+        })
+        .catch(e => console.error('Error loading tags:', e));
+}
+
+// Key type radio button handling
+document.querySelectorAll('.keyTypeRadio').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+        const isFile = e.target.value === 'file';
+        document.getElementById('keyFileDiv').classList.toggle('hidden', !isFile);
+        document.getElementById('keyPasteDiv').classList.toggle('hidden', isFile);
+    });
+});
+</script>

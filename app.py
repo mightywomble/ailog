@@ -13,9 +13,23 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from functools import lru_cache
+import tempfile
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag
+from wizard_helpers import test_ssh_connection, collect_system_info, collect_services
 
 # --- INITIALIZATION ---
 app = Flask(__name__)
+
+# --- DATABASE CONFIGURATION ---
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///ailog.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
+
+# Create database tables on startup
+with app.app_context():
+    db.create_all()
+
 scheduler = BackgroundScheduler(daemon=True)
 
 # --- CONFIGURATION ---
@@ -1180,3 +1194,466 @@ if __name__ == '__main__':
     
     # Start Flask app
     app.run(host='0.0.0.0', port=5001, debug=False)
+
+# --- NEW WIZARD & SSH KEY MANAGEMENT ENDPOINTS ---
+
+@app.route('/ssh-keys', methods=['GET'])
+def get_ssh_keys():
+    """Get list of stored SSH keys"""
+    try:
+        keys = SSHKey.query.all()
+        return jsonify([k.to_dict() for k in keys])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/ssh-keys/upload', methods=['POST'])
+def upload_ssh_key():
+    """Upload SSH key from file"""
+    try:
+        key_name = request.form.get('key_name')
+        uploaded_file = request.files.get('key_file')
+        
+        if not key_name or not uploaded_file:
+            return jsonify({'error': 'key_name and key_file required'}), 400
+        
+        existing = SSHKey.query.filter_by(key_name=key_name).first()
+        if existing:
+            return jsonify({'error': 'Key with this name already exists'}), 400
+        
+        key_content = uploaded_file.read().decode('utf-8')
+        
+        ssh_key = SSHKey(
+            key_name=key_name,
+            key_type='file',
+            key_content=key_content
+        )
+        db.session.add(ssh_key)
+        db.session.commit()
+        
+        return jsonify({'message': 'SSH key uploaded', 'id': ssh_key.id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/ssh-keys/save', methods=['POST'])
+def save_ssh_key():
+    """Save SSH key from pasted content"""
+    try:
+        data = request.get_json()
+        key_name = data.get('key_name')
+        key_content = data.get('key_content')
+        
+        if not key_name or not key_content:
+            return jsonify({'error': 'key_name and key_content required'}), 400
+        
+        existing = SSHKey.query.filter_by(key_name=key_name).first()
+        if existing:
+            return jsonify({'error': 'Key with this name already exists'}), 400
+        
+        ssh_key = SSHKey(
+            key_name=key_name,
+            key_type='pasted',
+            key_content=key_content
+        )
+        db.session.add(ssh_key)
+        db.session.commit()
+        
+        return jsonify({'message': 'SSH key saved', 'id': ssh_key.id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/wizard/validate-hosts', methods=['POST'])
+def validate_hosts():
+    """Validate SSH connectivity for multiple hosts"""
+    try:
+        data = request.get_json()
+        ips = data.get('ips', [])
+        usernames = data.get('usernames', [])
+        ssh_key_id = data.get('ssh_key_id')
+        key_content = data.get('key_content')
+        
+        if not ips:
+            return jsonify({'error': 'No IP addresses provided'}), 400
+        
+        ssh_key_path = None
+        if ssh_key_id:
+            ssh_key = SSHKey.query.get(ssh_key_id)
+            if ssh_key:
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                temp_file.write(ssh_key.key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)
+                ssh_key_path = temp_file.name
+        elif key_content:
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+            temp_file.write(key_content)
+            temp_file.close()
+            os.chmod(temp_file.name, 0o600)
+            ssh_key_path = temp_file.name
+        
+        results = []
+        for i, ip in enumerate(ips):
+            if len(usernames) > i:
+                user = usernames[i]
+            elif usernames:
+                user = usernames[0]
+            else:
+                user = 'root'
+            
+            result = test_ssh_connection(user, ip, ssh_key_path)
+            results.append(result)
+        
+        if ssh_key_path and os.path.exists(ssh_key_path):
+            try:
+                os.unlink(ssh_key_path)
+            except:
+                pass
+        
+        return jsonify({
+            'total': len(ips),
+            'results': results,
+            'successful': sum(1 for r in results if r['status'] == 'success')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/wizard/collect-info', methods=['POST'])
+def collect_host_info():
+    """Collect system information from validated hosts"""
+    try:
+        data = request.get_json()
+        ips = data.get('ips', [])
+        usernames = data.get('usernames', [])
+        ssh_key_id = data.get('ssh_key_id')
+        key_content = data.get('key_content')
+        
+        if not ips:
+            return jsonify({'error': 'No IP addresses provided'}), 400
+        
+        ssh_key_path = None
+        if ssh_key_id:
+            ssh_key = SSHKey.query.get(ssh_key_id)
+            if ssh_key:
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                temp_file.write(ssh_key.key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)
+                ssh_key_path = temp_file.name
+        elif key_content:
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+            temp_file.write(key_content)
+            temp_file.close()
+            os.chmod(temp_file.name, 0o600)
+            ssh_key_path = temp_file.name
+        
+        results = []
+        for i, ip in enumerate(ips):
+            if len(usernames) > i:
+                user = usernames[i]
+            elif usernames:
+                user = usernames[0]
+            else:
+                user = 'root'
+            
+            info = {
+                'ip': ip,
+                'user': user,
+                'system_info': collect_system_info(user, ip, ssh_key_path),
+                'services': collect_services(user, ip, ssh_key_path)
+            }
+            results.append(info)
+        
+        if ssh_key_path and os.path.exists(ssh_key_path):
+            try:
+                os.unlink(ssh_key_path)
+            except:
+                pass
+        
+        return jsonify({
+            'total': len(ips),
+            'results': results
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/wizard/add-devices', methods=['POST'])
+def add_devices_from_wizard():
+    """Add multiple devices from wizard with collected info"""
+    try:
+        data = request.get_json()
+        devices = data.get('devices', [])
+        ssh_key_id = data.get('ssh_key_id')
+        
+        if not devices:
+            return jsonify({'error': 'No devices provided'}), 400
+        
+        added_hosts = []
+        for device in devices:
+            try:
+                host = Host(
+                    hostname=device.get('hostname', device['ip']),
+                    friendly_name=device.get('friendly_name', device['ip']),
+                    ip_address=device['ip'],
+                    ssh_user=device.get('user', 'root'),
+                    ssh_key_id=ssh_key_id,
+                    description=device.get('description', ''),
+                    status='online'
+                )
+                db.session.add(host)
+                db.session.flush()
+                
+                if device.get('system_info'):
+                    sys_info = device['system_info']
+                    system_info = SystemInfo(
+                        host_id=host.id,
+                        os_version=sys_info.get('os_version'),
+                        hostname=sys_info.get('hostname'),
+                        ram_total=sys_info.get('ram_total'),
+                        ram_used=sys_info.get('ram_used'),
+                        disk_total=sys_info.get('disk_total'),
+                        disk_used=sys_info.get('disk_used'),
+                        cpu_type=sys_info.get('cpu_type'),
+                        cpu_cores=sys_info.get('cpu_cores'),
+                        netbird_ip=sys_info.get('netbird_ip'),
+                        main_ip=sys_info.get('main_ip')
+                    )
+                    db.session.add(system_info)
+                
+                if device.get('services'):
+                    for svc in device['services']:
+                        service = Service(
+                            host_id=host.id,
+                            service_name=svc.get('service_name'),
+                            status=svc.get('status'),
+                            is_running=svc.get('is_running', False)
+                        )
+                        db.session.add(service)
+                
+                log_content = f"Host onboarded from wizard\nIP: {device['ip']}\nUser: {device.get('user')}\nSystem Info collected: {bool(device.get('system_info'))}"
+                host_log = HostLog(
+                    host_id=host.id,
+                    log_content=log_content,
+                    log_type='setup'
+                )
+                db.session.add(host_log)
+                
+                added_hosts.append({
+                    'id': host.id,
+                    'hostname': host.hostname,
+                    'ip': host.ip_address
+                })
+            except Exception as e:
+                print(f"Error adding device {device}: {e}")
+                db.session.rollback()
+                continue
+        
+        db.session.commit()
+        return jsonify({
+            'message': f'Added {len(added_hosts)} devices',
+            'devices': added_hosts
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/hosts/db', methods=['GET'])
+def get_hosts_db():
+    """Get all hosts from database"""
+    try:
+        hosts = Host.query.all()
+        return jsonify([h.to_dict() for h in hosts])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/hosts/db/<int:host_id>', methods=['GET'])
+def get_host_db(host_id):
+    """Get specific host from database with all details"""
+    try:
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+        return jsonify(host.to_dict())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/groups', methods=['GET'])
+def get_groups():
+    """Get all groups"""
+    try:
+        groups = Group.query.all()
+        return jsonify([g.to_dict() for g in groups])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/groups', methods=['POST'])
+def create_group():
+    """Create a new group"""
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        
+        if not name:
+            return jsonify({'error': 'Group name required'}), 400
+        
+        existing = Group.query.filter_by(name=name).first()
+        if existing:
+            return jsonify({'error': 'Group already exists'}), 400
+        
+        group = Group(
+            name=name,
+            description=data.get('description', '')
+        )
+        db.session.add(group)
+        db.session.commit()
+        
+        return jsonify(group.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/tags', methods=['GET'])
+def get_tags():
+    """Get all tags"""
+    try:
+        tags = Tag.query.all()
+        return jsonify([t.to_dict() for t in tags])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/tags', methods=['POST'])
+def create_tag():
+    """Create a new tag"""
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        
+        if not name:
+            return jsonify({'error': 'Tag name required'}), 400
+        
+        existing = Tag.query.filter_by(name=name).first()
+        if existing:
+            return jsonify({'error': 'Tag already exists'}), 400
+        
+        tag = Tag(
+            name=name,
+            color=data.get('color', '#3b82f6')
+        )
+        db.session.add(tag)
+        db.session.commit()
+        
+        return jsonify(tag.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/hosts/db/<int:host_id>/groups', methods=['POST'])
+def add_host_to_group(host_id):
+    """Add host to a group"""
+    try:
+        data = request.get_json()
+        group_ids = data.get('group_ids', [])
+        
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+        
+        groups = Group.query.filter(Group.id.in_(group_ids)).all()
+        host.groups = groups
+        db.session.commit()
+        
+        return jsonify(host.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/hosts/db/<int:host_id>/tags', methods=['POST'])
+def add_host_to_tags(host_id):
+    """Add tags to a host"""
+    try:
+        data = request.get_json()
+        tag_ids = data.get('tag_ids', [])
+        
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+        
+        tags = Tag.query.filter(Tag.id.in_(tag_ids)).all()
+        host.tags = tags
+        db.session.commit()
+        
+        return jsonify(host.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/export/ansible-inventory', methods=['GET'])
+def export_ansible_inventory():
+    """Generate Ansible inventory YAML"""
+    try:
+        groups = Group.query.all()
+        ungrouped = Host.query.filter(~Host.groups.any()).all()
+        
+        inventory = {'all': {'children': {}}}
+        
+        for group in groups:
+            inventory['all']['children'][group.name] = {
+                'hosts': {}
+            }
+            for host in group.hosts:
+                inventory['all']['children'][group.name]['hosts'][host.friendly_name or host.hostname] = {
+                    'ansible_host': host.ip_address,
+                    'ansible_user': host.ssh_user
+                }
+        
+        if ungrouped:
+            inventory['all']['children']['ungrouped'] = {'hosts': {}}
+            for host in ungrouped:
+                inventory['all']['children']['ungrouped']['hosts'][host.friendly_name or host.hostname] = {
+                    'ansible_host': host.ip_address,
+                    'ansible_user': host.ssh_user
+                }
+        
+        try:
+            import yaml
+            yaml_output = yaml.dump(inventory, default_flow_style=False)
+        except ImportError:
+            yaml_output = json.dumps(inventory, indent=2)
+        
+        return Response(
+            yaml_output,
+            mimetype='text/yaml',
+            headers={'Content-Disposition': 'attachment; filename=inventory.yaml'}
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/export/ssh-config', methods=['GET'])
+def export_ssh_config():
+    """Generate SSH config file"""
+    try:
+        hosts = Host.query.all()
+        
+        ssh_config = "# Auto-generated SSH config from AI Log Viewer\n"
+        ssh_config += f"# Generated: {datetime.datetime.utcnow().isoformat()}\n\n"
+        
+        for host in hosts:
+            host_name = host.friendly_name or host.hostname
+            ssh_config += f"Host {host_name}\n"
+            ssh_config += f"    HostName {host.ip_address}\n"
+            ssh_config += f"    User {host.ssh_user}\n"
+            
+            if host.ssh_key:
+                ssh_config += f"    IdentityFile ~/.ssh/{host.ssh_key.key_name}\n"
+            
+            ssh_config += f"    StrictHostKeyChecking no\n"
+            ssh_config += f"    UserKnownHostsFile=/dev/null\n"
+            ssh_config += "\n"
+        
+        return Response(
+            ssh_config,
+            mimetype='text/plain',
+            headers={'Content-Disposition': 'attachment; filename=ssh_config'}
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
