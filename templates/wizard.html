@@ -345,6 +345,11 @@ async function proceedToStep2() {
     resultsDiv.innerHTML = '<p class="text-gray-500 text-sm">Testing connections...</p>';
     
     try {
+        // Create wizard session
+        const sessionResp = await fetch('/wizard/session/create', { method: 'POST' });
+        const sessionData = await sessionResp.json();
+        const sessionId = sessionData.session_id;
+        
         const payload = {
             ips: wizardData.ips,
             usernames: wizardData.usernames
@@ -356,38 +361,68 @@ async function proceedToStep2() {
             payload.key_content = wizardData.keyContent;
         }
         
-        const response = await fetch('/wizard/validate-hosts', {
+        resultsDiv.innerHTML = '';
+        const resultElements = {};
+        
+        // Open SSE stream
+        const eventSource = new EventSource(`/wizard/session/${sessionId}/validate-hosts-stream`);
+        
+        eventSource.addEventListener('message', (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.error) {
+                resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
+                eventSource.close();
+                return;
+            }
+            
+            if (data.type === 'start') {
+                resultsDiv.innerHTML = '';
+            } else if (data.type === 'progress') {
+                const progressBar = document.getElementById('progressBar');
+                const progressText = document.getElementById('progressText');
+                progressBar.style.width = `${((data.current) / data.total) * 100}%`;
+                progressText.textContent = `${data.current + 1}/${data.total}`;
+            } else if (data.type === 'result') {
+                const statusIcon = data.status === 'success' ? '✓' : data.status === 'auth_error' ? '⚠' : '✗';
+                const statusColor = data.status === 'success' ? 'text-green-600' : data.status === 'auth_error' ? 'text-yellow-600' : 'text-red-600';
+                
+                const resultDiv = document.createElement('div');
+                resultDiv.className = `flex items-center justify-between p-2 border rounded ${statusColor}`;
+                resultDiv.innerHTML = `
+                    <span class="font-medium">${data.ip}</span>
+                    <span class="text-lg">${statusIcon}</span>
+                `;
+                resultsDiv.appendChild(resultDiv);
+                resultElements[data.ip] = resultDiv;
+                
+                if (data.status === 'success') {
+                    wizardData.validatedHosts.push({
+                        ip: data.ip,
+                        user: data.ip.split('@')[1] || 'root'
+                    });
+                }
+            } else if (data.type === 'complete') {
+                eventSource.close();
+                document.getElementById('progressText').textContent = `${data.successful}/${data.total}`;
+                document.getElementById('progressBar').style.width = '100%';
+            } else if (data.type === 'error') {
+                resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
+                eventSource.close();
+            }
+        });
+        
+        eventSource.onerror = () => {
+            resultsDiv.innerHTML = `<p class="text-red-600">Connection error</p>`;
+            eventSource.close();
+        };
+        
+        // Send the request to start streaming
+        await fetch(`/wizard/session/${sessionId}/validate-hosts-stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        
-        const data = await response.json();
-        
-        resultsDiv.innerHTML = '';
-        data.results.forEach((result, idx) => {
-            const statusIcon = result.status === 'success' ? '✓' : result.status === 'auth_error' ? '⚠' : '✗';
-            const statusColor = result.status === 'success' ? 'text-green-600' : result.status === 'auth_error' ? 'text-yellow-600' : 'text-red-600';
-            
-            const resultDiv = document.createElement('div');
-            resultDiv.className = `flex items-center justify-between p-2 border rounded ${statusColor}`;
-            resultDiv.innerHTML = `
-                <span class="font-medium">${result.ip}</span>
-                <span class="text-lg">${statusIcon}</span>
-            `;
-            resultsDiv.appendChild(resultDiv);
-            
-            if (result.status === 'success') {
-                wizardData.validatedHosts.push({
-                    ip: result.ip,
-                    user: result.user
-                });
-            }
-        });
-        
-        const progressText = document.getElementById('progressText');
-        progressText.textContent = `${wizardData.validatedHosts.length}/${data.total}`;
-        document.getElementById('progressBar').style.width = `${(wizardData.validatedHosts.length / data.total) * 100}%`;
     } catch (error) {
         resultsDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
     }
@@ -406,6 +441,11 @@ async function proceedToStep3() {
     logDiv.innerHTML = '<p class="text-gray-600">Starting system information collection...</p>';
     
     try {
+        // Create wizard session
+        const sessionResp = await fetch('/wizard/session/create', { method: 'POST' });
+        const sessionData = await sessionResp.json();
+        const sessionId = sessionData.session_id;
+        
         const payload = {
             ips: wizardData.validatedHosts.map(h => h.ip),
             usernames: wizardData.validatedHosts.map(h => h.user)
@@ -417,31 +457,68 @@ async function proceedToStep3() {
             payload.key_content = wizardData.keyContent;
         }
         
-        const response = await fetch('/wizard/collect-info', {
+        logDiv.innerHTML = '';
+        const ipSections = {};
+        
+        // Open SSE stream
+        const eventSource = new EventSource(`/wizard/session/${sessionId}/collect-info-stream`);
+        
+        eventSource.addEventListener('message', (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.error) {
+                logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
+                eventSource.close();
+                return;
+            }
+            
+            if (data.type === 'start') {
+                logDiv.innerHTML = '<p class="text-gray-600">Initializing collection...</p>';
+            } else if (data.type === 'progress') {
+                const progressBar = document.getElementById('collectionProgressBar');
+                const progressText = document.getElementById('collectionProgressText');
+                progressBar.style.width = `${((data.current) / data.total) * 100}%`;
+                progressText.textContent = `${data.current + 1}/${data.total}`;
+            } else if (data.type === 'log') {
+                if (!ipSections[data.ip]) {
+                    const section = document.createElement('div');
+                    section.className = 'border-b pb-2 mb-2';
+                    section.innerHTML = `<p class="font-medium text-blue-600">${data.ip}</p>`;
+                    logDiv.appendChild(section);
+                    ipSections[data.ip] = section;
+                }
+                
+                const logLine = document.createElement('p');
+                logLine.className = 'text-xs text-gray-700';
+                logLine.innerHTML = `<span class="text-gray-500">${new Date(data.timestamp).toLocaleTimeString()}</span> ${data.message}`;
+                ipSections[data.ip].appendChild(logLine);
+                logDiv.scrollTop = logDiv.scrollHeight;
+            } else if (data.type === 'host_complete') {
+                const progressBar = document.getElementById('collectionProgressBar');
+                const progressText = document.getElementById('collectionProgressText');
+                progressBar.style.width = `${(data.current / data.total) * 100}%`;
+                progressText.textContent = `${data.current}/${data.total}`;
+            } else if (data.type === 'complete') {
+                eventSource.close();
+                wizardData.collectedInfo = data.results;
+                document.getElementById('collectionProgressBar').style.width = '100%';
+            } else if (data.type === 'error') {
+                logDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
+                eventSource.close();
+            }
+        });
+        
+        eventSource.onerror = () => {
+            logDiv.innerHTML = `<p class="text-red-600">Connection error</p>`;
+            eventSource.close();
+        };
+        
+        // Send the request to start streaming
+        await fetch(`/wizard/session/${sessionId}/collect-info-stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        
-        const data = await response.json();
-        
-        wizardData.collectedInfo = data.results;
-        
-        logDiv.innerHTML = '';
-        data.results.forEach((result, idx) => {
-            const logEntry = document.createElement('div');
-            logEntry.className = 'border-b pb-2 mb-2';
-            logEntry.innerHTML = `
-                <p class="font-medium text-blue-600">${result.ip}</p>
-                <p class="text-xs">OS: ${result.system_info.os_version || 'Unknown'}</p>
-                <p class="text-xs">RAM: ${(result.system_info.ram_total / (1024**3)).toFixed(1)}GB (${(result.system_info.ram_used / (1024**3)).toFixed(1)}GB used)</p>
-                <p class="text-xs">Services: ${result.services.length} total, ${result.services.filter(s => s.is_running).length} running</p>
-            `;
-            logDiv.appendChild(logEntry);
-        });
-        
-        document.getElementById('collectionProgressText').textContent = `${data.results.length}/${data.total}`;
-        document.getElementById('collectionProgressBar').style.width = '100%';
     } catch (error) {
         logDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
     }

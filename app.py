@@ -1657,3 +1657,201 @@ def export_ssh_config():
         )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# --- SERVER-SENT EVENTS (SSE) STREAMING ENDPOINTS ---
+
+import uuid as uuid_lib
+from threading import Lock
+
+# Global dictionary to store event queues for each wizard session
+wizard_sessions = {}
+sessions_lock = Lock()
+
+@app.route('/wizard/session/create', methods=['POST'])
+def create_wizard_session():
+    """Create a new wizard session ID for streaming"""
+    session_id = str(uuid_lib.uuid4())
+    with sessions_lock:
+        wizard_sessions[session_id] = {
+            'created_at': datetime.datetime.utcnow(),
+            'status': 'active'
+        }
+    return jsonify({'session_id': session_id})
+
+@app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['POST'])
+def validate_hosts_stream(session_id):
+    """Stream SSH validation progress via SSE"""
+    def generate():
+        try:
+            data = request.get_json()
+            ips = data.get('ips', [])
+            usernames = data.get('usernames', [])
+            ssh_key_id = data.get('ssh_key_id')
+            key_content = data.get('key_content')
+            
+            if not ips:
+                yield "data: " + json.dumps({'error': 'No IP addresses provided'}) + "\n\n"
+                return
+            
+            yield "data: " + json.dumps({'type': 'start', 'total': len(ips)}) + "\n\n"
+            
+            ssh_key_path = None
+            if ssh_key_id:
+                ssh_key = SSHKey.query.get(ssh_key_id)
+                if ssh_key:
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                    temp_file.write(ssh_key.key_content)
+                    temp_file.close()
+                    os.chmod(temp_file.name, 0o600)
+                    ssh_key_path = temp_file.name
+            elif key_content:
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                temp_file.write(key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)
+                ssh_key_path = temp_file.name
+            
+            results = []
+            for i, ip in enumerate(ips):
+                if len(usernames) > i:
+                    user = usernames[i]
+                elif usernames:
+                    user = usernames[0]
+                else:
+                    user = 'root'
+                
+                timestamp = datetime.datetime.utcnow().isoformat()
+                msg = {'type': 'progress', 'current': i, 'total': len(ips), 'message': 'Testing ' + ip + '...'}
+                yield "data: " + json.dumps(msg) + "\n\n"
+                
+                result = test_ssh_connection(user, ip, ssh_key_path)
+                results.append(result)
+                
+                msg = {'type': 'result', 'ip': ip, 'status': result['status'], 'message': result['message'], 'timestamp': timestamp}
+                yield "data: " + json.dumps(msg) + "\n\n"
+            
+            if ssh_key_path and os.path.exists(ssh_key_path):
+                try:
+                    os.unlink(ssh_key_path)
+                except:
+                    pass
+            
+            success_count = sum(1 for r in results if r['status'] == 'success')
+            msg = {'type': 'complete', 'total': len(ips), 'successful': success_count, 'results': results}
+            yield "data: " + json.dumps(msg) + "\n\n"
+        
+        except Exception as e:
+            msg = {'type': 'error', 'error': str(e)}
+            yield "data: " + json.dumps(msg) + "\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+@app.route('/wizard/session/<session_id>/collect-info-stream', methods=['POST'])
+def collect_info_stream(session_id):
+    """Stream system information collection progress via SSE"""
+    def generate():
+        try:
+            data = request.get_json()
+            ips = data.get('ips', [])
+            usernames = data.get('usernames', [])
+            ssh_key_id = data.get('ssh_key_id')
+            key_content = data.get('key_content')
+            
+            if not ips:
+                yield "data: " + json.dumps({'error': 'No IP addresses provided'}) + "\n\n"
+                return
+            
+            yield "data: " + json.dumps({'type': 'start', 'total': len(ips)}) + "\n\n"
+            
+            ssh_key_path = None
+            if ssh_key_id:
+                ssh_key = SSHKey.query.get(ssh_key_id)
+                if ssh_key:
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                    temp_file.write(ssh_key.key_content)
+                    temp_file.close()
+                    os.chmod(temp_file.name, 0o600)
+                    ssh_key_path = temp_file.name
+            elif key_content:
+                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                temp_file.write(key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)
+                ssh_key_path = temp_file.name
+            
+            results = []
+            for i, ip in enumerate(ips):
+                if len(usernames) > i:
+                    user = usernames[i]
+                elif usernames:
+                    user = usernames[0]
+                else:
+                    user = 'root'
+                
+                timestamp = datetime.datetime.utcnow().isoformat()
+                msg = {'type': 'progress', 'current': i, 'total': len(ips), 'message': 'Collecting info from ' + ip + '...'}
+                yield "data: " + json.dumps(msg) + "\n\n"
+                
+                sys_info = collect_system_info(user, ip, ssh_key_path)
+                
+                if sys_info.get('os_version'):
+                    os_msg = sys_info['os_version'][:80]
+                    msg = {'type': 'log', 'ip': ip, 'message': 'OS: ' + os_msg, 'timestamp': timestamp}
+                    yield "data: " + json.dumps(msg) + "\n\n"
+                
+                if sys_info.get('ram_total'):
+                    ram_gb = sys_info['ram_total'] / (1024**3)
+                    ram_used_gb = sys_info.get('ram_used', 0) / (1024**3)
+                    ram_msg = 'RAM: {:.1f}GB total, {:.1f}GB used'.format(ram_gb, ram_used_gb)
+                    msg = {'type': 'log', 'ip': ip, 'message': ram_msg, 'timestamp': timestamp}
+                    yield "data: " + json.dumps(msg) + "\n\n"
+                
+                if sys_info.get('disk_total'):
+                    disk_gb = sys_info['disk_total'] / (1024**3)
+                    disk_used_gb = sys_info.get('disk_used', 0) / (1024**3)
+                    disk_msg = 'Disk: {:.1f}GB total, {:.1f}GB used'.format(disk_gb, disk_used_gb)
+                    msg = {'type': 'log', 'ip': ip, 'message': disk_msg, 'timestamp': timestamp}
+                    yield "data: " + json.dumps(msg) + "\n\n"
+                
+                if sys_info.get('cpu_type'):
+                    cpu_msg = 'CPU: ' + sys_info['cpu_type']
+                    msg = {'type': 'log', 'ip': ip, 'message': cpu_msg, 'timestamp': timestamp}
+                    yield "data: " + json.dumps(msg) + "\n\n"
+                
+                services = collect_services(user, ip, ssh_key_path)
+                running_count = sum(1 for s in services if s.get('is_running'))
+                svc_msg = 'Services: {} total, {} running'.format(len(services), running_count)
+                msg = {'type': 'log', 'ip': ip, 'message': svc_msg, 'timestamp': timestamp}
+                yield "data: " + json.dumps(msg) + "\n\n"
+                
+                results.append({
+                    'ip': ip,
+                    'user': user,
+                    'system_info': sys_info,
+                    'services': services
+                })
+                
+                msg = {'type': 'host_complete', 'ip': ip, 'current': i+1, 'total': len(ips)}
+                yield "data: " + json.dumps(msg) + "\n\n"
+            
+            if ssh_key_path and os.path.exists(ssh_key_path):
+                try:
+                    os.unlink(ssh_key_path)
+                except:
+                    pass
+            
+            msg = {'type': 'complete', 'total': len(ips), 'results': results}
+            yield "data: " + json.dumps(msg) + "\n\n"
+        
+        except Exception as e:
+            msg = {'type': 'error', 'error': str(e)}
+            yield "data: " + json.dumps(msg) + "\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
