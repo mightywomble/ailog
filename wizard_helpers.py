@@ -155,8 +155,13 @@ def collect_system_info(user: str, ip: str, ssh_key_path: str = None) -> Dict:
     if success:
         info['main_ip'] = output.strip()
     
-    # NetBird IP (if available)
-    success, output = execute_remote_command(user, ip, "wg show 2>/dev/null | grep 'endpoint' | awk '{print $NF}' || echo ''", ssh_key_path)
+    # NetBird IP (if available) - capture from NetBird interface (wt0)
+    # Prefer IPv4 address assigned to wt0.
+    success, output = execute_remote_command(
+        user, ip,
+        "ip -4 -o addr show dev wt0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || echo ''",
+        ssh_key_path
+    )
     if success and output.strip():
         info['netbird_ip'] = output.strip()
     

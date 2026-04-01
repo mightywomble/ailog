@@ -1557,6 +1557,103 @@ def get_host_info(host_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/hosts/db/<int:host_id>/rescan', methods=['POST'])
+def rescan_host(host_id):
+    '''Re-scan a DB host to refresh system info (including wt0 netbird IP) and services.'''
+    try:
+        host = Host.query.get(host_id)
+        if not host:
+            return jsonify({'error': 'Host not found'}), 404
+
+        user = host.ssh_user
+        ip = host.ip_address
+
+        ssh_key_path = None
+        if host.ssh_key and host.ssh_key.key_content:
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+            temp_file.write(host.ssh_key.key_content)
+            temp_file.close()
+            os.chmod(temp_file.name, 0o600)
+            ssh_key_path = temp_file.name
+
+        try:
+            sys_info = collect_system_info(user, ip, ssh_key_path)
+            services = collect_services(user, ip, ssh_key_path)
+        finally:
+            if ssh_key_path and os.path.exists(ssh_key_path):
+                try:
+                    os.unlink(ssh_key_path)
+                except Exception:
+                    pass
+
+        # Update host status
+        host.status = 'online'
+        host.last_seen = datetime.datetime.utcnow()
+
+        # Upsert SystemInfo
+        si = SystemInfo.query.filter_by(host_id=host_id).order_by(SystemInfo.captured_at.desc()).first()
+        if not si:
+            si = SystemInfo(host_id=host_id)
+            db.session.add(si)
+
+        si.os_version = sys_info.get('os_version')
+        si.hostname = sys_info.get('hostname')
+        si.ram_total = sys_info.get('ram_total')
+        si.ram_used = sys_info.get('ram_used')
+        si.disk_total = sys_info.get('disk_total')
+        si.disk_used = sys_info.get('disk_used')
+        si.cpu_type = sys_info.get('cpu_type')
+        si.cpu_cores = sys_info.get('cpu_cores')
+        si.main_ip = sys_info.get('main_ip')
+        si.netbird_ip = sys_info.get('netbird_ip')
+        si.last_update = datetime.datetime.utcnow()
+        si.captured_at = datetime.datetime.utcnow()
+
+        # Replace services snapshot
+        Service.query.filter_by(host_id=host_id).delete()
+        for svc in services or []:
+            db.session.add(Service(
+                host_id=host_id,
+                service_name=svc.get('service_name'),
+                status=svc.get('status'),
+                is_running=bool(svc.get('is_running'))
+            ))
+
+        # Log
+        db.session.add(HostLog(
+            host_id=host_id,
+            log_content=(
+                "Host rescan completed\n"
+                f"IP: {ip}\n"
+                f"User: {user}\n"
+                f"Main IP: {sys_info.get('main_ip')}\n"
+                f"Netbird IP: {sys_info.get('netbird_ip')}\n"
+                f"Services: {len(services or [])}"
+            ),
+            log_type='discovery'
+        ))
+
+        db.session.commit()
+
+        # Return updated host info in same shape as /hosts/db/<id>/info
+        host_dict = host.to_dict()
+        services_list = [s.to_dict() for s in Service.query.filter_by(host_id=host_id).all()]
+        running = [s for s in services_list if s.get('status') == 'active' or s.get('is_running')]
+        stopped = [s for s in services_list if s.get('status') not in ('active',) and not s.get('is_running')]
+        host_dict['services'] = services_list
+        host_dict['services_summary'] = {
+            'total': len(services_list),
+            'running': len(running),
+            'stopped': len(stopped)
+        }
+
+        return jsonify(host_dict)
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/hosts/db', methods=['POST'])
 def get_hosts_db():
     """Get all hosts from database"""
@@ -1701,18 +1798,42 @@ def export_ansible_inventory():
                 'hosts': {}
             }
             for host in group.hosts:
-                inventory['all']['children'][group.name]['hosts'][host.friendly_name or host.hostname] = {
-                    'ansible_host': host.ip_address,
+                host_name = host.friendly_name or host.hostname
+                si = getattr(host, 'system_info', None)
+                main_ip = getattr(si, 'main_ip', None) if si else None
+                netbird_ip = getattr(si, 'netbird_ip', None) if si else None
+                base_ip = main_ip or host.ip_address
+
+                inventory['all']['children'][group.name]['hosts'][host_name] = {
+                    'ansible_host': base_ip,
                     'ansible_user': host.ssh_user
                 }
+
+                if netbird_ip:
+                    inventory['all']['children'][group.name]['hosts'][f"{host_name}-netbird"] = {
+                        'ansible_host': netbird_ip,
+                        'ansible_user': host.ssh_user
+                    }
         
         if ungrouped:
             inventory['all']['children']['ungrouped'] = {'hosts': {}}
             for host in ungrouped:
-                inventory['all']['children']['ungrouped']['hosts'][host.friendly_name or host.hostname] = {
-                    'ansible_host': host.ip_address,
+                host_name = host.friendly_name or host.hostname
+                si = getattr(host, 'system_info', None)
+                main_ip = getattr(si, 'main_ip', None) if si else None
+                netbird_ip = getattr(si, 'netbird_ip', None) if si else None
+                base_ip = main_ip or host.ip_address
+
+                inventory['all']['children']['ungrouped']['hosts'][host_name] = {
+                    'ansible_host': base_ip,
                     'ansible_user': host.ssh_user
                 }
+
+                if netbird_ip:
+                    inventory['all']['children']['ungrouped']['hosts'][f"{host_name}-netbird"] = {
+                        'ansible_host': netbird_ip,
+                        'ansible_user': host.ssh_user
+                    }
         
         try:
             import yaml
@@ -1739,16 +1860,25 @@ def export_ssh_config():
         
         for host in hosts:
             host_name = host.friendly_name or host.hostname
-            ssh_config += f"Host {host_name}\n"
-            ssh_config += f"    HostName {host.ip_address}\n"
-            ssh_config += f"    User {host.ssh_user}\n"
-            
-            if host.ssh_key:
-                ssh_config += f"    IdentityFile ~/.ssh/{host.ssh_key.key_name}\n"
-            
-            ssh_config += f"    StrictHostKeyChecking no\n"
-            ssh_config += f"    UserKnownHostsFile=/dev/null\n"
-            ssh_config += "\n"
+            si = getattr(host, 'system_info', None)
+            main_ip = getattr(si, 'main_ip', None) if si else None
+            netbird_ip = getattr(si, 'netbird_ip', None) if si else None
+            base_ip = main_ip or host.ip_address
+
+            def append_host_block(name, hostname_or_ip):
+                nonlocal ssh_config
+                ssh_config += f"Host {name}\n"
+                ssh_config += f"    HostName {hostname_or_ip}\n"
+                ssh_config += f"    User {host.ssh_user}\n"
+                if host.ssh_key:
+                    ssh_config += f"    IdentityFile ~/.ssh/{host.ssh_key.key_name}\n"
+                ssh_config += f"    StrictHostKeyChecking no\n"
+                ssh_config += f"    UserKnownHostsFile=/dev/null\n"
+                ssh_config += "\n"
+
+            append_host_block(host_name, base_ip)
+            if netbird_ip:
+                append_host_block(f"{host_name}-netbird", netbird_ip)
         
         return Response(
             ssh_config,

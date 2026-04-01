@@ -63,6 +63,12 @@
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 Settings
             </button>
+            <button id="create-ansible-inventory-btn" class="bg-amber-400 hover:bg-amber-500 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors">
+                Create Ansible Inventory
+            </button>
+            <button id="create-ssh-config-btn" class="bg-amber-400 hover:bg-amber-500 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors">
+                Create SSH Config
+            </button>
             <div id="sudo-mode-indicator" class="bg-red-100/80 border border-red-300 text-red-800 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">SUDO MODE ENABLED</div>
         </div>
     </header>
@@ -452,6 +458,8 @@
         
         const hostListContainer = document.getElementById('host-list-container');
         const settingsBtn = document.getElementById('settings-btn');
+        const createAnsibleInventoryBtn = document.getElementById('create-ansible-inventory-btn');
+        const createSshConfigBtn = document.getElementById('create-ssh-config-btn');
         const closeSettingsBtn = document.getElementById('close-settings-btn');
         const settingsModal = document.getElementById('settings-modal');
         const hostListDiv = document.getElementById('host-list');
@@ -561,6 +569,39 @@
             else toast.classList.add('bg-green-500');
             toast.classList.remove('hidden');
             setTimeout(() => toast.classList.add('hidden'), 4000);
+        };
+
+        const downloadFromPost = async (url, fallbackFilename) => {
+            const resp = await fetch(url, { method: 'POST' });
+            if (!resp.ok) {
+                let msg = `Request failed (${resp.status})`;
+                try {
+                    const data = await resp.json();
+                    if (data && data.error) msg = data.error;
+                } catch (_) {}
+                throw new Error(msg);
+            }
+
+            const blob = await resp.blob();
+
+            // Try to honor Content-Disposition filename
+            let filename = fallbackFilename;
+            const cd = resp.headers.get('Content-Disposition') || resp.headers.get('content-disposition');
+            if (cd) {
+                const m = /filename\s*=\s*([^;]+)/i.exec(cd);
+                if (m && m[1]) {
+                    filename = m[1].trim().replace(/^"|"$/g, '');
+                }
+            }
+
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
         };
         
         const fetchApi = async (endpoint, options = {}) => {
@@ -842,7 +883,10 @@
                 <div class="space-y-3 text-sm text-gray-800" id="host-info-body">
                     <p class="text-xs text-gray-500">Loading host details...</p>
                 </div>
-                <div class="mt-4 flex justify-end">
+                <div class="mt-4 flex justify-between items-center">
+                    <button id="host-info-rescan" class="px-4 py-2 text-sm font-medium bg-amber-400 hover:bg-amber-500 text-black rounded-lg">
+                        Rescan
+                    </button>
                     <button id="host-info-close" class="px-4 py-2 text-sm font-medium bg-gray-800 text-white rounded-lg hover:bg-gray-700">
                         Close
                     </button>
@@ -876,30 +920,21 @@
 
             try {
                 const dbId = parseInt(hostId.split('-')[1], 10);
-                const resp = await fetch(`/hosts/db/${dbId}/info`);
-                const info = await resp.json();
+                const rescanBtn = card.querySelector('#host-info-rescan');
 
-                if (info.error) {
-                    bodyEl.innerHTML = `<p class="text-xs text-red-600">Error loading host info: ${info.error}</p>`;
-                    return;
-                }
+                const renderHostInfo = (info) => {
+                    const si = info.system_info || {};
+                    const svcSummary = info.services_summary || { total: 0, running: 0, stopped: 0 };
 
-                const si = info.system_info || {};
-                const svcSummary = info.services_summary || { total: 0, running: 0, stopped: 0 };
+                    const fmtBytes = (v) => {
+                        if (!v && v !== 0) return 'N/A';
+                        const gb = v / (1024 ** 3);
+                        return `${gb.toFixed(1)} GB`;
+                    };
 
-                const fmtBytes = (v) => {
-                    if (!v && v !== 0) return 'N/A';
-                    const gb = v / (1024 ** 3);
-                    return `${gb.toFixed(1)} GB`;
-                };
+                    bodyEl.innerHTML = `
 
-                bodyEl.innerHTML = `
-                    <div class="flex items-center mb-3">
-                        <span class="w-6 h-6 mr-2 text-blue-500">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h18M3 17h18"></path>
-                            </svg>
-                        </span>
+                    <div class="flex items-center justify-between">
                         <span class="font-mono truncate" title="${info.ssh_user || hostData.user}@${info.ip_address || hostData.ip}">
                             ${(info.ssh_user || hostData.user)}@${info.ip_address || hostData.ip}
                         </span>
@@ -932,6 +967,42 @@
                         </div>
                     </div>
                 `;
+                };
+
+                const loadInfo = async () => {
+                    const resp = await fetch(`/hosts/db/${dbId}/info`);
+                    const info = await resp.json();
+                    if (info.error) {
+                        bodyEl.innerHTML = `<p class="text-xs text-red-600">Error loading host info: ${info.error}</p>`;
+                        return null;
+                    }
+                    renderHostInfo(info);
+                    return info;
+                };
+
+                // Initial load
+                await loadInfo();
+
+                if (rescanBtn) {
+                    rescanBtn.addEventListener('click', async () => {
+                        rescanBtn.disabled = true;
+                        rescanBtn.textContent = 'Rescanning...';
+                        try {
+                            const resp = await fetch(`/hosts/db/${dbId}/rescan`, { method: 'POST' });
+                            const info = await resp.json();
+                            if (!resp.ok || info.error) {
+                                throw new Error(info.error || `Rescan failed (${resp.status})`);
+                            }
+                            renderHostInfo(info);
+                            showToast('Rescan complete.', 'success');
+                        } catch (err) {
+                            showToast(err.message || 'Rescan failed.', 'error');
+                        } finally {
+                            rescanBtn.disabled = false;
+                            rescanBtn.textContent = 'Rescan';
+                        }
+                    });
+                }
 
             } catch (err) {
                 console.error('Error loading host info', err);
@@ -1511,6 +1582,28 @@
              // Ensure AI Provider section is shown by default
              switchSettingsSection('ai-provider');
         });
+
+        if (createAnsibleInventoryBtn) {
+            createAnsibleInventoryBtn.addEventListener('click', async () => {
+                try {
+                    await downloadFromPost('/export/ansible-inventory', 'inventory.yaml');
+                    showToast('Downloaded Ansible inventory.', 'success');
+                } catch (err) {
+                    showToast(err.message || 'Failed to create inventory.', 'error');
+                }
+            });
+        }
+
+        if (createSshConfigBtn) {
+            createSshConfigBtn.addEventListener('click', async () => {
+                try {
+                    await downloadFromPost('/export/ssh-config', 'ssh_config');
+                    showToast('Downloaded SSH config.', 'success');
+                } catch (err) {
+                    showToast(err.message || 'Failed to create SSH config.', 'error');
+                }
+            });
+        }
         if (closeSettingsBtn) {
             closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
         }
