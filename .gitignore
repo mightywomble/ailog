@@ -11,3 +11,8 @@ __pycache__/
 *.pyc
 
 hosts.json
+
+# Local database artifacts
+instance/*.db
+instance/*.db-journal
+instance/*.db-wal
