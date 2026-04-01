@@ -69,6 +69,9 @@
             <button id="create-ssh-config-btn" class="bg-amber-400 hover:bg-amber-500 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors">
                 Create SSH Config
             </button>
+            <button id="rescan-all-btn" class="bg-amber-400 hover:bg-amber-500 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors">
+                Rescan All
+            </button>
             <div id="sudo-mode-indicator" class="bg-red-100/80 border border-red-300 text-red-800 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">SUDO MODE ENABLED</div>
         </div>
     </header>
@@ -451,6 +454,7 @@
         const aiAnalyseBtn = document.getElementById('ai-analyse-btn');
         const truncationWarning = document.getElementById('truncation-warning');
         // Removed non-existent elements: searchBox, sortControls, filterControls
+        
         const aiContentWrapper = document.getElementById('ai-content-wrapper');
         const aiViewPanel = document.getElementById('ai-view-panel');
         const resizeHandle = document.getElementById('resize-handle');
@@ -460,6 +464,7 @@
         const settingsBtn = document.getElementById('settings-btn');
         const createAnsibleInventoryBtn = document.getElementById('create-ansible-inventory-btn');
         const createSshConfigBtn = document.getElementById('create-ssh-config-btn');
+        const rescanAllBtn = document.getElementById('rescan-all-btn');
         const closeSettingsBtn = document.getElementById('close-settings-btn');
         const settingsModal = document.getElementById('settings-modal');
         const hostListDiv = document.getElementById('host-list');
@@ -603,7 +608,8 @@
             a.remove();
             setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
         };
-        
+
+
         const fetchApi = async (endpoint, options = {}) => {
             // Set default timeout of 60 seconds for API calls
             const controller = new AbortController();
@@ -1601,6 +1607,51 @@
                     showToast('Downloaded SSH config.', 'success');
                 } catch (err) {
                     showToast(err.message || 'Failed to create SSH config.', 'error');
+                }
+            });
+        }
+
+        if (rescanAllBtn) {
+            rescanAllBtn.addEventListener('click', async () => {
+                rescanAllBtn.disabled = true;
+
+                const originalHtml = rescanAllBtn.innerHTML;
+                const originalClass = rescanAllBtn.className;
+
+                // Turn button into an indeterminate red progress bar
+                rescanAllBtn.className = 'relative overflow-hidden bg-red-600 text-white text-sm px-4 py-2 rounded-lg font-medium';
+                rescanAllBtn.innerHTML = `
+                    <span class="relative z-10">Rescanning...</span>
+                    <div class="absolute inset-0 bg-red-700 opacity-40"></div>
+                    <div id="rescan-all-progress" class="absolute left-0 top-0 h-full bg-red-400 opacity-70" style="width: 30%;"></div>
+                `;
+
+                const bar = rescanAllBtn.querySelector('#rescan-all-progress');
+                let pos = 0;
+                let dir = 1;
+                const timer = setInterval(() => {
+                    if (!bar) return;
+                    pos += dir * 8;
+                    if (pos >= 70) { pos = 70; dir = -1; }
+                    if (pos <= 0) { pos = 0; dir = 1; }
+                    bar.style.transform = `translateX(${pos}%)`;
+                }, 120);
+
+                try {
+                    const resp = await fetch('/hosts/db/rescan-all', { method: 'POST' });
+                    const data = await resp.json();
+                    if (!resp.ok || data.error) {
+                        throw new Error(data.error || `Rescan all failed (${resp.status})`);
+                    }
+                    showToast(`Rescan complete: ${data.successful}/${data.total} successful`, 'success');
+                    await populateHostCards();
+                } catch (err) {
+                    showToast(err.message || 'Rescan all failed.', 'error');
+                } finally {
+                    clearInterval(timer);
+                    rescanAllBtn.disabled = false;
+                    rescanAllBtn.className = originalClass;
+                    rescanAllBtn.innerHTML = originalHtml;
                 }
             });
         }

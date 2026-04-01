@@ -1654,6 +1654,115 @@ def rescan_host(host_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
+
+@app.route('/hosts/db/rescan-all', methods=['POST'])
+def rescan_all_hosts():
+    '''Re-scan all DB hosts to refresh system info (including wt0 netbird IP) and services.'''
+    try:
+        hosts = Host.query.all()
+        results = []
+        success_count = 0
+
+        for host in hosts:
+            user = host.ssh_user
+            ip = host.ip_address
+            ssh_key_path = None
+
+            try:
+                if host.ssh_key and host.ssh_key.key_content:
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+                    temp_file.write(host.ssh_key.key_content)
+                    temp_file.close()
+                    os.chmod(temp_file.name, 0o600)
+                    ssh_key_path = temp_file.name
+
+                sys_info = collect_system_info(user, ip, ssh_key_path)
+                services = collect_services(user, ip, ssh_key_path)
+
+                host.status = 'online'
+                host.last_seen = datetime.datetime.utcnow()
+
+                si = SystemInfo.query.filter_by(host_id=host.id).order_by(SystemInfo.captured_at.desc()).first()
+                if not si:
+                    si = SystemInfo(host_id=host.id)
+                    db.session.add(si)
+
+                si.os_version = sys_info.get('os_version')
+                si.hostname = sys_info.get('hostname')
+                si.ram_total = sys_info.get('ram_total')
+                si.ram_used = sys_info.get('ram_used')
+                si.disk_total = sys_info.get('disk_total')
+                si.disk_used = sys_info.get('disk_used')
+                si.cpu_type = sys_info.get('cpu_type')
+                si.cpu_cores = sys_info.get('cpu_cores')
+                si.main_ip = sys_info.get('main_ip')
+                si.netbird_ip = sys_info.get('netbird_ip')
+                si.last_update = datetime.datetime.utcnow()
+                si.captured_at = datetime.datetime.utcnow()
+
+                Service.query.filter_by(host_id=host.id).delete()
+                for svc in services or []:
+                    db.session.add(Service(
+                        host_id=host.id,
+                        service_name=svc.get('service_name'),
+                        status=svc.get('status'),
+                        is_running=bool(svc.get('is_running'))
+                    ))
+
+                db.session.add(HostLog(
+                    host_id=host.id,
+                    log_content=(
+                        "Host rescan completed\n"
+                        f"IP: {ip}\n"
+                        f"User: {user}\n"
+                        f"Main IP: {sys_info.get('main_ip')}\n"
+                        f"Netbird IP: {sys_info.get('netbird_ip')}\n"
+                        f"Services: {len(services or [])}"
+                    ),
+                    log_type='discovery'
+                ))
+
+                results.append({
+                    'host_id': host.id,
+                    'friendly_name': host.friendly_name,
+                    'hostname': host.hostname,
+                    'ip_address': host.ip_address,
+                    'main_ip': sys_info.get('main_ip'),
+                    'netbird_ip': sys_info.get('netbird_ip'),
+                    'services_count': len(services or []),
+                    'status': 'success'
+                })
+                success_count += 1
+
+            except Exception as e:
+                host.status = 'offline'
+                results.append({
+                    'host_id': host.id,
+                    'friendly_name': host.friendly_name,
+                    'hostname': host.hostname,
+                    'ip_address': host.ip_address,
+                    'status': 'error',
+                    'error': str(e)
+                })
+            finally:
+                if ssh_key_path and os.path.exists(ssh_key_path):
+                    try:
+                        os.unlink(ssh_key_path)
+                    except Exception:
+                        pass
+
+        db.session.commit()
+        return jsonify({
+            'total': len(hosts),
+            'successful': success_count,
+            'failed': len(hosts) - success_count,
+            'results': results
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 @app.route('/hosts/db', methods=['POST'])
 def get_hosts_db():
     """Get all hosts from database"""
