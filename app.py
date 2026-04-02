@@ -1,11 +1,13 @@
 import subprocess
-from flask import Flask, render_template, jsonify, request, Response, stream_with_context
+from flask import Flask, render_template, jsonify, request, Response, stream_with_context, has_app_context
 import shlex
 import os
 import datetime
 import openai
 import requests
 import json
+import re
+import sqlite3
 import atexit
 from apscheduler.schedulers.background import BackgroundScheduler
 import threading
@@ -15,7 +17,9 @@ import time
 from functools import lru_cache
 import ast
 import tempfile
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag
+from sqlalchemy import text as sql_text
+import shutil
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services
 
 # --- INITIALIZATION ---
@@ -37,8 +41,101 @@ scheduler = BackgroundScheduler(daemon=True)
 LOG_DIRECTORY = '/var/log'
 MAX_CHAR_COUNT = 40000 
 DISCORD_ALERT_KEYWORDS = ['error', 'issue', 'failed', 'warning', 'critical', 'exception', 'denied', 'unable']
+
+# AI Search (prompt + keywords) - defaults; can be overridden per DB settings
+DEFAULT_AI_SEARCH_PROMPT = (
+    "Analyse this log for any errors and create a summary report,"
+    " troubleshooting tips and any other advice relating to any other issues found."
+)
+DEFAULT_ALERT_KEYWORDS = DISCORD_ALERT_KEYWORDS
+
+
+def get_ai_search_prompt():
+    return (_setting_get('ai.search_prompt', DEFAULT_AI_SEARCH_PROMPT) or DEFAULT_AI_SEARCH_PROMPT).strip()
+
+
+def get_ai_alert_keywords():
+    kws = _setting_get('ai.alert_keywords', DEFAULT_ALERT_KEYWORDS)
+    if not isinstance(kws, list):
+        return list(DEFAULT_ALERT_KEYWORDS)
+    out = []
+    for k in kws:
+        s = str(k).strip()
+        if s:
+            out.append(s)
+    return out
+
+
 CONFIG_FILE = 'scheduler_config.json'
 HOSTS_FILE = 'hosts.json'
+
+
+# --- DB-BACKED APP SETTINGS ---
+
+def _setting_get(key, default=None):
+    def _do():
+        row = AppSetting.query.get(key)
+        if not row or row.value_json is None:
+            return default
+        try:
+            return json.loads(row.value_json)
+        except Exception:
+            return row.value_json
+
+    if has_app_context():
+        return _do()
+    with app.app_context():
+        return _do()
+
+
+def _setting_set(key, value):
+    def _do():
+        row = AppSetting.query.get(key)
+        if not row:
+            row = AppSetting(key=key)
+            db.session.add(row)
+        row.value_json = json.dumps(value)
+        db.session.commit()
+
+    if has_app_context():
+        return _do()
+    with app.app_context():
+        return _do()
+
+
+def _migrate_scheduler_config_file_to_db():
+    # One-time migration from scheduler_config.json into DB settings.
+    if not os.path.exists(CONFIG_FILE):
+        return
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            cfg = json.load(f)
+    except Exception:
+        return
+
+    mapping = {
+        'analysis_provider': 'analysis_provider',
+        'openai_api_key': 'openai_api_key',
+        'ollama_url': 'ollama_url',
+        'ollama_model': 'ollama_model',
+        'webhook_url': 'discord_webhook_url',
+        'discord_webhook_url': 'discord_webhook_url',
+        'is_running': 'schedule.is_running',
+        'interval': 'schedule.interval_hours',
+        'sources': 'schedule.sources',
+    }
+
+    changed = False
+    for src_key, dst_key in mapping.items():
+        if src_key not in cfg:
+            continue
+        if AppSetting.query.get(dst_key) is not None:
+            continue
+        db.session.add(AppSetting(key=dst_key, value_json=json.dumps(cfg.get(src_key))))
+        changed = True
+
+    if changed:
+        db.session.commit()
 
 # --- HELPER FUNCTIONS for HOSTS ---
 def load_hosts():
@@ -300,20 +397,101 @@ def format_relative_time(epoch_time):
     if delta.seconds >= 60: return f"{delta.seconds // 60} mins ago"
     return "Just now"
 
-def send_discord_notification(webhook_url, log_name, host_id, analysis_text):
-    if not webhook_url: return
+
+def extract_log_time_range(log_content):
+    """Extract (start_iso, end_iso) from the first/last timestamped lines, or (None, None)."""
+    if not log_content:
+        return None, None
+
+    lines = [ln for ln in log_content.splitlines() if ln.strip()]
+    if not lines:
+        return None, None
+
+    iso_re = re.compile(r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)")
+    syslog_re = re.compile(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+([ 0-3]?\d)\s+(\d{2}:\d{2}:\d{2})")
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    def _parse(line):
+        mt = iso_re.search(line)
+        if mt:
+            s = mt.group(1).replace(' ', 'T')
+            try:
+                if s.endswith('Z'):
+                    s = s[:-1] + '+00:00'
+                return datetime.datetime.fromisoformat(s).astimezone(datetime.timezone.utc)
+            except Exception:
+                pass
+        ms = syslog_re.match(line)
+        if ms:
+            try:
+                mon, day, hms = ms.group(1), int(ms.group(2)), ms.group(3)
+                dt = datetime.datetime.strptime(f"{now.year} {mon} {day:02d} {hms}", "%Y %b %d %H:%M:%S")
+                return dt.replace(tzinfo=datetime.timezone.utc)
+            except Exception:
+                pass
+        return None
+
+    start_dt, end_dt = None, None
+    for ln in lines[:200]:
+        dt = _parse(ln)
+        if dt:
+            start_dt = dt
+            break
+    for ln in reversed(lines[-200:]):
+        dt = _parse(ln)
+        if dt:
+            end_dt = dt
+            break
+
+    if not start_dt and not end_dt:
+        return None, None
+    return (start_dt or end_dt).isoformat(), (end_dt or start_dt).isoformat()
+
+
+def _send_discord_embed(webhook_url, title, description, color=3447003):
+    if not webhook_url:
+        return
     headers = {'Content-Type': 'application/json'}
-    
-    # Retrieve the friendly name of the host
-    hosts = load_hosts()
-    host_info = hosts.get(host_id, {'friendly_name': host_id})
-    friendly_name = host_info.get('friendly_name', host_id)
-    
-    discord_payload = {"embeds": [{"title": f"🚨 AI Alert for: {log_name} on {friendly_name}","description": analysis_text[:4000],"color": 15158332, "footer": { "text": "Log Viewer AI Analysis" },"timestamp": datetime.datetime.now().isoformat()}]}
+    discord_payload = {
+        "embeds": [
+            {
+                "title": title,
+                "description": (description or '')[:4000],
+                "color": color,
+                "footer": {"text": "Log Viewer AI Analysis"},
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        ]
+    }
     try:
         requests.post(webhook_url, data=json.dumps(discord_payload), headers=headers, timeout=10)
     except requests.exceptions.RequestException as e:
         print(f"Error sending Discord notification: {e}")
+
+
+def send_discord_notification(webhook_url, log_name, host_id, analysis_text, data_start=None, data_end=None):
+    # Alert embed (red)
+    hosts = load_hosts() or {}
+    host_info = hosts.get(host_id, {'friendly_name': host_id})
+    friendly_name = host_info.get('friendly_name', host_id)
+
+    range_line = f"\n\nData range: {data_start} → {data_end}" if (data_start and data_end) else ''
+    title = f"🚨 AI Alert for: {log_name} on {friendly_name}"
+    desc = (analysis_text or '') + range_line
+    _send_discord_embed(webhook_url, title, desc, color=15158332)
+
+
+def send_discord_status(webhook_url, log_name, host_id, message, data_start=None, data_end=None):
+    # Info embed (blue)
+    hosts = load_hosts() or {}
+    host_info = hosts.get(host_id, {'friendly_name': host_id})
+    friendly_name = host_info.get('friendly_name', host_id)
+
+    range_line = f"\n\nData range: {data_start} → {data_end}" if (data_start and data_end) else ''
+    title = f"ℹ️ Analysis of {log_name} on {friendly_name}"
+    desc = (message or '') + range_line
+    _send_discord_embed(webhook_url, title, desc, color=3447003)
+
 
 # --- FLASK ROUTES ---
 @app.route('/')
@@ -926,6 +1104,10 @@ def test_ollama():
     # Ensure URL is properly formatted
     if not ollama_url.startswith('http'):
         ollama_url = f'http://{ollama_url}'
+    ollama_url = ollama_url.rstrip('/')
+
+    # Normalize: avoid trailing slash that can cause //api/generate redirects (which may flip POST to GET)
+    ollama_url = ollama_url.rstrip('/')
     
     try:
         # Test connectivity by fetching models list
@@ -951,6 +1133,15 @@ def get_ollama_models():
     if not ollama_url:
         # Fall back to config if not provided
         config = load_config()
+    def _emit(payload):
+        try:
+            if emit:
+                emit(payload)
+            else:
+                # default: log to server
+                print(payload.get('message') or payload)
+        except Exception:
+            pass
         ollama_url = config.get('ollama_url', '').strip()
     
     if not ollama_url:
@@ -958,6 +1149,7 @@ def get_ollama_models():
     
     if not ollama_url.startswith('http'):
         ollama_url = f'http://{ollama_url}'
+    ollama_url = ollama_url.rstrip('/')
     
     try:
         response = requests.get(f'{ollama_url}/api/tags', timeout=10)
@@ -1006,6 +1198,89 @@ def openai_config():
             'analysis_provider': config.get('analysis_provider', 'openai')
         })
 
+
+
+@app.route('/openai/test-saved', methods=['GET'])
+def test_saved_openai_key():
+    # Test the saved OpenAI API key stored in DB settings.
+    try:
+        cfg = load_config()
+        api_key = (cfg.get('openai_api_key') or '').strip()
+        if not api_key:
+            return jsonify({'success': False, 'error': 'No saved OpenAI API key configured.'}), 400
+
+        resp = requests.get(
+            'https://api.openai.com/v1/models',
+            headers={'Authorization': f'Bearer {api_key}'},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return jsonify({'success': True, 'message': 'Saved OpenAI API key is valid.'})
+        try:
+            j = resp.json()
+            err = (j.get('error') or {}).get('message')
+        except Exception:
+            err = None
+        return jsonify({'success': False, 'error': err or f'OpenAI validation failed ({resp.status_code}).'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/ai/search-config', methods=['GET', 'POST'])
+def ai_search_config():
+    """Get/set the AI search prompt and alert keywords (DB-backed)."""
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        prompt = (data.get('search_prompt') or '').strip()
+        keywords = data.get('alert_keywords')
+        if prompt:
+            _setting_set('ai.search_prompt', prompt)
+        if isinstance(keywords, list):
+            cleaned = [str(k).strip() for k in keywords if str(k).strip()]
+            _setting_set('ai.alert_keywords', cleaned)
+        return jsonify({'search_prompt': get_ai_search_prompt(), 'alert_keywords': get_ai_alert_keywords(), 'message': 'AI search settings saved.'})
+    return jsonify({'search_prompt': get_ai_search_prompt(), 'alert_keywords': get_ai_alert_keywords()})
+
+
+@app.route('/discord/config', methods=['GET', 'POST'])
+def discord_config():
+    # Save or retrieve Discord webhook configuration.
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        webhook_url = (data.get('webhook_url') or '').strip()
+        if not webhook_url:
+            return jsonify({'error': 'Discord webhook URL is required.'}), 400
+        cfg = load_config()
+        cfg['discord_webhook_url'] = webhook_url
+        save_config(cfg)
+        return jsonify({'message': 'Discord webhook saved.'})
+
+    cfg = load_config()
+    webhook_url = (cfg.get('discord_webhook_url') or '').strip()
+    configured = bool(webhook_url)
+    return jsonify({'configured': configured, 'webhook_url': webhook_url})
+
+
+@app.route('/discord/test', methods=['POST'])
+def discord_test():
+    # Send a test message to Discord using provided webhook_url or saved config.
+    try:
+        data = request.get_json(silent=True) or {}
+        webhook_url = (data.get('webhook_url') or '').strip()
+        if not webhook_url:
+            cfg = load_config()
+            webhook_url = (cfg.get('discord_webhook_url') or '').strip()
+
+        if not webhook_url:
+            return jsonify({'success': False, 'error': 'No Discord webhook URL configured.'}), 400
+
+        payload = {'content': '✅ AI Log Viewer test notification.'}
+        r = requests.post(webhook_url, json=payload, timeout=10)
+        if r.status_code in (200, 204):
+            return jsonify({'success': True, 'message': 'Discord webhook test sent.'})
+        return jsonify({'success': False, 'error': f'Discord returned {r.status_code}: {r.text[:200]}'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 @app.route('/ollama/config', methods=['POST', 'GET'])
 def ollama_config():
     """Save or retrieve Ollama configuration"""
@@ -1035,6 +1310,7 @@ def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
     """Analyze log using Ollama"""
     if not ollama_url.startswith('http'):
         ollama_url = f'http://{ollama_url}'
+    ollama_url = ollama_url.rstrip('/')
     
     truncated_content = log_content
     if len(log_content) > MAX_CHAR_COUNT:
@@ -1043,60 +1319,106 @@ def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
     prompt = f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"
     
     try:
+        endpoint_url = f'{ollama_url}/api/generate'
         response = requests.post(
-            f'{ollama_url}/api/generate',
+            endpoint_url,
+            allow_redirects=False,
             json={'model': ollama_model, 'prompt': prompt, 'stream': False},
             timeout=60
         )
+
+        if response.is_redirect or response.is_permanent_redirect:
+            loc = response.headers.get('Location')
+            raise Exception(f'Ollama redirected request from {endpoint_url} to {loc} (status {response.status_code}). Final URL seen: {response.url}. Check the base URL (no trailing slash) and reverse proxy settings.')
+
         response.raise_for_status()
-        result = response.json()
+
+        try:
+            result = response.json()
+        except Exception:
+            snippet = (response.text or '')[:300].replace('\n', ' ')
+            raise Exception(f'Unexpected response from Ollama (status {response.status_code}): {snippet}')
         return result.get('response', 'No response from Ollama')
     except Exception as e:
         raise Exception(f'Ollama analysis failed: {str(e)}')
 
 # --- ANALYSIS & SCHEDULER ROUTES (RESTORED) ---
 def save_config(config):
-    with open(CONFIG_FILE, 'w') as f: json.dump(config, f, indent=4)
+    """Persist relevant config keys to DB-backed AppSetting."""
+    if 'analysis_provider' in config:
+        _setting_set('analysis_provider', config.get('analysis_provider'))
+    if 'openai_api_key' in config:
+        _setting_set('openai_api_key', config.get('openai_api_key'))
+    if 'api_key' in config and 'openai_api_key' not in config:
+        _setting_set('openai_api_key', config.get('api_key'))
+    if 'ollama_url' in config:
+        _setting_set('ollama_url', config.get('ollama_url'))
+    if 'ollama_model' in config:
+        _setting_set('ollama_model', config.get('ollama_model'))
+
+    if 'discord_webhook_url' in config:
+        _setting_set('discord_webhook_url', config.get('discord_webhook_url'))
+    if 'webhook_url' in config and 'discord_webhook_url' not in config:
+        _setting_set('discord_webhook_url', config.get('webhook_url'))
+
+    if 'is_running' in config:
+        _setting_set('schedule.is_running', bool(config.get('is_running')))
+    if 'interval' in config:
+        _setting_set('schedule.interval_hours', config.get('interval'))
+    if 'sources' in config:
+        _setting_set('schedule.sources', config.get('sources') or [])
 def load_config():
-    if not os.path.exists(CONFIG_FILE): return {}
-    with open(CONFIG_FILE, 'r') as f:
-        try: return json.load(f)
-        except json.JSONDecodeError: return {}
+    """Load config from DB settings; fall back to scheduler_config.json via migration."""
+    try:
+        _migrate_scheduler_config_file_to_db()
+    except Exception:
+        pass
+
+    cfg = {}
+    cfg['analysis_provider'] = _setting_get('analysis_provider', 'openai')
+    cfg['openai_api_key'] = _setting_get('openai_api_key', '')
+    cfg['api_key'] = cfg['openai_api_key']  # backward-compatible alias
+    cfg['ollama_url'] = _setting_get('ollama_url', '')
+    cfg['ollama_model'] = _setting_get('ollama_model', '')
+
+    cfg['discord_webhook_url'] = _setting_get('discord_webhook_url', '')
+    cfg['webhook_url'] = cfg['discord_webhook_url']
+
+    cfg['is_running'] = bool(_setting_get('schedule.is_running', False))
+    cfg['interval'] = _setting_get('schedule.interval_hours', None)
+    cfg['sources'] = _setting_get('schedule.sources', []) or []
+
+    return cfg
 
 @app.route('/analyse', methods=['POST'])
 def analyse_log():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     log_content = data.get('log_content')
     log_name = data.get('log_name')
     webhook_url = data.get('webhook_url')
     provider = data.get('provider', 'openai')  # 'openai' or 'ollama'
-    
+
     if not log_content:
         return jsonify({'error': 'Missing log_content.'}), 400
-    
-    analysis = None
-    
+
     try:
         if provider == 'ollama':
-            # Use Ollama
             config = load_config()
             ollama_url = config.get('ollama_url')
             ollama_model = config.get('ollama_model')
-            
             if not ollama_url or not ollama_model:
                 return jsonify({'error': 'Ollama not configured. Please set up Ollama in Settings.'}), 400
-            
             analysis = analyse_with_ollama(log_content, log_name, ollama_url, ollama_model)
         else:
-            # Use OpenAI (default)
             api_key = data.get('api_key')
             if not api_key:
                 return jsonify({'error': 'OpenAI API key not provided.'}), 400
-            
+
             truncated_content = log_content
             if len(log_content) > MAX_CHAR_COUNT:
                 truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
-            
+
+
             client = openai.OpenAI(api_key=api_key)
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -1106,90 +1428,150 @@ def analyse_log():
                 ]
             )
             analysis = response.choices[0].message.content
-        
-        # Check for alerts and send Discord notification if needed
+
         discord_sent = False
-        if webhook_url and analysis and any(keyword in analysis.lower() for keyword in DISCORD_ALERT_KEYWORDS):
-            send_discord_notification(webhook_url, log_name, 'local', analysis)
+        data_start, data_end = extract_log_time_range(log_content)
+        if webhook_url and analysis and any(keyword.lower() in analysis.lower() for keyword in get_ai_alert_keywords()):
+            send_discord_notification(webhook_url, log_name, 'local', analysis, data_start=data_start, data_end=data_end)
             discord_sent = True
-        
+
         return jsonify({'analysis': analysis, 'discord_sent': discord_sent})
     except Exception as e:
         return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
 
-@app.route('/test_discord', methods=['POST'])
-def test_discord():
-    webhook_url = request.get_json().get('webhook_url')
-    if not webhook_url: return jsonify({'error': 'Webhook URL is missing.'}), 400
-    payload = json.dumps({'content': '✅ Test message from Log Viewer.'})
-    try:
-        response = requests.post(webhook_url, data=payload, headers={'Content-Type': 'application/json'}, timeout=5)
-        response.raise_for_status()
-        return jsonify({'message': 'Test message sent successfully!'})
-    except requests.exceptions.RequestException as e: return jsonify({'error': f'Failed to send test message: {str(e)}'}), 500
+def _exec_summary_from_analysis(analysis_text: str, max_chars: int = 600) -> str:
+    if not analysis_text:
+        return '(no analysis output)'
+    txt = analysis_text.strip().replace('\r', '')
+    parts = [p.strip() for p in txt.split('\n\n') if p.strip()]
+    head = parts[0] if parts else txt
+    if len(head) > max_chars:
+        head = head[:max_chars].rstrip() + '…'
+    return head
 
-def _do_analysis_task():
-    print("--- Commencing scheduled log analysis task ---")
+def _do_analysis_task(emit=None):
+    """Run analysis over configured sources.
+
+    If emit is provided, it will be called with dict payloads suitable for SSE.
+    """
     config = load_config()
-    webhook_url, sources = config.get('webhook_url'), config.get('sources', [])
-    provider = config.get('analysis_provider', 'openai')  # Get configured provider
-    
-    if not all([webhook_url, sources]):
-        print("Scheduled analysis aborted: Missing webhook URL or sources.")
+
+    def _emit(payload):
+        try:
+            if emit:
+                emit(payload)
+            else:
+                print(payload.get('message') or payload)
+        except Exception:
+            pass
+
+    _emit({'status': 'progress', 'message': 'Starting scheduled analysis...', 'progress': 0})
+
+    webhook_url = (config.get('webhook_url') or '').strip()
+    sources = config.get('sources', []) or []
+    provider = config.get('analysis_provider', 'openai')
+
+    if not webhook_url or not sources:
+        _emit({'status': 'error', 'message': 'Scheduled analysis aborted: Missing webhook URL or selected logs.'})
         return
-    
-    # Validate provider is configured
+
     if provider == 'ollama':
         if not config.get('ollama_url') or not config.get('ollama_model'):
-            print("Scheduled analysis aborted: Ollama not configured.")
+            _emit({'status': 'error', 'message': 'Scheduled analysis aborted: Ollama not configured.'})
             return
     else:
         if not config.get('api_key'):
-            print("Scheduled analysis aborted: OpenAI API key not configured.")
+            _emit({'status': 'error', 'message': 'Scheduled analysis aborted: OpenAI API key not configured.'})
             return
-    
-    for source in sources:
-        log_name, log_type, host = source.get('name'), source.get('type'), source.get('host', 'local')
-        print(f"Analyzing {log_type}: {log_name} on {host} using {provider}")
+
+    total = len(sources)
+
+    for i, source in enumerate(sources, start=1):
+        log_name = source.get('name')
+        log_type = source.get('type')
+        host = source.get('host', 'local')
+
+        progress = int(((i - 1) / max(total, 1)) * 100)
+        _emit({'status': 'progress', 'message': f'Analyzing {i}/{total}: {log_name} on {host}...', 'progress': progress})
+        _emit({'status': 'log', 'message': f'Analyzing {log_type}: {log_name} on {host} using {provider}'})
+
         try:
-            command = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))} 2>/dev/null | tail -n 500" if log_name.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))}"
-            if log_type != 'file': command = f"sudo journalctl -u {shlex.quote(log_name)} -n 500 --no-pager"
-            
+            command = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))} 2>/dev/null | tail -n 500" if str(log_name).endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, log_name))}"
+            if log_type != 'file':
+                command = f"sudo journalctl -u {shlex.quote(log_name)} -n 500 --no-pager"
+
             result = execute_command(host, command)
             log_content = result.stdout
-            if not log_content: continue
-            
-            truncated_content = log_content
-            if len(log_content) > MAX_CHAR_COUNT:
-                truncated_content = f"[--- Log truncated... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+            if not log_content:
+                _emit({'status': 'log', 'message': f'Skipping {log_name} on {host}: empty log.'})
+                continue
 
-            # Use configured provider for analysis
-            if provider == 'ollama':
-                analysis = analyse_with_ollama(log_content, f"{log_name} on {host}", config.get('ollama_url'), config.get('ollama_model'))
+            data_start, data_end = extract_log_time_range(log_content)
+
+            # Notify Discord that analysis started (info)
+            send_discord_status(webhook_url, log_name, host, 'Analysis started.', data_start=data_start, data_end=data_end)
+
+            # Split long logs into chunks instead of truncating
+            chunks = [log_content[j:j + MAX_CHAR_COUNT] for j in range(0, len(log_content), MAX_CHAR_COUNT)]
+            if len(chunks) > 1:
+                _emit({'status': 'log', 'message': f'Log is large; splitting into {len(chunks)} parts for analysis.'})
+
+            analysis_parts = []
+
+            for part_idx, chunk in enumerate(chunks, start=1):
+                part_label = f'part {part_idx}/{len(chunks)}' if len(chunks) > 1 else 'single part'
+                _emit({'status': 'log', 'message': f'Analyzing {part_label}...'})
+
+                hb_stop = threading.Event()
+
+                def _hb():
+                    waited = 0
+                    while not hb_stop.wait(5):
+                        waited += 5
+                        _emit({'status': 'log', 'message': f'Waiting for {provider} response ({waited}s)...'})
+
+                hb_thread = threading.Thread(target=_hb)
+                hb_thread.daemon = True
+
+                try:
+                    _emit({'status': 'log', 'message': f'Waiting for {provider} response...'})
+                    hb_thread.start()
+
+                    if provider == 'ollama':
+                        part_analysis = analyse_with_ollama(chunk, f"{log_name} on {host}", config.get('ollama_url'), config.get('ollama_model'))
+                    else:
+                        prompt = get_ai_search_prompt()
+                        client = openai.OpenAI(api_key=config.get('api_key'))
+                        response = client.chat.completions.create(
+                            model="gpt-3.5-turbo",
+                            messages=[
+                                {"role": "system", "content": "You are a helpful assistant that analyses log files for potential issues."},
+                                {"role": "user", "content": f"{prompt}\n\n--- LOG for {log_name} on {host} ({part_label}) ---\n{chunk}"},
+                            ]
+                        )
+                        part_analysis = response.choices[0].message.content
+
+                    analysis_parts.append(part_analysis)
+
+                    _emit({'status': 'log', 'message': f'✅ Completed {part_label}.'})
+                finally:
+                    hb_stop.set()
+
+            analysis = "\n\n".join(analysis_parts)
+            alert_needed = any(keyword.lower() in analysis.lower() for keyword in get_ai_alert_keywords())
+            if alert_needed:
+                _emit({'status': 'log', 'message': f'Issue found in {log_name} on {host}. Sending alert to Discord...'})
+                send_discord_notification(webhook_url, log_name, host, analysis, data_start=data_start, data_end=data_end)
+                _emit({'status': 'log', 'message': 'Discord alert sent.'})
             else:
-                prompt = "Analyse this log for any errors and create a summary report, troubleshooting tips and any other advice relating to any other issues found."
-                client = openai.OpenAI(api_key=config.get('api_key'))
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that analyses log files for potential issues."},
-                        {"role": "user", "content": f"{prompt}\n\n--- LOG for {log_name} on {host} ---\n{truncated_content}"}
-                    ]
-                )
-                analysis = response.choices[0].message.content
-            
-            if any(keyword in analysis.lower() for keyword in DISCORD_ALERT_KEYWORDS):
-                print(f"Issue found in {log_name} on {host}. Sending alert to Discord.")
-                send_discord_notification(webhook_url, log_name, host, analysis)
-        except Exception as e:
-            print(f"Error during scheduled analysis of {log_name} on {host}: {e}")
+                _emit({'status': 'log', 'message': f'No alert keywords found for {log_name} on {host}; sending summary to Discord.'})
+                exec_sum = _exec_summary_from_analysis(analysis)
+                send_discord_status(webhook_url, log_name, host, f'No alert keywords found.\n\nExecutive summary:\n{exec_sum}', data_start=data_start, data_end=data_end)
 
-def perform_scheduled_analysis():
-    config = load_config()
-    if not config.get('is_running'):
-        print("Scheduler is paused. Skipping scheduled run.")
-        return
-    _do_analysis_task()
+        except Exception as e:
+            _emit({'status': 'log', 'message': f'Error analyzing {log_name} on {host}: {e}'})
+
+    _emit({'status': 'complete', 'message': 'Scheduled analysis completed.', 'progress': 100})
 
 @app.route('/schedule/start', methods=['POST'])
 def start_schedule():
@@ -1220,7 +1602,60 @@ def run_now():
     thread.start()
     return jsonify({'message': 'Immediate analysis triggered. Alerts will be sent for any issues found.'})
 
-@app.route('/schedule/status', methods=['POST'])
+@app.route('/schedule/run_now/stream', methods=['GET'])
+def run_now_stream():
+    """Run an immediate analysis and stream progress via Server-Sent Events."""
+    from queue import Queue, Empty
+
+    q: Queue = Queue()
+
+    def emit(payload):
+        q.put(payload)
+
+    config = load_config()
+    provider = config.get('analysis_provider', 'openai')
+    # Validate minimal requirements
+    if not config.get('webhook_url') or not config.get('sources'):
+        def gen_err():
+            yield f"data: {json.dumps({'status':'error','message':'Cannot run. Configure Discord webhook and select logs first.'})}\n\n"
+        headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+        return Response(stream_with_context(gen_err()), mimetype='text/event-stream', headers=headers)
+    if provider != 'ollama' and not config.get('api_key'):
+        def gen_err():
+            yield f"data: {json.dumps({'status':'error','message':'Cannot run. Configure OpenAI API key first.'})}\n\n"
+        headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+        return Response(stream_with_context(gen_err()), mimetype='text/event-stream', headers=headers)
+
+    def worker():
+        try:
+            _do_analysis_task(emit=emit)
+        except Exception as e:
+            emit({'status': 'error', 'message': f'Run failed: {e}'})
+        finally:
+            emit({'status': 'complete', 'message': 'Run finished.', 'progress': 100})
+
+    thread = threading.Thread(target=worker)
+    thread.daemon = True
+    thread.start()
+
+    def generate():
+        # send initial ping
+        yield f"data: {json.dumps({'status':'progress','message':'Run started...','progress':0})}\n\n"
+        while True:
+            try:
+                payload = q.get(timeout=10)
+            except Empty:
+                # keepalive
+                yield ': keepalive\n\n'
+                continue
+            yield f"data: {json.dumps(payload)}\n\n"
+            if payload.get('status') in ('complete','error'):
+                break
+
+    headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    return Response(stream_with_context(generate()), mimetype='text/event-stream', headers=headers)
+
+@app.route('/schedule/status', methods=['GET', 'POST'])
 def schedule_status():
     config = load_config()
     job = scheduler.get_job('scheduled_analysis')
@@ -1228,6 +1663,13 @@ def schedule_status():
     if job and config.get('is_running'):
         status.update({'is_running': True, 'next_run': job.next_run_time.isoformat() if job.next_run_time else None})
     return jsonify(status)
+
+def perform_scheduled_analysis():
+    config = load_config()
+    if not config.get('is_running'):
+        print("Scheduler is paused. Skipping scheduled run.")
+        return
+    _do_analysis_task()
 
 # --- STARTUP & SHUTDOWN ---
 def startup_scheduler():
@@ -1241,6 +1683,12 @@ def startup_scheduler():
 def initialize_app():
     """Initialize application components on startup"""
     print("=== AI Log Viewer Startup ===")
+    # Migrate legacy scheduler_config.json into DB settings
+    try:
+        _migrate_scheduler_config_file_to_db()
+    except Exception as e:
+        print(f"[WARN] Settings migration skipped: {e}")
+
     
     # Load and display host configuration
     hosts = load_hosts()
@@ -1275,6 +1723,8 @@ def get_ssh_keys():
         keys = SSHKey.query.all()
         return jsonify([k.to_dict() for k in keys])
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
         return jsonify({'error': str(e)}), 500
 
 @app.route('/ssh-keys/upload', methods=['POST'])
@@ -1895,65 +2345,43 @@ def add_host_to_tags(host_id):
 
 @app.route('/export/ansible-inventory', methods=['POST'])
 def export_ansible_inventory():
-    """Generate Ansible inventory YAML"""
+    '''Generate Ansible inventory JSON with mainip and netbirdip groups.'''
     try:
-        groups = Group.query.all()
-        ungrouped = Host.query.filter(~Host.groups.any()).all()
-        
-        inventory = {'all': {'children': {}}}
-        
-        for group in groups:
-            inventory['all']['children'][group.name] = {
-                'hosts': {}
+        hosts = Host.query.all()
+
+        inventory = {
+            'mainip':    {'hosts': []},
+            'netbirdip': {'hosts': []},
+            '_meta':     {'hostvars': {}}
+        }
+
+        for host in hosts:
+            host_name = host.friendly_name or host.hostname
+            si        = getattr(host, 'system_info', None)
+            main_ip   = getattr(si, 'main_ip',    None) if si else None
+            netbird_ip= getattr(si, 'netbird_ip', None) if si else None
+            base_ip   = main_ip or host.ip_address
+
+            inventory['mainip']['hosts'].append(host_name)
+            inventory['_meta']['hostvars'][host_name] = {
+                'ansible_host': base_ip,
+                'ansible_user': host.ssh_user,
             }
-            for host in group.hosts:
-                host_name = host.friendly_name or host.hostname
-                si = getattr(host, 'system_info', None)
-                main_ip = getattr(si, 'main_ip', None) if si else None
-                netbird_ip = getattr(si, 'netbird_ip', None) if si else None
-                base_ip = main_ip or host.ip_address
 
-                inventory['all']['children'][group.name]['hosts'][host_name] = {
-                    'ansible_host': base_ip,
-                    'ansible_user': host.ssh_user
+            if netbird_ip:
+                nb_name = f'{host_name}-netbird'
+                inventory['netbirdip']['hosts'].append(nb_name)
+                inventory['_meta']['hostvars'][nb_name] = {
+                    'ansible_host': netbird_ip,
+                    'ansible_user': host.ssh_user,
                 }
 
-                if netbird_ip:
-                    inventory['all']['children'][group.name]['hosts'][f"{host_name}-netbird"] = {
-                        'ansible_host': netbird_ip,
-                        'ansible_user': host.ssh_user
-                    }
-        
-        if ungrouped:
-            inventory['all']['children']['ungrouped'] = {'hosts': {}}
-            for host in ungrouped:
-                host_name = host.friendly_name or host.hostname
-                si = getattr(host, 'system_info', None)
-                main_ip = getattr(si, 'main_ip', None) if si else None
-                netbird_ip = getattr(si, 'netbird_ip', None) if si else None
-                base_ip = main_ip or host.ip_address
+        json_output = json.dumps(inventory, indent=2, sort_keys=True)
 
-                inventory['all']['children']['ungrouped']['hosts'][host_name] = {
-                    'ansible_host': base_ip,
-                    'ansible_user': host.ssh_user
-                }
-
-                if netbird_ip:
-                    inventory['all']['children']['ungrouped']['hosts'][f"{host_name}-netbird"] = {
-                        'ansible_host': netbird_ip,
-                        'ansible_user': host.ssh_user
-                    }
-        
-        try:
-            import yaml
-            yaml_output = yaml.dump(inventory, default_flow_style=False)
-        except ImportError:
-            yaml_output = json.dumps(inventory, indent=2)
-        
         return Response(
-            yaml_output,
-            mimetype='text/yaml',
-            headers={'Content-Disposition': 'attachment; filename=inventory.yaml'}
+            json_output,
+            mimetype='application/json',
+            headers={'Content-Disposition': 'attachment; filename=inventory.json'}
         )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1967,27 +2395,36 @@ def export_ssh_config():
         ssh_config = "# Auto-generated SSH config from AI Log Viewer\n"
         ssh_config += f"# Generated: {datetime.datetime.utcnow().isoformat()}\n\n"
         
+        def _host_block(name, ip, host_obj):
+            nonlocal ssh_config
+            ssh_config += f'Host {name}\n'
+            ssh_config += f'    HostName {ip}\n'
+            ssh_config += f'    User {host_obj.ssh_user}\n'
+            if host_obj.ssh_key:
+                ssh_config += f'    IdentityFile ~/.ssh/{host_obj.ssh_key.key_name}\n'
+            ssh_config += '    StrictHostKeyChecking no\n'
+            ssh_config += '    UserKnownHostsFile=/dev/null\n'
+            ssh_config += '\n'
+
+        ssh_config += '# ----------------------------------------\n'
+        ssh_config += '# Group: mainip\n'
+        ssh_config += '# ----------------------------------------\n'
         for host in hosts:
-            host_name = host.friendly_name or host.hostname
-            si = getattr(host, 'system_info', None)
-            main_ip = getattr(si, 'main_ip', None) if si else None
+            host_name  = host.friendly_name or host.hostname
+            si         = getattr(host, 'system_info', None)
+            main_ip    = getattr(si, 'main_ip', None) if si else None
+            base_ip    = main_ip or host.ip_address
+            _host_block(host_name, base_ip, host)
+
+        ssh_config += '# ----------------------------------------\n'
+        ssh_config += '# Group: netbirdip\n'
+        ssh_config += '# ----------------------------------------\n'
+        for host in hosts:
+            host_name  = host.friendly_name or host.hostname
+            si         = getattr(host, 'system_info', None)
             netbird_ip = getattr(si, 'netbird_ip', None) if si else None
-            base_ip = main_ip or host.ip_address
-
-            def append_host_block(name, hostname_or_ip):
-                nonlocal ssh_config
-                ssh_config += f"Host {name}\n"
-                ssh_config += f"    HostName {hostname_or_ip}\n"
-                ssh_config += f"    User {host.ssh_user}\n"
-                if host.ssh_key:
-                    ssh_config += f"    IdentityFile ~/.ssh/{host.ssh_key.key_name}\n"
-                ssh_config += f"    StrictHostKeyChecking no\n"
-                ssh_config += f"    UserKnownHostsFile=/dev/null\n"
-                ssh_config += "\n"
-
-            append_host_block(host_name, base_ip)
             if netbird_ip:
-                append_host_block(f"{host_name}-netbird", netbird_ip)
+                _host_block(f'{host_name}-netbird', netbird_ip, host)
         
         return Response(
             ssh_config,
@@ -1996,6 +2433,101 @@ def export_ssh_config():
         )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+def _get_sqlite_db_file_path():
+    '''Return sqlite file path if DATABASE_URL is sqlite:////... else None.'''
+    url = app.config.get('SQLALCHEMY_DATABASE_URI', '') or ''
+    if not url.startswith('sqlite:'):
+        return None
+    # sqlite:////absolute/path or sqlite:///relative/path
+    if url.startswith('sqlite:////'):
+        # Keep leading slash
+        return '/' + url[len('sqlite:////'):]
+    if url.startswith('sqlite:///'):
+        return url[len('sqlite:///'):]
+    if url == 'sqlite://':
+        return None
+    if url.startswith('sqlite:'):
+        return url.split('sqlite:', 1)[1]
+    return None
+
+
+@app.route('/admin/db/backup', methods=['GET'])
+def backup_database():
+    '''Download a copy of the current sqlite database.'''
+    try:
+        db_path = _get_sqlite_db_file_path()
+        if not db_path:
+            return jsonify({'error': 'Database backup only supported for sqlite'}), 400
+        if not os.path.exists(db_path):
+            return jsonify({'error': f'Database file not found: {db_path}'}), 404
+
+        ts = datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+        filename = f"ailog-backup-{ts}.db"
+
+        with open(db_path, 'rb') as f:
+            data = f.read()
+
+        return Response(
+            data,
+            mimetype='application/octet-stream',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/db/restore', methods=['POST'])
+def restore_database():
+    '''Restore sqlite database from uploaded file.'''
+    try:
+        db_path = _get_sqlite_db_file_path()
+        if not db_path:
+            return jsonify({'error': 'Database restore only supported for sqlite'}), 400
+
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+
+        upload = request.files['file']
+        if not upload or not upload.filename:
+            return jsonify({'error': 'No file selected'}), 400
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        tmp_path = tmp.name
+        tmp.close()
+        upload.save(tmp_path)
+
+        try:
+            with open(tmp_path, 'rb') as fh:
+                header = fh.read(16)
+            if header != b'SQLite format 3\x00':
+                return jsonify({'error': 'Uploaded file is not a valid sqlite database'}), 400
+
+            os.makedirs(os.path.dirname(db_path) or '.', exist_ok=True)
+
+            # Drop connections and replace DB file
+            try:
+                db.session.remove()
+            except Exception:
+                pass
+            try:
+                db.engine.dispose()
+            except Exception:
+                pass
+
+            shutil.copyfile(tmp_path, db_path)
+
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+        return jsonify({'message': 'Database restored successfully. Please refresh the page.'})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 # --- SERVER-SENT EVENTS (SSE) STREAMING ENDPOINTS ---
 
@@ -2006,6 +2538,153 @@ from threading import Lock
 wizard_sessions = {}
 sessions_lock = Lock()
 
+
+
+@app.route('/admin/db/restore-selective', methods=['POST'])
+def restore_database_selective():
+    '''Selective restore from uploaded sqlite DB.
+
+    Flags (form fields):
+    - restore_ai
+    - restore_discord
+    - restore_hosts (replace-all)
+    - restore_schedule (interval/is_running only)
+    '''
+    try:
+        db_path = _get_sqlite_db_file_path()
+        if not db_path:
+            return jsonify({'error': 'Database restore only supported for sqlite'}), 400
+
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+
+        upload = request.files['file']
+        if not upload or not upload.filename:
+            return jsonify({'error': 'No file selected'}), 400
+
+        def _flag(name: str) -> bool:
+            v = (request.form.get(name) or '').lower()
+            return v in ('1', 'true', 'yes', 'on')
+
+        restore_ai = _flag('restore_ai')
+        restore_discord = _flag('restore_discord')
+        restore_hosts = _flag('restore_hosts')
+        restore_schedule = _flag('restore_schedule')
+
+        if not any([restore_ai, restore_discord, restore_hosts, restore_schedule]):
+            return jsonify({'error': 'No restore categories selected'}), 400
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        tmp_path = tmp.name
+        tmp.close()
+        upload.save(tmp_path)
+
+        try:
+            with open(tmp_path, 'rb') as fh:
+                header = fh.read(16)
+            if header != b'SQLite format 3\x00':
+                return jsonify({'error': 'Uploaded file is not a valid sqlite database'}), 400
+
+            src = sqlite3.connect(tmp_path)
+            src.row_factory = sqlite3.Row
+
+            def table_exists(conn, name: str) -> bool:
+                cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,))
+                return cur.fetchone() is not None
+
+            def read_table(conn, name: str):
+                cur = conn.execute(f"SELECT * FROM {name}")
+                rows = [dict(r) for r in cur.fetchall()]
+                return rows
+
+            def exec_many(stmt, rows):
+                if not rows:
+                    return
+                db.session.execute(stmt, rows)
+
+            # Avoid using a stale connection while mutating
+            try:
+                db.session.remove()
+            except Exception:
+                pass
+            try:
+                db.engine.dispose()
+            except Exception:
+                pass
+
+            # SETTINGS restore (app_settings)
+            if restore_ai or restore_discord or restore_schedule:
+                # Support both new and old backups: prefer app_settings
+                if table_exists(src, 'app_settings'):
+                    keys = set()
+                    if restore_ai:
+                        keys |= {'analysis_provider', 'openai_api_key', 'ollama_url', 'ollama_model'}
+                    if restore_discord:
+                        keys |= {'discord_webhook_url'}
+                    if restore_schedule:
+                        keys |= {'schedule.is_running', 'schedule.interval_hours'}
+
+                    if keys:
+                        cur = src.execute(
+                            f"SELECT key, value_json FROM app_settings WHERE key IN ({','.join(['?']*len(keys))})",
+                            tuple(sorted(keys))
+                        )
+                        rows = cur.fetchall()
+                        for r in rows:
+                            _setting_set(r['key'], json.loads(r['value_json']) if r['value_json'] else None)
+                else:
+                    # Fallback: try legacy scheduler_config.json style keys in a settings-like table (none), so skip.
+                    pass
+
+            # HOSTS restore (replace-all)
+            if restore_hosts:
+                required_tables = ['hosts']
+                if not all(table_exists(src, t) for t in required_tables):
+                    return jsonify({'error': 'Backup does not contain required host tables'}), 400
+
+                # Determine which tables we can restore
+                tables = [
+                    'host_groups', 'host_tags',
+                    'system_info', 'services', 'host_logs',
+                    'hosts',
+                    'groups', 'tags',
+                    'ssh_keys',
+                ]
+                tables = [t for t in tables if table_exists(src, t)]
+
+                # Delete in FK-safe-ish order (association, dependents, base)
+                delete_order = [t for t in ['host_groups','host_tags','system_info','services','host_logs','hosts','groups','tags','ssh_keys'] if t in tables]
+                for t in delete_order:
+                    db.session.execute(sql_text(f"DELETE FROM {t}"))
+
+                # Insert rows
+                for t in tables:
+                    rows = read_table(src, t)
+                    if not rows:
+                        continue
+                    cols = list(rows[0].keys())
+                    placeholders = ','.join([f":{c}" for c in cols])
+                    col_list = ','.join(cols)
+                    stmt = sql_text(f"INSERT INTO {t} ({col_list}) VALUES ({placeholders})")
+                    exec_many(stmt, rows)
+
+            db.session.commit()
+
+        finally:
+            try:
+                src.close()
+            except Exception:
+                pass
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+        return jsonify({'message': 'Selective restore complete. Please refresh the page.'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 @app.route('/wizard/session/create', methods=['POST'])
 def create_wizard_session():
     """Create a new wizard session ID for streaming"""

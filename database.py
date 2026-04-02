@@ -9,6 +9,22 @@ import json
 
 db = SQLAlchemy()
 
+
+class AppSetting(db.Model):
+    '''Key/value application settings stored in the database.'''
+    __tablename__ = 'app_settings'
+
+    key = db.Column(db.String(255), primary_key=True)
+    value_json = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        try:
+            value = json.loads(self.value_json) if self.value_json else None
+        except Exception:
+            value = self.value_json
+        return {'key': self.key, 'value': value, 'updated_at': self.updated_at.isoformat() if self.updated_at else None}
+
 # Association tables for many-to-many relationships
 host_groups = db.Table(
     'host_groups',

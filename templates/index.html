@@ -136,7 +136,13 @@
                 <!-- Host cards will be populated here -->
             </div>
             <div id="progress-container" class="mt-4 hidden">
-                <p id="progress-message" class="text-xs text-gray-600 mb-1 truncate">Loading...</p>
+                <div class="flex items-center justify-between mb-1">
+                    <p id="progress-message" class="text-xs text-gray-600 truncate">Loading...</p>
+                    <div class="flex items-center gap-1">
+                        <button id="progress-minimize-btn" class="px-2 py-0.5 text-xs rounded bg-gray-200 hover:bg-gray-300 text-gray-700" title="Minimize">_</button>
+                        <button id="progress-close-btn" class="px-2 py-0.5 text-xs rounded bg-gray-200 hover:bg-gray-300 text-gray-700" title="Close">X</button>
+                    </div>
+                </div>
                 <div class="w-full bg-gray-300 rounded-full h-2 mb-2">
                     <div id="progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
                 </div>
@@ -245,7 +251,7 @@
                             <span class="text-sm font-medium text-gray-200">🤖 AI Provider</span>
                         </button>
                         <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="prompts">
-                            <span class="text-sm font-medium text-gray-200">✏️ AI Prompts</span>
+                            <span class="text-sm font-medium text-gray-200">🔎 AI Search</span>
                         </button>
                         <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="notifications">
                             <span class="text-sm font-medium text-gray-200">🔔 Notifications</span>
@@ -255,6 +261,9 @@
                         </button>
                         <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="remote-hosts">
                             <span class="text-sm font-medium text-gray-200">🌐 Remote Hosts</span>
+                        </button>
+                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="backup-database">
+                            <span class="text-sm font-medium text-gray-200">💾 Backup Database</span>
                         </button>
                     </nav>
                 </aside>
@@ -277,9 +286,10 @@
                         <div id="openai-config-panel" class="border-t border-white/10 pt-4 hidden">
                             <h5 class="font-medium text-white mb-3">OpenAI Configuration</h5>
                             <div class="mb-3">
-                                <label for="openai-api-key" class="block text-sm font-medium text-gray-300 mb-1">API Key</label>
+                                <label for="openai-api-key" class="block text-sm font-medium text-gray-300 mb-1 flex items-center gap-2">API Key <span id="openai-key-status" class="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title="OpenAI key status"></span></label>
                                 <div class="flex space-x-2">
                                     <input type="password" id="openai-api-key" class="flex-grow bg-white/10 border border-white/20 rounded-md px-3 py-2 placeholder-gray-500 text-white" placeholder="sk-...">
+                                    <button id="toggle-openai-key-visibility" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 text-sm rounded-md font-medium transition-colors" type="button" title="Show/Hide">Show</button>
                                     <button id="test-openai-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
                                 </div>
                                 <p id="openai-test-status" class="text-xs mt-2"></p>
@@ -321,12 +331,27 @@
                         </div>
                     </section>
 
-                    <!-- AI Prompts Section (Placeholder) -->
-                    <section id="prompts-section" class="settings-section space-y-4">
-                        <h4 class="font-semibold text-lg text-white">AI Prompts</h4>
-                        <p class="text-sm text-gray-300">Customize the prompts used for AI log analysis. This feature allows you to tailor the behavior of the AI analysis to match your specific needs and terminology.</p>
-                        <div class="bg-blue-500/20 border border-blue-500/30 rounded-md p-4">
-                            <p class="text-sm text-blue-300">🔧 <strong>Coming Soon:</strong> Custom prompt configuration interface will be available in the next release.</p>
+                    <!-- AI Search Section -->
+                    <section id="prompts-section" class="settings-section space-y-4 hidden">
+                        <h4 class="font-semibold text-lg text-white">AI Search</h4>
+                        <p class="text-sm text-gray-300">Edit the prompt used for AI analysis and the keywords/phrases used to decide whether to alert. These settings apply to Run Now, scheduled analysis, and manual AI Analyse.</p>
+
+                        <div class="space-y-2">
+                            <label for="ai-search-prompt" class="block text-sm font-medium text-gray-300">Analysis prompt</label>
+                            <textarea id="ai-search-prompt" rows="5" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder-gray-500" placeholder="Enter the analysis prompt..."></textarea>
+                            <div class="flex gap-2">
+                                <button id="save-ai-search-btn" class="button px-4 py-2 text-sm">Save</button>
+                                <span id="ai-search-save-status" class="text-xs text-gray-300 self-center"></span>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-white/10 pt-4 space-y-3">
+                            <div class="flex items-center justify-between">
+                                <h5 class="font-medium text-white">Alert keywords &amp; phrases</h5>
+                                <button id="add-alert-keyword-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs rounded-md font-medium transition-colors" type="button">Add</button>
+                            </div>
+                            <p class="text-xs text-gray-400">If any of these words/phrases appear in the AI output, it will send an alert. If none match, it will send a summary message saying no alert words were found.</p>
+                            <ul id="alert-keywords-list" class="space-y-2"></ul>
                         </div>
                     </section>
 
@@ -334,9 +359,10 @@
                     <section id="notifications-section" class="settings-section space-y-4 hidden">
                         <h4 class="font-semibold text-lg text-white">Notifications</h4>
                         <div>
-                            <label for="discord-webhook-input" class="block text-sm font-medium text-gray-300 mb-1">Discord Webhook URL</label>
+                            <label for="discord-webhook-input" class="block text-sm font-medium text-gray-300 mb-1 flex items-center gap-2">Discord Webhook URL <span id="discord-webhook-status" class="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title="Discord webhook status"></span></label>
                             <div class="flex space-x-2">
                                 <input type="password" id="discord-webhook-input" class="flex-grow w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder-gray-500" placeholder="https://discord.com/api/webhooks/...">
+                                <button id="toggle-discord-webhook-visibility" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 text-sm rounded-md font-medium transition-colors" type="button" title="Show/Hide">Show</button>
                                 <button id="test-discord-btn" class="button px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-wait">Test</button>
                             </div>
                         </div>
@@ -369,6 +395,32 @@
                                                     </div>
                         <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
                     </section>
+
+                    <!-- Backup Database Section -->
+                    
+                    <!-- Backup Database Section -->
+                    <section id="backup-database-section" class="settings-section space-y-4 hidden">
+                        <h4 class="font-semibold text-lg text-white">Backup Database</h4>
+                        <p class="text-sm text-gray-300">Download a backup of the current database, or selectively restore parts of a backup. Restoring Hosts will replace all current hosts.</p>
+                        <div class="flex flex-wrap items-center gap-3">
+                            <button id="download-db-backup-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors">Download Backup</button>
+                        </div>
+                        <div class="border-t border-white/10 pt-4 space-y-3">
+                            <h5 class="font-medium text-white">Restore from Backup</h5>
+                            <div class="flex flex-wrap items-center gap-3">
+                                <input id="restore-db-file" type="file" accept=".db,.sqlite,.sqlite3" class="text-sm text-gray-200" />
+                                <button id="restore-db-btn" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50" disabled>Restore Selected</button>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-200">
+                                <label class="flex items-center gap-2"><input id="restore-ai" type="checkbox" class="restore-opt" checked> AI key</label>
+                                <label class="flex items-center gap-2"><input id="restore-discord" type="checkbox" class="restore-opt" checked> Discord key</label>
+                                <label class="flex items-center gap-2"><input id="restore-hosts" type="checkbox" class="restore-opt"> Hosts (replace all)</label>
+                                <label class="flex items-center gap-2"><input id="restore-schedule" type="checkbox" class="restore-opt" checked> Schedules (interval/is_running)</label>
+                            </div>
+                            <p class="text-xs text-gray-400">After restoring, refresh the page. Secrets are stored in plaintext in the DB backup.</p>
+                        </div>
+                    </section>
+
 
                 </div>
             </div>
@@ -466,6 +518,9 @@
         const createSshConfigBtn = document.getElementById('create-ssh-config-btn');
         const rescanAllBtn = document.getElementById('rescan-all-btn');
         const closeSettingsBtn = document.getElementById('close-settings-btn');
+        const downloadDbBackupBtn = document.getElementById('download-db-backup-btn');
+        const restoreDbFileInput = document.getElementById('restore-db-file');
+        const restoreDbBtn = document.getElementById('restore-db-btn');
         const settingsModal = document.getElementById('settings-modal');
         const hostListDiv = document.getElementById('host-list');
         const addNewHostBtn = document.getElementById('add-new-host-btn');
@@ -487,13 +542,23 @@
         const progressBar = document.getElementById('progress-bar');
         const progressMessage = document.getElementById('progress-message');
         const progressLogs = document.getElementById('progress-logs');
+        const progressMinimizeBtn = document.getElementById('progress-minimize-btn');
+        const progressCloseBtn = document.getElementById('progress-close-btn');
         const journalLoadingIndicator = document.getElementById('journal-loading-indicator');
         
         const apiKeyInput = document.getElementById('api-key-input');
         const discordWebhookInput = document.getElementById('discord-webhook-input');
         const testDiscordBtn = document.getElementById('test-discord-btn');
         const saveCredentialsBtn = document.getElementById('save-credentials-btn');
+        const discordWebhookStatusDot = document.getElementById('discord-webhook-status');
         const providerLabel = document.getElementById('provider-label');
+
+        // AI Search (prompt + alert keywords)
+        const aiSearchPromptTextarea = document.getElementById('ai-search-prompt');
+        const saveAiSearchBtn = document.getElementById('save-ai-search-btn');
+        const aiSearchSaveStatus = document.getElementById('ai-search-save-status');
+        const alertKeywordsList = document.getElementById('alert-keywords-list');
+        const addAlertKeywordBtn = document.getElementById('add-alert-keyword-btn');
         
         // AI Provider Selection Elements (NEW UNIFIED WORKFLOW)
         const providerDropdown = document.getElementById('provider-dropdown');
@@ -502,6 +567,7 @@
         const openaiApiKeyInput = document.getElementById('openai-api-key');
         const testOpenaiBtn = document.getElementById('test-openai-btn');
         const openaiTestStatus = document.getElementById('openai-test-status');
+        const openaiKeyStatusDot = document.getElementById('openai-key-status');
         const ollamaApiUrlInput = document.getElementById('ollama-api-url');
         const testOllamaUrlBtn = document.getElementById('test-ollama-url-btn');
         const ollamaUrlTestStatus = document.getElementById('ollama-url-test-status');
@@ -575,6 +641,29 @@
             toast.classList.remove('hidden');
             setTimeout(() => toast.classList.add('hidden'), 4000);
         };
+
+
+        const setStatusDot = (el, ok) => {
+            if (!el) return;
+            el.classList.remove('bg-green-500', 'bg-red-500');
+            el.classList.add(ok ? 'bg-green-500' : 'bg-red-500');
+        };
+
+
+        const toggleOpenaiKeyVisibilityBtn = document.getElementById('toggle-openai-key-visibility');
+        const toggleDiscordWebhookVisibilityBtn = document.getElementById('toggle-discord-webhook-visibility');
+
+        const wireVisibilityToggle = (btn, input) => {
+            if (!btn || !input) return;
+            btn.addEventListener('click', () => {
+                const show = input.type === 'password';
+                input.type = show ? 'text' : 'password';
+                btn.textContent = show ? 'Hide' : 'Show';
+            });
+        };
+
+        wireVisibilityToggle(toggleOpenaiKeyVisibilityBtn, openaiApiKeyInput);
+        wireVisibilityToggle(toggleDiscordWebhookVisibilityBtn, discordWebhookInput);
 
         const downloadFromPost = async (url, fallbackFilename) => {
             const resp = await fetch(url, { method: 'POST' });
@@ -1168,8 +1257,7 @@
             if (provider === 'ollama' && ollamaModel) {
                 providerLabel.textContent = `🤖 Ollama (${ollamaModel})`;
             } else if (provider === 'openai') {
-                const apiKey = localStorage.getItem('openai_api_key');
-                providerLabel.textContent = apiKey ? '🔑 OpenAI' : 'No Provider';
+                providerLabel.textContent = '🔑 OpenAI';
             } else {
                 providerLabel.textContent = 'No Provider';
             }
@@ -1183,6 +1271,17 @@
                 
                 // Update localStorage with config from backend
                 localStorage.setItem('analysis_provider', provider);
+
+                // Status dots
+                setStatusDot(openaiKeyStatusDot, !!aiConfig.openai_configured);
+                try {
+                    const dc = await fetchApi('/discord/config', { method: 'GET' });
+                    setStatusDot(discordWebhookStatusDot, !!dc.configured);
+                    if (dc.webhook_url && discordWebhookInput) discordWebhookInput.value = dc.webhook_url;
+                } catch (_) {
+                    setStatusDot(discordWebhookStatusDot, false);
+                }
+
                 
                 if (provider === 'openai' && aiConfig.openai_configured) {
                     // OpenAI is configured
@@ -1207,6 +1306,90 @@
         };
         
         // Initialize provider indicator on page load - async load from backend
+
+
+        const renderAlertKeywords = (keywords) => {
+            if (!alertKeywordsList) return;
+            alertKeywordsList.innerHTML = '';
+            (keywords || []).forEach((kw, idx) => {
+                const li = document.createElement('li');
+                li.className = 'flex items-center gap-2';
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.value = kw;
+                input.className = 'flex-1 bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white text-sm';
+
+                const del = document.createElement('button');
+                del.type = 'button';
+                del.textContent = 'Delete';
+                del.className = 'bg-red-600 hover:bg-red-500 text-white px-3 py-2 text-xs rounded-md font-medium transition-colors';
+                del.addEventListener('click', () => {
+                    li.remove();
+                });
+
+                li.appendChild(input);
+                li.appendChild(del);
+                alertKeywordsList.appendChild(li);
+            });
+        };
+
+        const collectAlertKeywords = () => {
+            if (!alertKeywordsList) return [];
+            const inputs = Array.from(alertKeywordsList.querySelectorAll('input'));
+            return inputs.map(i => i.value.trim()).filter(Boolean);
+        };
+
+        const loadAiSearchSettings = async () => {
+            try {
+                const cfg = await fetchApi('/ai/search-config', { method: 'GET' });
+                if (aiSearchPromptTextarea && cfg.search_prompt) aiSearchPromptTextarea.value = cfg.search_prompt;
+                renderAlertKeywords(cfg.alert_keywords || []);
+            } catch (e) {
+                // ignore
+            }
+        };
+
+        const saveAiSearchSettings = async () => {
+            const payload = {
+                search_prompt: aiSearchPromptTextarea ? aiSearchPromptTextarea.value.trim() : '',
+                alert_keywords: collectAlertKeywords(),
+            };
+            const resp = await fetchApi('/ai/search-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            return resp;
+        };
+
+        if (saveAiSearchBtn) {
+            saveAiSearchBtn.addEventListener('click', async () => {
+                try {
+                    saveAiSearchBtn.disabled = true;
+                    if (aiSearchSaveStatus) aiSearchSaveStatus.textContent = 'Saving...';
+                    await saveAiSearchSettings();
+                    if (aiSearchSaveStatus) aiSearchSaveStatus.textContent = 'Saved.';
+                    showToast('AI Search settings saved.', 'success');
+                } catch (e) {
+                    if (aiSearchSaveStatus) aiSearchSaveStatus.textContent = 'Save failed.';
+                } finally {
+                    saveAiSearchBtn.disabled = false;
+                    setTimeout(() => { if (aiSearchSaveStatus) aiSearchSaveStatus.textContent = ''; }, 2000);
+                }
+            });
+        }
+
+        if (addAlertKeywordBtn) {
+            addAlertKeywordBtn.addEventListener('click', () => {
+                const kws = collectAlertKeywords();
+                kws.push('');
+                renderAlertKeywords(kws);
+                const last = alertKeywordsList?.querySelector('li:last-child input');
+                if (last) last.focus();
+            });
+        }
+
         (async () => {
             await loadSettingsFromBackend();
         })();
@@ -1235,14 +1418,16 @@
             
             if (provider === 'openai') {
                 openaiConfigPanel.classList.remove('hidden');
-                // Load from localStorage or backend
-                const savedKey = localStorage.getItem('openai_api_key') || '';
+                // Load from backend
                 if (config && config.openai_configured) {
                     activeProviderName.textContent = 'OpenAI (GPT-3.5)';
                     currentConfigStatus.classList.remove('hidden');
-                } else if (savedKey) {
-                    openaiApiKeyInput.value = savedKey;
                 }
+
+                // Populate field from backend (plaintext as requested)
+                fetchApi('/openai/config', { method: 'GET' })
+                    .then(cfg => { if (cfg.api_key) openaiApiKeyInput.value = cfg.api_key; })
+                    .catch(() => {});
             } else if (provider === 'ollama') {
                 ollamaConfigPanel.classList.remove('hidden');
                 // Load from localStorage or backend
@@ -1270,8 +1455,24 @@
         testOpenaiBtn.addEventListener('click', async () => {
             const apiKey = openaiApiKeyInput.value.trim();
             if (!apiKey) {
-                openaiTestStatus.textContent = '❌ API key cannot be empty';
-                openaiTestStatus.className = 'text-xs text-red-600 mt-2';
+                // No key entered: test saved key in DB
+                testOpenaiBtn.disabled = true;
+                testOpenaiBtn.textContent = 'Testing...';
+                openaiTestStatus.textContent = 'Testing saved API key...';
+                openaiTestStatus.className = 'text-xs text-yellow-600 mt-2';
+                try {
+                    await fetchApi('/openai/test-saved', { method: 'GET' });
+                    openaiTestStatus.textContent = '✅ Saved API key is valid!';
+                    openaiTestStatus.className = 'text-xs text-green-600 mt-2';
+                    setStatusDot(openaiKeyStatusDot, true);
+                } catch (error) {
+                    openaiTestStatus.textContent = `❌ ${error.message}`;
+                    openaiTestStatus.className = 'text-xs text-red-600 mt-2';
+                    setStatusDot(openaiKeyStatusDot, false);
+                } finally {
+                    testOpenaiBtn.disabled = false;
+                    testOpenaiBtn.textContent = 'Test';
+                }
                 return;
             }
             
@@ -1303,7 +1504,8 @@
                 testOpenaiBtn.disabled = true;
                 
                 // Save to localStorage
-                localStorage.setItem('openai_api_key', apiKey);
+                // persisted on backend (DB-backed settings); do not store secrets in localStorage
+                // localStorage.setItem('openai_api_key', apiKey);
                 localStorage.setItem('analysis_provider', 'openai');
                 
                 // Update indicator
@@ -1655,6 +1857,89 @@
                 }
             });
         }
+
+
+        if (downloadDbBackupBtn) {
+            downloadDbBackupBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await fetch('/admin/db/backup', { method: 'GET' });
+                    if (!resp.ok) {
+                        let msg = `Backup failed (${resp.status})`;
+                        try {
+                            const data = await resp.json();
+                            if (data && data.error) msg = data.error;
+                        } catch (_) {}
+                        throw new Error(msg);
+                    }
+
+                    const blob = await resp.blob();
+                    let filename = 'ailog-backup.db';
+                    const cd = resp.headers.get('Content-Disposition') || resp.headers.get('content-disposition');
+                    if (cd) {
+                        const m = /filename\s*=\s*([^;]+)/i.exec(cd);
+                        if (m && m[1]) filename = m[1].trim().replace(/^"|"$/g, '');
+                    }
+
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+
+                    showToast('Database backup downloaded.', 'success');
+                } catch (err) {
+                    showToast(err.message || 'Backup failed.', 'error');
+                }
+            });
+        }
+
+        if (restoreDbFileInput && restoreDbBtn) {
+            const updateRestoreEnabled = () => {
+                restoreDbBtn.disabled = !(restoreDbFileInput.files && restoreDbFileInput.files.length);
+            };
+            restoreDbFileInput.addEventListener('change', updateRestoreEnabled);
+            updateRestoreEnabled();
+
+            restoreDbBtn.addEventListener('click', async () => {
+                if (!(restoreDbFileInput.files && restoreDbFileInput.files.length)) return;
+
+                if (!confirm('Restore database from the selected file? This will overwrite the current database.')) {
+                    return;
+                }
+
+                restoreDbBtn.disabled = true;
+                const originalText = restoreDbBtn.textContent;
+                restoreDbBtn.textContent = 'Restoring...';
+
+                try {
+                    const fd = new FormData();
+                    fd.append('file', restoreDbFileInput.files[0]);
+
+                    fd.append('restore_ai', document.getElementById('restore-ai')?.checked ? '1' : '0');
+                    fd.append('restore_discord', document.getElementById('restore-discord')?.checked ? '1' : '0');
+                    fd.append('restore_hosts', document.getElementById('restore-hosts')?.checked ? '1' : '0');
+                    fd.append('restore_schedule', document.getElementById('restore-schedule')?.checked ? '1' : '0');
+
+                    const resp = await fetch('/admin/db/restore-selective', { method: 'POST', body: fd });
+                    const data = await resp.json().catch(() => ({}));
+                    if (!resp.ok || data.error) {
+                        throw new Error(data.error || `Restore failed (${resp.status})`);
+                    }
+
+                    showToast('Database restored. Refreshing host list...', 'success');
+                    await populateHostCards();
+                } catch (err) {
+                    showToast(err.message || 'Restore failed.', 'error');
+                } finally {
+                    restoreDbBtn.textContent = originalText;
+                    restoreDbBtn.disabled = false;
+                }
+            });
+        }
+
         if (closeSettingsBtn) {
             closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
         }
@@ -2471,7 +2756,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
                     return; 
                 }
             } else {
-                const apiKey = apiKeyInput.value.trim();
+                const openaiKeyEl = openaiApiKeyInput || apiKeyInput;
+                const apiKey = openaiKeyEl ? openaiKeyEl.value.trim() : '';
                 if (!apiKey) { showToast('OpenAI API key is required.', 'error'); return; }
             }
 
@@ -2485,7 +2771,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 
                 // Add provider-specific credentials
                 if (provider === 'openai') {
-                    payload.api_key = apiKeyInput.value.trim();
+                    const openaiKeyEl = openaiApiKeyInput || apiKeyInput;
+                    payload.api_key = openaiKeyEl ? openaiKeyEl.value.trim() : '';
                 }
                 
                 const data = await fetchApi('/schedule/start', {
@@ -2505,30 +2792,147 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 updateSchedulerStatus();
             } catch (error) {}
         });
-        
+
+        // Run Now: stream progress in sidebar progress panel
+        let runNowEventSource = null;
+        const appendProgressLog = (msg) => {
+            if (!progressLogs) return;
+            const line = document.createElement('div');
+            line.textContent = msg;
+            progressLogs.appendChild(line);
+            progressLogs.scrollTop = progressLogs.scrollHeight;
+        };
+
+
+        let progressMinimized = false;
+
+        const resetRunNowUi = () => {
+            runNowBtn.disabled = false;
+            runNowBtn.textContent = 'Run Now';
+        };
+
+        if (progressMinimizeBtn) {
+            progressMinimizeBtn.addEventListener('click', () => {
+                progressMinimized = !progressMinimized;
+                if (progressLogs) progressLogs.classList.toggle('hidden', progressMinimized);
+                progressMinimizeBtn.textContent = progressMinimized ? '+' : '_';
+            });
+        }
+
+        if (progressCloseBtn) {
+            progressCloseBtn.addEventListener('click', () => {
+                if (runNowEventSource) {
+                    try { runNowEventSource.close(); } catch (_) {}
+                    runNowEventSource = null;
+                }
+                if (progressContainer) progressContainer.classList.add('hidden');
+                if (progressBar) progressBar.style.width = '0%';
+                if (progressMessage) progressMessage.textContent = '';
+                if (progressLogs) progressLogs.innerHTML = '';
+                resetRunNowUi();
+            });
+        }
+
+        const formatRunNowLogMessage = (msg) => {
+            if (!msg) return msg;
+            if (msg.includes('insufficient_quota') || msg.includes('You exceeded your current quota')) {
+                return '\u26a0\ufe0f OpenAI: quota exceeded \u2014 check your billing at platform.openai.com';
+            }
+            if (msg.includes('invalid_api_key') || msg.includes('Incorrect API key') || msg.includes('No API key provided')) {
+                return '\u274c OpenAI: invalid or missing API key.';
+            }
+            if (msg.includes('rate_limit_exceeded') || (msg.includes('429') && msg.includes('rate'))) {
+                return '\u23f3 OpenAI: rate limited \u2014 too many requests. Try again shortly.';
+            }
+            if ((msg.startsWith('Error analyzing') || msg.startsWith('Error code:')) && msg.length > 220) {
+                const shortMsg = msg.slice(0, 220).replace(/{.*$/s, '').trim();
+                return (shortMsg || msg.slice(0, 220)) + '\u2026';
+            }
+            return msg;
+        };
+
         runNowBtn.addEventListener('click', async () => {
             if (scheduledSources.length === 0) { showToast('Please select logs for the schedule first.', 'error'); return; }
-            if (!apiKeyInput.value.trim() || !discordWebhookInput.value.trim()) { showToast('OpenAI key and Discord webhook must be set to run analysis.', 'error'); return; }
-            runNowBtn.disabled = true; runNowBtn.textContent = '...';
-            try {
-                await fetchApi('/schedule/run_now', { method: 'POST' });
-                showToast('Immediate analysis triggered.');
-            } catch(error) {}
-            finally { runNowBtn.disabled = false; runNowBtn.textContent = 'Run Now'; }
+
+            // Reset + show progress UI
+            if (runNowEventSource) {
+                try { runNowEventSource.close(); } catch (_) {}
+                runNowEventSource = null;
+            }
+            if (progressContainer) progressContainer.classList.remove('hidden');
+            if (progressBar) progressBar.style.width = '0%';
+            if (progressMessage) progressMessage.textContent = 'Starting Run Now...';
+            if (progressLogs) progressLogs.innerHTML = '';
+            appendProgressLog('Starting...');
+
+            runNowBtn.disabled = true;
+            runNowBtn.textContent = 'Running...';
+
+            runNowEventSource = new EventSource('/schedule/run_now/stream');
+
+            runNowEventSource.onmessage = (event) => {
+                let data;
+                try { data = JSON.parse(event.data); } catch (_) { return; }
+
+                if (data.status === 'progress') {
+                    if (progressBar && typeof data.progress === 'number') progressBar.style.width = `${data.progress}%`;
+                    if (progressMessage && data.message) progressMessage.textContent = data.message;
+                    if (data.message) appendProgressLog(formatRunNowLogMessage(data.message));
+                } else if (data.status === 'log') {
+                    if (data.message) appendProgressLog(formatRunNowLogMessage(data.message));
+                } else if (data.status === 'error') {
+                    if (data.message) showToast(data.message, 'error');
+                    if (progressMessage && data.message) progressMessage.textContent = data.message;
+                    if (progressBar) progressBar.style.width = '100%';
+                    appendProgressLog('Error.');
+                    try { runNowEventSource.close(); } catch (_) {}
+                    runNowEventSource = null;
+                    runNowBtn.disabled = false;
+                    runNowBtn.textContent = 'Run Now';
+                } else if (data.status === 'complete') {
+                    if (progressBar) progressBar.style.width = '100%';
+                    if (progressMessage) progressMessage.textContent = data.message || 'Done';
+                    appendProgressLog(data.message || 'Done');
+                    try { runNowEventSource.close(); } catch (_) {}
+                    runNowEventSource = null;
+                    runNowBtn.disabled = false;
+                    runNowBtn.textContent = 'Run Now';
+                }
+            };
+
+            runNowEventSource.onerror = (err) => {
+                console.error('Run Now EventSource failed:', err);
+                showToast('Run Now stream connection failed.', 'error');
+                try { runNowEventSource.close(); } catch (_) {}
+                runNowEventSource = null;
+                runNowBtn.disabled = false;
+                runNowBtn.textContent = 'Run Now';
+            };
         });
 
         testDiscordBtn.addEventListener('click', async () => {
             const webhookUrl = discordWebhookInput.value.trim();
-            if (!webhookUrl) { showToast('Enter a Discord webhook URL.', 'error'); return; }
-            testDiscordBtn.disabled = true; testDiscordBtn.textContent = '...';
+
+            testDiscordBtn.disabled = true;
+            const original = testDiscordBtn.textContent;
+            testDiscordBtn.textContent = 'Testing...';
+
             try {
-                await fetchApi('/test_discord', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                // If field is empty, backend will test saved webhook
+                await fetchApi('/discord/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ webhook_url: webhookUrl })
                 });
-                showToast('Test message sent successfully!');
-            } catch (error) {} 
-            finally { testDiscordBtn.disabled = false; testDiscordBtn.textContent = 'Test'; }
+                showToast('Discord webhook test sent.', 'success');
+                setStatusDot(discordWebhookStatusDot, true);
+            } catch (error) {
+                showToast(error.message || 'Discord test failed.', 'error');
+                setStatusDot(discordWebhookStatusDot, false);
+            } finally {
+                testDiscordBtn.disabled = false;
+                testDiscordBtn.textContent = original;
+            }
         });
 
         // Event listeners for search/filter/sort removed - not needed for current UI
@@ -2647,7 +3051,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
         };
 
         const escapeRegExp = (string) => {
-            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return string.replace(/[.*+?^${}()|[\[\]\\]/g, '\\$&');
+
         };
 
         // Search event listeners
@@ -2681,8 +3086,6 @@ aiAnalyseBtn.addEventListener('click', async () => {
         showEmptyLogsCheckbox.addEventListener('change', filterLogsBySize);
 
         // --- INITIALIZATION ---
-        if (apiKeyInput) apiKeyInput.value = localStorage.getItem('openai_api_key') || '';
-        if (discordWebhookInput) discordWebhookInput.value = localStorage.getItem('discord_webhook_url') || '';
         populateHostCards();
     });
     </script>
