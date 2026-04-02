@@ -2549,6 +2549,7 @@ def restore_database_selective():
     - restore_discord
     - restore_hosts (replace-all)
     - restore_schedule (interval/is_running only)
+    - restore_ai_search (prompt/keywords)
     '''
     try:
         db_path = _get_sqlite_db_file_path()
@@ -2570,8 +2571,9 @@ def restore_database_selective():
         restore_discord = _flag('restore_discord')
         restore_hosts = _flag('restore_hosts')
         restore_schedule = _flag('restore_schedule')
+        restore_ai_search = _flag('restore_ai_search')
 
-        if not any([restore_ai, restore_discord, restore_hosts, restore_schedule]):
+        if not any([restore_ai, restore_discord, restore_hosts, restore_schedule, restore_ai_search]):
             return jsonify({'error': 'No restore categories selected'}), 400
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
@@ -2613,7 +2615,7 @@ def restore_database_selective():
                 pass
 
             # SETTINGS restore (app_settings)
-            if restore_ai or restore_discord or restore_schedule:
+            if restore_ai or restore_discord or restore_schedule or restore_ai_search:
                 # Support both new and old backups: prefer app_settings
                 if table_exists(src, 'app_settings'):
                     keys = set()

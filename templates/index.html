@@ -416,6 +416,7 @@
                                 <label class="flex items-center gap-2"><input id="restore-discord" type="checkbox" class="restore-opt" checked> Discord key</label>
                                 <label class="flex items-center gap-2"><input id="restore-hosts" type="checkbox" class="restore-opt"> Hosts (replace all)</label>
                                 <label class="flex items-center gap-2"><input id="restore-schedule" type="checkbox" class="restore-opt" checked> Schedules (interval/is_running)</label>
+                                <label class="flex items-center gap-2"><input id="restore-ai-search" type="checkbox" class="restore-opt" checked> AI Search (prompt/keywords)</label>
                             </div>
                             <p class="text-xs text-gray-400">After restoring, refresh the page. Secrets are stored in plaintext in the DB backup.</p>
                         </div>
@@ -1922,6 +1923,7 @@
                     fd.append('restore_discord', document.getElementById('restore-discord')?.checked ? '1' : '0');
                     fd.append('restore_hosts', document.getElementById('restore-hosts')?.checked ? '1' : '0');
                     fd.append('restore_schedule', document.getElementById('restore-schedule')?.checked ? '1' : '0');
+                    fd.append('restore_ai_search', document.getElementById('restore-ai-search')?.checked ? '1' : '0');
 
                     const resp = await fetch('/admin/db/restore-selective', { method: 'POST', body: fd });
                     const data = await resp.json().catch(() => ({}));

@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-04-02 | v2.4.0 | DB-backed Settings + Backup/Selective Restore, AI Search prompt/keywords, Run Now SSE progress, Export improvements, Rescan/Netbird enhancements | ✅ Complete |
 | 2026-01-27 | v2.3.0 | Settings Modal Redesign, Sidebar Navigation, Radio Button Models, Dark Theme, Bug Fixes | ✅ Complete |
 | 2026-01-27 | v2.2.0 | Unified AI Provider Settings, DOM Element Fixes, Host Card Styling, Multi-Model Support | ✅ Complete |
 | 2026-01-15 | v2.1.0 | Global Search, Multi-Host Enhancements, Progress Tracking | ✅ Complete |
@@ -39,19 +40,26 @@ This application is designed for use on a trusted, internal development network 
 * **Cross-Host Discovery:** Find log entries across your entire infrastructure from a single search
 
 ### 🤖 **AI-Powered Analysis**
-* **On-Demand Analysis:** Manual log analysis using OpenAI's GPT models with intelligent error detection
-* **Scheduled Monitoring:** Automated recurring analysis with customizable intervals
-* **Multi-Host Scheduling:** Monitor logs across different servers with unified scheduling
-* **Smart Alerting:** Proactive Discord notifications for detected issues and anomalies
+* **Provider Support:** OpenAI and Ollama
+* **AI Search Settings:** Configurable analysis prompt + alert keyword/phrase list (DB-backed) used by manual analysis, Run Now, and scheduled runs
+* **On-Demand Analysis:** Manual log analysis with provider-specific validation and status indicators
+* **Scheduled Monitoring:** Automated recurring analysis with configurable intervals and sources
+* **Run Now with Live Progress:** Server-Sent Events (SSE) streaming progress + heartbeat while the model is working
+* **Smart Alerting:** Discord notifications when alert keywords are detected; otherwise a summary message can be sent
 
 ### 📈 **Real-Time Progress Tracking**
-* **Streaming Updates:** Server-Sent Events (SSE) provide real-time feedback during log loading
-* **Progress Visualization:** Detailed progress bars and status messages for all operations
+* **Streaming Updates:** Server-Sent Events (SSE) provide real-time feedback during log loading and analysis
+* **Progress Visualization:** Detailed progress bars, log output, and status messages for all operations
 * **Error Recovery:** Automatic retry mechanisms for failed host connections
 * **Performance Optimization:** Concurrent processing with timeout handling for reliable operations
 
+### 💾 **Database Backup & Restore**
+* **One-Click Backup Download:** Download the sqlite database bundle
+* **Selective Restore:** Restore only selected categories (AI provider/key, Discord webhook, AI Search prompt/keywords, Hosts (replace all), Schedule interval/is_running)
+
 ### 🔒 **Security & Privacy**
-* **Local Credential Storage:** API keys and webhooks stored securely in browser localStorage
+* **DB-Backed Credential Storage:** API keys/webhooks and settings are stored in the application database (plaintext, by choice) and persist across restarts
+* **Backup Awareness:** Database backups include settings/secrets; keep backups protected
 * **SSH Key Authentication:** Passwordless SSH access with proper key-based security
 * **Granular Sudo Permissions:** Minimal required permissions for enhanced security
 * **Network Isolation:** Designed for trusted internal networks only
@@ -102,11 +110,14 @@ The project includes a `requirements.txt` file with all necessary dependencies:
 
 **requirements.txt**
 ```
-Flask>=2.3.3
-Werkzeug>=2.3.7
-openai>=1.3.0
-requests>=2.31.0
-APScheduler>=3.10.4
+Flask==3.0.0
+Werkzeug==3.0.1
+openai==1.3.7
+requests==2.31.0
+APScheduler==3.10.4
+SQLAlchemy==2.0.23
+Flask-SQLAlchemy==3.1.1
+# Note: openai==1.3.7 requires httpx<0.28 (pinned in the deployed venv)
 ```
 
 Install the dependencies:
@@ -142,7 +153,7 @@ Create a `systemd` service on the main Log Viewer server to ensure the applicati
 1.  Create a new service file:
 
     ```bash
-    sudo nano /etc/systemd/system/logviewer.service
+    sudo nano /etc/systemd/system/ailog.service
     ```
 
 2.  Paste the following configuration into the file. Crucially, replace `david` with your username and `your-repo-name` with your project's directory name.
@@ -159,6 +170,8 @@ Create a `systemd` service on the main Log Viewer server to ensure the applicati
     # Use 'debug=False' for production stability with the scheduler
     ExecStart=/home/david/code/your-repo-name/venv/bin/python3 /home/david/code/your-repo-name/app.py
     Restart=always
+    # Persist DB outside the repo (recommended)
+    Environment=DATABASE_URL=sqlite:////var/lib/ailog/ailog.db
 
     [Install]
     WantedBy=multi-user.target
@@ -171,15 +184,15 @@ Create a `systemd` service on the main Log Viewer server to ensure the applicati
 Reload the `systemd` daemon, then start and enable the service.
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl start logviewer
-sudo systemctl enable logviewer
+sudo systemctl start ailog
+sudo systemctl enable ailog
 ```
 
 #### Step 7: Verify the Service is Running
 
 Check the status of the service to ensure it's active.
 ```bash
-sudo systemctl status logviewer
+sudo systemctl status ailog
 ```
 You should see output indicating the service is `active (running)`.
 
