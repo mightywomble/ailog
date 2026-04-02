@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-04-02 | v2.6.0 | Termix-style dark dashboard (default view), logs view on host click, global dark theme consistency pass | ✅ Complete |
 | 2026-04-02 | v2.5.0 | Multi-schedule system (DB schedules), host-first selection per schedule, queued serial execution, schedule-scoped Run Now SSE + log picker | ✅ Complete |
 | 2026-04-02 | v2.4.0 | DB-backed Settings + Backup/Selective Restore, AI Search prompt/keywords, Run Now SSE progress, Export improvements, Rescan/Netbird enhancements | ✅ Complete |
 | 2026-01-27 | v2.3.0 | Settings Modal Redesign, Sidebar Navigation, Radio Button Models, Dark Theme, Bug Fixes | ✅ Complete |
@@ -21,6 +22,11 @@ This application is designed for use on a trusted, internal development network 
 **DO NOT expose this application to the public internet.** Doing so would create a significant security risk. You must ensure that passwordless SSH key-based authentication is set up correctly and that the principle of least privilege is followed.
 
 ## 🚀 Key Features
+
+### 🧭 **Navigation (Dashboard → Logs)**
+* **Dashboard-first:** The app opens on a dark dashboard view showing stats, recent activity, and quick actions.
+* **Logs on demand:** Click any host in the left sidebar to switch into the Logs view for that host.
+* **Back button:** The Logs view has a Back button to return to the dashboard without reloading.
 
 ### 📊 **Unified Log Management**
 * **Multi-Source Access:** View traditional syslog files from `/var/log` and systemd journal entries in a unified interface
@@ -50,6 +56,10 @@ This application is designed for use on a trusted, internal development network 
 * **Smart Alerting:** Discord notifications when alert keywords are detected; otherwise a summary message can be sent
 
 ### 📈 **Real-Time Progress Tracking**
+
+### 🎨 **UI Theme**
+* Termix-style dark theme throughout: dark panel surfaces, subtle borders, consistent spacing, and typography.
+* Fully dark headers, search bar, log viewer, settings modals, and host cards.
 * **Streaming Updates:** Server-Sent Events (SSE) provide real-time feedback during log loading and analysis
 * **Progress Visualization:** Detailed progress bars, log output, and status messages for all operations
 * **Error Recovery:** Automatic retry mechanisms for failed host connections
