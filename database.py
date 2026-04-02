@@ -9,6 +9,22 @@ import json
 
 db = SQLAlchemy()
 
+
+class AppSetting(db.Model):
+    '''Key/value application settings stored in the database.'''
+    __tablename__ = 'app_settings'
+
+    key = db.Column(db.String(255), primary_key=True)
+    value_json = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        try:
+            value = json.loads(self.value_json) if self.value_json else None
+        except Exception:
+            value = self.value_json
+        return {'key': self.key, 'value': value, 'updated_at': self.updated_at.isoformat() if self.updated_at else None}
+
 # Association tables for many-to-many relationships
 host_groups = db.Table(
     'host_groups',
@@ -194,4 +210,65 @@ class Tag(db.Model):
             'name': self.name,
             'color': self.color,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class Schedule(db.Model):
+    """A named recurring analysis schedule."""
+    __tablename__ = 'schedules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False, default='Schedule')
+    enabled = db.Column(db.Boolean, default=False)
+    interval_hours = db.Column(db.Integer, nullable=False, default=6)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    hosts = db.relationship('ScheduleHost', backref='schedule', cascade='all, delete-orphan')
+    sources = db.relationship('ScheduleSource', backref='schedule', cascade='all, delete-orphan')
+
+    def to_dict(self, include_children=False):
+        d = {
+            'id': self.id,
+            'name': self.name,
+            'enabled': bool(self.enabled),
+            'interval_hours': self.interval_hours,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_children:
+            d['hosts'] = [h.to_dict() for h in self.hosts]
+            d['sources'] = [s.to_dict() for s in self.sources]
+        return d
+
+
+class ScheduleHost(db.Model):
+    """Hosts included in a schedule (host-first selection)."""
+    __tablename__ = 'schedule_hosts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    schedule_id = db.Column(db.Integer, db.ForeignKey('schedules.id'), nullable=False, index=True)
+    host_id = db.Column(db.String(64), nullable=False)  # 'local' or 'db-<id>'
+
+    def to_dict(self):
+        return {'id': self.id, 'schedule_id': self.schedule_id, 'host_id': self.host_id}
+
+
+class ScheduleSource(db.Model):
+    """A log source (file/journal) for a given schedule and host."""
+    __tablename__ = 'schedule_sources'
+
+    id = db.Column(db.Integer, primary_key=True)
+    schedule_id = db.Column(db.Integer, db.ForeignKey('schedules.id'), nullable=False, index=True)
+    host_id = db.Column(db.String(64), nullable=False)
+    source_type = db.Column(db.String(16), nullable=False)  # file/journal
+    source_name = db.Column(db.String(512), nullable=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'schedule_id': self.schedule_id,
+            'host_id': self.host_id,
+            'type': self.source_type,
+            'name': self.source_name,
         }
