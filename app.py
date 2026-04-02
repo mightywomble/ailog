@@ -11,6 +11,7 @@ import sqlite3
 import atexit
 from apscheduler.schedulers.background import BackgroundScheduler
 import threading
+import queue
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
@@ -19,7 +20,7 @@ import ast
 import tempfile
 from sqlalchemy import text as sql_text
 import shutil
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services
 
 # --- INITIALIZATION ---
@@ -36,6 +37,87 @@ with app.app_context():
     db.create_all()
 
 scheduler = BackgroundScheduler(daemon=True)
+
+# --- MULTI-SCHEDULE RUN QUEUE (serial execution) ---
+# Single worker thread processes schedule runs one-at-a-time.
+schedule_run_queue: queue.Queue = queue.Queue()
+_schedule_worker_started = False
+
+# Schedule run status (in-memory): schedule_id -> dict
+schedule_status_map = {}
+
+
+def _enqueue_schedule_run(schedule_id: int, reason: str = 'scheduled', emit=None):
+    schedule_run_queue.put({'schedule_id': schedule_id, 'reason': reason, 'emit': emit, 'enqueued_at': datetime.datetime.now(datetime.timezone.utc).isoformat()})
+
+
+def _ensure_schedule_worker():
+    global _schedule_worker_started
+    if _schedule_worker_started:
+        return
+
+    def worker_loop():
+        while True:
+            item = schedule_run_queue.get()
+            try:
+                sid = int(item.get('schedule_id'))
+                reason = item.get('reason') or 'scheduled'
+                emit = item.get('emit')
+
+                # track status
+                schedule_status_map[sid] = {
+                    'state': 'running',
+                    'reason': reason,
+                    'queued_at': item.get('enqueued_at'),
+                    'started_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    'finished_at': None,
+                    'error': None,
+                }
+
+                def _emit(payload):
+                    try:
+                        if emit:
+                            emit(payload)
+                    except Exception:
+                        pass
+
+                # Load schedule and run inside app context
+                with app.app_context():
+                    sched = Schedule.query.get(sid)
+                    if not sched or not sched.enabled:
+                        schedule_status_map[sid].update({
+                            'state': 'skipped',
+                            'finished_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            'error': 'Schedule not found or disabled',
+                        })
+                        _emit({'status': 'log', 'message': 'Skipped: schedule not found or disabled.'})
+                    else:
+                        _emit({'status': 'progress', 'message': f'Running schedule: {sched.name}', 'progress': 0})
+                        _run_schedule(sched, emit=_emit)
+                        schedule_status_map[sid].update({
+                            'state': 'idle',
+                            'finished_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        })
+            except Exception as e:
+                try:
+                    sid = int(item.get('schedule_id'))
+                    schedule_status_map[sid] = {
+                        'state': 'error',
+                        'reason': item.get('reason') or 'scheduled',
+                        'queued_at': item.get('enqueued_at'),
+                        'started_at': schedule_status_map.get(sid, {}).get('started_at'),
+                        'finished_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        'error': str(e),
+                    }
+                except Exception:
+                    pass
+            finally:
+                schedule_run_queue.task_done()
+
+    t = threading.Thread(target=worker_loop, daemon=True)
+    t.start()
+    _schedule_worker_started = True
+
 
 # --- CONFIGURATION ---
 LOG_DIRECTORY = '/var/log'
@@ -1573,6 +1655,373 @@ def _do_analysis_task(emit=None):
 
     _emit({'status': 'complete', 'message': 'Scheduled analysis completed.', 'progress': 100})
 
+def _run_schedule(schedule: Schedule, emit=None):
+    """Run analysis for a specific Schedule by temporarily overriding legacy schedule.sources.
+
+    This reuses the existing _do_analysis_task implementation while we complete the migration.
+    """
+    # Build sources list
+    sources = []
+    for ss in ScheduleSource.query.filter_by(schedule_id=schedule.id).all():
+        sources.append({'host': ss.host_id, 'type': ss.source_type, 'name': ss.source_name})
+
+    old_sources = _setting_get('schedule.sources', [])
+    try:
+        _setting_set('schedule.sources', sources)
+        _do_analysis_task(emit=emit)
+    finally:
+        try:
+            _setting_set('schedule.sources', old_sources)
+        except Exception:
+            pass
+
+
+# --- MULTI-SCHEDULE API + MIGRATION HELPERS ---
+
+def _get_all_host_choices():
+    """Return list of (host_id, host_name) including local and remote hosts.
+    
+    Must match the IDs returned by /hosts (config hosts + db-<id> hosts).
+    """
+    hosts_data = load_hosts() or {}
+    out = [('local', 'Localhost')]
+    
+    # config-file hosts
+    for hid, h in hosts_data.items():
+        try:
+            out.append((hid, (h.get('friendly_name') or hid)))
+        except Exception:
+            out.append((hid, hid))
+    
+    # db-backed hosts (wizard)
+    try:
+        for h in Host.query.all():
+            hid = f'db-{h.id}'
+            name = (h.friendly_name or h.hostname or h.ip_address or hid)
+            if not any(x[0] == hid for x in out):
+                out.append((hid, name))
+    except Exception:
+        pass
+    
+    return out
+
+def _schedule_to_payload(s: Schedule, include_children: bool = True):
+    if not s:
+        return None
+    return s.to_dict(include_children=include_children)
+
+
+def _ensure_default_schedule_migrated():
+    """If no schedules exist, create a Default schedule from legacy schedule.* settings."""
+    if Schedule.query.count() > 0:
+        return
+
+    interval = int(_setting_get('schedule.interval_hours', 6) or 6)
+    enabled = bool(_setting_get('schedule.is_running', False))
+    legacy_sources = _setting_get('schedule.sources', []) or []
+
+    s = Schedule(name='Default', enabled=enabled, interval_hours=max(1, interval))
+    db.session.add(s)
+    db.session.flush()  # get id
+
+    # Derive hosts from sources, falling back to local
+    host_ids = []
+    for src in legacy_sources:
+        try:
+            hid = (src or {}).get('host') or 'local'
+        except Exception:
+            hid = 'local'
+        if hid not in host_ids:
+            host_ids.append(hid)
+
+    if not host_ids:
+        host_ids = ['local']
+
+    for hid in host_ids:
+        db.session.add(ScheduleHost(schedule_id=s.id, host_id=hid))
+
+    for src in legacy_sources:
+        if not isinstance(src, dict):
+            continue
+        hid = src.get('host') or 'local'
+        st = src.get('type')
+        sn = src.get('name')
+        if not st or not sn:
+            continue
+        db.session.add(ScheduleSource(schedule_id=s.id, host_id=hid, source_type=str(st), source_name=str(sn)))
+
+    db.session.commit()
+
+
+def _sync_scheduler_jobs_from_db():
+    """Ensure APScheduler has one interval job per enabled schedule."""
+    _ensure_schedule_worker()
+
+    enabled_schedules = Schedule.query.filter_by(enabled=True).all()
+    enabled_ids = {s.id for s in enabled_schedules}
+
+    # Remove jobs for schedules that are no longer enabled
+    for job in list(scheduler.get_jobs()):
+        if job.id.startswith('schedule_'):
+            try:
+                sid = int(job.id.split('_', 1)[1])
+            except Exception:
+                continue
+            if sid not in enabled_ids:
+                try:
+                    scheduler.remove_job(job.id)
+                except Exception:
+                    pass
+
+    # Upsert jobs for enabled schedules
+    for s in enabled_schedules:
+        hours = max(1, int(s.interval_hours or 6))
+
+        def _make_job(schedule_id: int):
+            def _job():
+                _enqueue_schedule_run(schedule_id, reason='scheduled')
+            return _job
+
+        scheduler.add_job(
+            _make_job(s.id),
+            trigger='interval',
+            hours=hours,
+            id=f'schedule_{s.id}',
+            replace_existing=True,
+        )
+
+
+@app.route('/api/schedules', methods=['GET', 'POST'])
+def api_schedules_collection():
+    if request.method == 'GET':
+        schedules = Schedule.query.order_by(Schedule.id.asc()).all()
+        return jsonify([_schedule_to_payload(s, include_children=True) for s in schedules])
+
+    data = request.get_json(force=True, silent=True) or {}
+    name = (data.get('name') or 'Schedule').strip()
+    enabled = bool(data.get('enabled', False))
+    interval_hours = int(data.get('interval_hours') or 6)
+    interval_hours = max(1, interval_hours)
+
+    s = Schedule(name=name, enabled=enabled, interval_hours=interval_hours)
+    db.session.add(s)
+    db.session.flush()
+
+    host_ids = data.get('hosts') or []
+    if not isinstance(host_ids, list):
+        host_ids = []
+    if not host_ids:
+        host_ids = ['local']
+
+    for hid in host_ids:
+        db.session.add(ScheduleHost(schedule_id=s.id, host_id=str(hid)))
+
+    sources = data.get('sources') or []
+    if isinstance(sources, list):
+        for src in sources:
+            if not isinstance(src, dict):
+                continue
+            hid = src.get('host') or src.get('host_id') or 'local'
+            st = src.get('type') or src.get('source_type')
+            sn = src.get('name') or src.get('source_name')
+            if not st or not sn:
+                continue
+            db.session.add(ScheduleSource(schedule_id=s.id, host_id=str(hid), source_type=str(st), source_name=str(sn)))
+
+    db.session.commit()
+
+    _sync_scheduler_jobs_from_db()
+
+    return jsonify(_schedule_to_payload(s, include_children=True)), 201
+
+
+@app.route('/api/schedules/<int:schedule_id>', methods=['GET', 'PUT', 'DELETE'])
+def api_schedule_item(schedule_id: int):
+    s = Schedule.query.get_or_404(schedule_id)
+
+    if request.method == 'GET':
+        return jsonify(_schedule_to_payload(s, include_children=True))
+
+    if request.method == 'DELETE':
+        try:
+            scheduler.remove_job(f'schedule_{s.id}')
+        except Exception:
+            pass
+        db.session.delete(s)
+        db.session.commit()
+        return jsonify({'message': 'Schedule deleted.'})
+
+    data = request.get_json(force=True, silent=True) or {}
+    if 'name' in data:
+        s.name = (data.get('name') or s.name).strip() or s.name
+    if 'enabled' in data:
+        s.enabled = bool(data.get('enabled'))
+    if 'interval_hours' in data:
+        s.interval_hours = max(1, int(data.get('interval_hours') or s.interval_hours or 6))
+
+    # Replace hosts if provided
+    if 'hosts' in data:
+        host_ids = data.get('hosts')
+        if not isinstance(host_ids, list):
+            host_ids = []
+        ScheduleHost.query.filter_by(schedule_id=s.id).delete()
+        if not host_ids:
+            host_ids = ['local']
+        for hid in host_ids:
+            db.session.add(ScheduleHost(schedule_id=s.id, host_id=str(hid)))
+
+    # Replace sources if provided
+    if 'sources' in data:
+        sources = data.get('sources')
+        ScheduleSource.query.filter_by(schedule_id=s.id).delete()
+        if isinstance(sources, list):
+            for src in sources:
+                if not isinstance(src, dict):
+                    continue
+                hid = src.get('host') or src.get('host_id') or 'local'
+                st = src.get('type') or src.get('source_type')
+                sn = src.get('name') or src.get('source_name')
+                if not st or not sn:
+                    continue
+                db.session.add(ScheduleSource(schedule_id=s.id, host_id=str(hid), source_type=str(st), source_name=str(sn)))
+
+    db.session.commit()
+    _sync_scheduler_jobs_from_db()
+    return jsonify(_schedule_to_payload(s, include_children=True))
+
+
+@app.route('/api/schedules/<int:schedule_id>/run_now/stream', methods=['GET'])
+def api_schedule_run_now_stream(schedule_id: int):
+    from queue import Queue, Empty
+
+    s = Schedule.query.get_or_404(schedule_id)
+
+    q: Queue = Queue()
+
+    def emit(payload):
+        q.put(payload)
+
+    # Basic validation: must have at least one source
+    if ScheduleSource.query.filter_by(schedule_id=s.id).count() == 0:
+        def gen_err():
+            yield f"data: {json.dumps({'status':'error','message':'No log sources selected for this schedule.'})}\n\n"
+        headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+        return Response(stream_with_context(gen_err()), mimetype='text/event-stream', headers=headers)
+
+    _ensure_schedule_worker()
+    _enqueue_schedule_run(s.id, reason='manual', emit=emit)
+
+    def generate():
+        yield f"data: {json.dumps({'status':'progress','message':'Queued...','progress':0})}\n\n"
+        while True:
+            try:
+                payload = q.get(timeout=10)
+            except Empty:
+                yield ': keepalive\n\n'
+                continue
+            yield f"data: {json.dumps(payload)}\n\n"
+            if payload.get('status') in ('complete', 'error'):
+                break
+
+    headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    return Response(stream_with_context(generate()), mimetype='text/event-stream', headers=headers)
+
+
+@app.route('/api/schedules/<int:schedule_id>/sources/table/stream', methods=['GET'])
+def api_schedule_sources_table_stream(schedule_id: int):
+    """Like /sources/table/stream but limited to selected hosts (host-first)."""
+    Schedule.query.get_or_404(schedule_id)
+
+    # Hosts can be passed as querystring: ?hosts=local,host1,host2
+    hosts_param = (request.args.get('hosts') or '').strip()
+    allowed = None
+    if hosts_param:
+        allowed = {h.strip() for h in hosts_param.split(',') if h.strip()}
+
+    def generate_table_events():
+        def generate_event(data):
+            return f"data: {json.dumps(data)}\n\n"
+
+        try:
+            yield generate_event({'status': 'progress', 'message': 'Initializing host scan...', 'progress': 5})
+
+            all_sources = []
+            failed_hosts = []
+            all_hostnames = _get_all_host_choices()
+            if allowed is not None:
+                all_hostnames = [(hid, hname) for hid, hname in all_hostnames if hid in allowed]
+
+            total_hosts = len(all_hostnames)
+            if total_hosts == 0:
+                yield generate_event({'status': 'error', 'message': 'No hosts selected.'})
+                return
+
+            yield generate_event({'status': 'progress', 'message': f'Found {total_hosts} hosts to scan', 'progress': 10})
+
+            for i, (host_id, host_name) in enumerate(all_hostnames):
+                host_progress = 10 + int((i / total_hosts) * 80)
+                yield generate_event({'status': 'progress', 'message': f'Connecting to {host_name}...', 'progress': host_progress})
+                try:
+                    host_sources = fetch_sources_from_host_detailed(host_id, host_name, generate_event, host_progress)
+                    all_sources.extend(host_sources)
+                    yield generate_event({'status': 'progress', 'message': f'✅ {host_name}: Found {len(host_sources)} log sources', 'progress': host_progress + int(80/total_hosts)})
+                except Exception as e:
+                    error_msg = str(e)
+                    if 'timeout' in error_msg.lower():
+                        error_msg = 'Connection timed out'
+                    elif 'connection refused' in error_msg.lower():
+                        error_msg = 'Connection refused'
+                    elif 'no route to host' in error_msg.lower():
+                        error_msg = 'No route to host'
+                    failed_hosts.append({'host_id': host_id, 'host_name': host_name, 'error': error_msg})
+                    yield generate_event({'status': 'progress', 'message': f'❌ {host_name}: {error_msg}', 'progress': host_progress + int(80/total_hosts)})
+
+            yield generate_event({'status': 'progress', 'message': 'Building log matrix...', 'progress': 90})
+
+            log_matrix = {}
+            host_list = []
+            for host_id, host_name in all_hostnames:
+                if not any(f['host_id'] == host_id for f in failed_hosts):
+                    host_list.append({'host_id': host_id, 'host_name': host_name})
+
+            for source in all_sources:
+                log_key = f"{source['name']}|{source['type']}"
+                if log_key not in log_matrix:
+                    log_matrix[log_key] = {
+                        'name': source['name'],
+                        'type': source['type'],
+                        'hosts': {},
+                        'size_info': source.get('size_formatted', 'N/A'),
+                        'modified_info': source.get('modified_formatted', 'N/A')
+                    }
+                log_matrix[log_key]['hosts'][source['host']] = {
+                    'host_id': source['host'],
+                    'host_name': source['host_name'],
+                    'size_bytes': source.get('size_bytes', 0),
+                    'size_formatted': source.get('size_formatted', 'N/A'),
+                    'modified_epoch': source.get('modified_epoch', 0),
+                    'modified_formatted': source.get('modified_formatted', 'N/A')
+                }
+
+            logs_table = list(log_matrix.values())
+            logs_table.sort(key=lambda x: x['name'].lower())
+
+            response_data = {
+                'logs': logs_table,
+                'hosts': host_list,
+                'failed_hosts': failed_hosts,
+                'total_hosts': len(all_hostnames),
+                'successful_hosts': len(host_list)
+            }
+
+            yield generate_event({'status': 'complete', 'data': response_data, 'progress': 100})
+
+        except Exception as e:
+            yield generate_event({'status': 'error', 'message': str(e)})
+
+    return Response(stream_with_context(generate_table_events()), mimetype='text/event-stream')
+
+
 @app.route('/schedule/start', methods=['POST'])
 def start_schedule():
     config = request.get_json()
@@ -1673,11 +2122,16 @@ def perform_scheduled_analysis():
 
 # --- STARTUP & SHUTDOWN ---
 def startup_scheduler():
-    config = load_config()
-    if config.get('is_running'):
-        print("Restarting previously active schedule.")
-        interval = config.get('interval', 1)
-        scheduler.add_job(perform_scheduled_analysis, 'interval', hours=interval, id='scheduled_analysis', replace_existing=True)
+    """Start APScheduler and sync jobs from DB schedules."""
+    with app.app_context():
+        try:
+            _ensure_default_schedule_migrated()
+        except Exception as e:
+            print(f'[WARN] Schedule migration skipped: {e}')
+        try:
+            _sync_scheduler_jobs_from_db()
+        except Exception as e:
+            print(f'[WARN] Scheduler sync skipped: {e}')
 
 # --- STARTUP INITIALIZATION ---
 def initialize_app():

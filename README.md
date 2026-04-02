@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-04-02 | v2.5.0 | Multi-schedule system (DB schedules), host-first selection per schedule, queued serial execution, schedule-scoped Run Now SSE + log picker | ✅ Complete |
 | 2026-04-02 | v2.4.0 | DB-backed Settings + Backup/Selective Restore, AI Search prompt/keywords, Run Now SSE progress, Export improvements, Rescan/Netbird enhancements | ✅ Complete |
 | 2026-01-27 | v2.3.0 | Settings Modal Redesign, Sidebar Navigation, Radio Button Models, Dark Theme, Bug Fixes | ✅ Complete |
 | 2026-01-27 | v2.2.0 | Unified AI Provider Settings, DOM Element Fixes, Host Card Styling, Multi-Model Support | ✅ Complete |
@@ -43,7 +44,8 @@ This application is designed for use on a trusted, internal development network 
 * **Provider Support:** OpenAI and Ollama
 * **AI Search Settings:** Configurable analysis prompt + alert keyword/phrase list (DB-backed) used by manual analysis, Run Now, and scheduled runs
 * **On-Demand Analysis:** Manual log analysis with provider-specific validation and status indicators
-* **Scheduled Monitoring:** Automated recurring analysis with configurable intervals and sources
+* **Scheduled Monitoring (Multi-Schedule):** Create multiple schedules, each with its own hosts, logs, and interval
+* **Queued Execution:** Scheduled runs and Run Now requests are queued and execute serially (no skipping)
 * **Run Now with Live Progress:** Server-Sent Events (SSE) streaming progress + heartbeat while the model is working
 * **Smart Alerting:** Discord notifications when alert keywords are detected; otherwise a summary message can be sent
 
@@ -55,7 +57,8 @@ This application is designed for use on a trusted, internal development network 
 
 ### 💾 **Database Backup & Restore**
 * **One-Click Backup Download:** Download the sqlite database bundle
-* **Selective Restore:** Restore only selected categories (AI provider/key, Discord webhook, AI Search prompt/keywords, Hosts (replace all), Schedule interval/is_running)
+* **Selective Restore:** Restore only selected categories (AI provider/key, Discord webhook, AI Search prompt/keywords, Hosts (replace all), legacy schedule interval/is_running)
+  - Note: Full schedules (multi-schedule tables) are included in a full DB restore, but are not currently part of the selective restore toggle.
 
 ### 🔒 **Security & Privacy**
 * **DB-Backed Credential Storage:** API keys/webhooks and settings are stored in the application database (plaintext, by choice) and persist across restarts

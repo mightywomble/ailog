@@ -348,10 +348,14 @@
                         <div class="border-t border-white/10 pt-4 space-y-3">
                             <div class="flex items-center justify-between">
                                 <h5 class="font-medium text-white">Alert keywords &amp; phrases</h5>
-                                <button id="add-alert-keyword-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs rounded-md font-medium transition-colors" type="button">Add</button>
+                                <div class="flex items-center gap-2">
+                                    <button id="save-alert-keywords-btn" class="bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 text-xs rounded-md font-medium transition-colors" type="button">Save</button>
+                                    <button id="add-alert-keyword-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs rounded-md font-medium transition-colors" type="button">Add</button>
+                                </div>
                             </div>
                             <p class="text-xs text-gray-400">If any of these words/phrases appear in the AI output, it will send an alert. If none match, it will send a summary message saying no alert words were found.</p>
                             <ul id="alert-keywords-list" class="space-y-2"></ul>
+                            <div class="text-xs text-gray-300"><span id="alert-keywords-save-status"></span></div>
                         </div>
                     </section>
 
@@ -370,25 +374,53 @@
 
                     <!-- Scheduled Analysis Section -->
                     <section id="scheduled-analysis-section" class="settings-section space-y-4 hidden">
-                        <h4 class="font-semibold text-lg text-white">Scheduled Analysis</h4>
-                        <p class="text-xs text-gray-300 font-bold">Scheduled analysis can now run on any configured host.</p>
-                        <div id="scheduler-status" class="text-sm text-gray-300 p-2 rounded-md bg-white/5 border border-white/10">Loading status...</div>
-                        <button id="select-logs-btn" class="button w-full mb-4 px-4 py-2 text-sm">Select Logs for Schedule...</button>
-                        <div>
-                            <span id="selected-log-count" class="text-sm text-gray-300 font-bold block text-center mb-3">0 logs selected</span>
+                        <div class="flex items-center justify-between">
+                            <h4 class="font-semibold text-lg text-white">Scheduled Analysis</h4>
+                            <div class="flex gap-2">
+                                <button id="add-schedule-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs rounded-md font-medium transition-colors" type="button">Add</button>
+                                <button id="delete-schedule-btn" class="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 text-xs rounded-md font-medium transition-colors" type="button">Delete</button>
+                            </div>
                         </div>
+                        <p class="text-xs text-gray-300">Schedules are stored in the database. Runs are queued and execute serially.</p>
+
                         <div>
-                            <label for="schedule-interval-input" class="block text-sm font-medium text-gray-300 mb-1">Run every (hours)</label>
-                            <input type="number" id="schedule-interval-input" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white" min="1" max="100" value="12">
+                            <label for="schedule-select" class="block text-sm font-medium text-gray-300 mb-1">Schedule</label>
+                            <select id="schedule-select" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white"></select>
                         </div>
-                        <div class="grid grid-cols-3 gap-2 pt-2">
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <label for="schedule-interval-input" class="block text-sm font-medium text-gray-300 mb-1">Run every (hours)</label>
+                                <input type="number" id="schedule-interval-input" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white" min="1" max="100" value="6">
+                            </div>
+                            <div class="flex items-end">
+                                <label class="inline-flex items-center gap-2 text-sm text-gray-200">
+                                    <input id="schedule-enabled-input" type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500">
+                                    Enabled
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-white/10 pt-4 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <h5 class="font-medium text-white">Hosts (choose hosts first)</h5>
+                                <button id="select-logs-btn" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" type="button" disabled>Pick Logs for Selected Hosts…</button>
+                            </div>
+                            <div id="schedule-hosts-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-200"></div>
+                            <div class="text-xs text-gray-400"><span id="selected-log-count">0 logs selected</span></div>
+                        </div>
+
+                        <div class="grid grid-cols-4 gap-2 pt-2">
+                            <button id="save-schedule-btn" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50" >Save</button>
                             <button id="start-schedule-btn" class="button px-4 py-2 text-sm">Start</button>
                             <button id="stop-schedule-btn" class="button px-4 py-2 text-sm">Stop</button>
                             <button id="run-now-btn" class="button px-4 py-2 text-sm">Run Now</button>
                         </div>
+
+                        <div id="scheduler-status" class="text-sm text-gray-300 p-2 rounded-md bg-white/5 border border-white/10">Loading schedules…</div>
                     </section>
 
-                    <!-- Remote Hosts Section -->
+<!-- Remote Hosts Section -->
                     <section id="remote-hosts-section" class="settings-section space-y-4 hidden">
                         <div class="flex justify-between items-center">
                             <h4 class="font-semibold text-lg text-white">Delete Hosts</h4>
@@ -428,7 +460,6 @@
 
             <!-- Footer -->
             <div class="border-t border-white/10 p-6 flex justify-end">
-                <button id="save-credentials-btn" class="button px-6 py-2">Save & Close</button>
             </div>
         </div>
     </div>
@@ -550,7 +581,6 @@
         const apiKeyInput = document.getElementById('api-key-input');
         const discordWebhookInput = document.getElementById('discord-webhook-input');
         const testDiscordBtn = document.getElementById('test-discord-btn');
-        const saveCredentialsBtn = document.getElementById('save-credentials-btn');
         const discordWebhookStatusDot = document.getElementById('discord-webhook-status');
         const providerLabel = document.getElementById('provider-label');
 
@@ -560,6 +590,8 @@
         const aiSearchSaveStatus = document.getElementById('ai-search-save-status');
         const alertKeywordsList = document.getElementById('alert-keywords-list');
         const addAlertKeywordBtn = document.getElementById('add-alert-keyword-btn');
+        const saveAlertKeywordsBtn = document.getElementById('save-alert-keywords-btn');
+        const alertKeywordsSaveStatus = document.getElementById('alert-keywords-save-status');
         
         // AI Provider Selection Elements (NEW UNIFIED WORKFLOW)
         const providerDropdown = document.getElementById('provider-dropdown');
@@ -615,6 +647,17 @@
         let currentLogName = "";
         let currentLogContent = "";
         let scheduledSources = [];
+        let scheduleHostsDirty = false;
+        const setPickLogsButtonState = (ready) => {
+            if (!selectLogsBtn) return;
+            selectLogsBtn.disabled = !ready;
+            selectLogsBtn.classList.remove('bg-red-600','hover:bg-red-500','bg-green-600','hover:bg-green-500');
+            selectLogsBtn.classList.add(ready ? 'bg-green-600' : 'bg-red-600');
+            if (ready) selectLogsBtn.classList.add('hover:bg-green-500');
+            else selectLogsBtn.classList.add('hover:bg-red-500');
+            selectLogsBtn.title = ready ? '' : 'Click Save first to persist host selection.';
+        };
+
         let currentEventSource = null;
         let currentViewMode = 'list';
         let tableData = null;
@@ -1381,6 +1424,23 @@
             });
         }
 
+        if (saveAlertKeywordsBtn) {
+            saveAlertKeywordsBtn.addEventListener('click', async () => {
+                try {
+                    saveAlertKeywordsBtn.disabled = true;
+                    if (alertKeywordsSaveStatus) alertKeywordsSaveStatus.textContent = 'Saving...';
+                    await saveAiSearchSettings();
+                    if (alertKeywordsSaveStatus) alertKeywordsSaveStatus.textContent = 'Saved.';
+                    showToast('Alert keywords saved.', 'success');
+                } catch (e) {
+                    if (alertKeywordsSaveStatus) alertKeywordsSaveStatus.textContent = 'Save failed.';
+                } finally {
+                    saveAlertKeywordsBtn.disabled = false;
+                    setTimeout(() => { if (alertKeywordsSaveStatus) alertKeywordsSaveStatus.textContent = ''; }, 2000);
+                }
+            });
+        }
+
         if (addAlertKeywordBtn) {
             addAlertKeywordBtn.addEventListener('click', () => {
                 const kws = collectAlertKeywords();
@@ -1765,6 +1825,9 @@
             if (selectedSection) {
                 selectedSection.classList.remove('hidden');
             }
+            if (sectionId === 'prompts') {
+                loadAiSearchSettings();
+            }
             
             // Mark button as active
             const activeBtn = document.querySelector(`.settings-nav-btn[data-section="${sectionId}"]`);
@@ -1788,6 +1851,7 @@
              updateSchedulerStatus();
              loadCurrentProviderConfig();
              loadSettingsFromBackend();
+             loadAiSearchSettings();
              // Ensure AI Provider section is shown by default
              switchSettingsSection('ai-provider');
         });
@@ -2024,13 +2088,7 @@
             } catch(error) {}
         });
         
-        saveCredentialsBtn.addEventListener('click', async () => {
-            // Note: Individual handlers (testOpenaiBtn, testOllamaModelBtn, testDiscordBtn) 
-            // already save credentials to localStorage when tested
-            // This button just closes the modal
-            showToast('Settings saved!');
-            settingsModal.classList.add('hidden');
-        });
+
         
         // Ollama test button (legacy - only if element exists)
         if (testOllamaBtn) {
@@ -2216,29 +2274,198 @@ aiAnalyseBtn.addEventListener('click', async () => {
             }
         });
         
-        const updateSchedulerStatus = async () => {
-            try {
-                const data = await fetchApi('/schedule/status');
-                scheduledSources = data.sources || [];
-                selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+        // --- Multi-schedule UI (DB-backed schedules) ---
+        let schedules = [];
+        let activeScheduleId = null;
 
-                if (data.is_running) {
-                    const nextRun = new Date(data.next_run).toLocaleString();
-                    schedulerStatusDiv.innerHTML = `<p class="text-green-400 font-semibold">Status: Running</p><p>Monitoring ${data.sources.length} logs every ${data.interval} hour(s).</p><p>Next run: ${nextRun}</p>`;
-                    scheduleIntervalInput.value = data.interval;
-                } else {
-                    schedulerStatusDiv.innerHTML = `<p class="text-yellow-400 font-semibold">Status: Not Running</p>`;
-                }
-            } catch (error) {
-                schedulerStatusDiv.innerHTML = `<p class="text-red-400 font-semibold">Error fetching status.</p>`;
+        const scheduleSelect = document.getElementById('schedule-select');
+        const addScheduleBtn = document.getElementById('add-schedule-btn');
+        const deleteScheduleBtn = document.getElementById('delete-schedule-btn');
+        const saveScheduleBtn = document.getElementById('save-schedule-btn');
+        const scheduleEnabledInput = document.getElementById('schedule-enabled-input');
+        const scheduleHostsList = document.getElementById('schedule-hosts-list');
+
+        const apiScheduleUrl = (id) => `/api/schedules/${id}`;
+
+        const normalizeScheduleSourcesForUi = (sources) => {
+            if (!Array.isArray(sources)) return [];
+            return sources.map(s => ({
+                host: s.host || s.host_id || 'local',
+                type: s.type || s.source_type,
+                name: s.name || s.source_name,
+            })).filter(s => s.type && s.name);
+        };
+
+        const getSelectedHostIds = () => {
+            const checked = Array.from(scheduleHostsList.querySelectorAll('input[type=checkbox]:checked'));
+            const ids = checked.map(cb => cb.value).filter(Boolean);
+            return ids.length ? ids : ['local'];
+        };
+
+        const renderHostsChecklist = (hostTuples, selectedIds) => {
+            scheduleHostsList.innerHTML = '';
+            hostTuples.forEach(([host_id, host_name]) => {
+                const id = `sched-host-${host_id}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+                const wrapper = document.createElement('label');
+                wrapper.className = 'flex items-center gap-2';
+                wrapper.innerHTML = `
+                    <input id="${id}" type="checkbox" class="h-4 w-4 rounded bg-gray-600 border-gray-500 text-indigo-600 focus:ring-indigo-500" value="${host_id}">
+                    <span>${host_name}</span>
+                `;
+                scheduleHostsList.appendChild(wrapper);
+                const cb = wrapper.querySelector('input');
+                cb.checked = selectedIds.includes(host_id);
+            });
+        };
+
+        const setActiveSchedule = (scheduleId) => {
+            activeScheduleId = scheduleId;
+            const s = schedules.find(x => x.id === scheduleId);
+            if (!s) return;
+
+            scheduledSources = normalizeScheduleSourcesForUi(s.sources);
+            selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+
+            scheduleIntervalInput.value = s.interval_hours || 6;
+            scheduleEnabledInput.checked = !!s.enabled;
+
+            const selectedHostIds = (s.hosts || []).map(h => h.host_id).filter(Boolean);
+            // Render host checklist from known hosts (local + remote)
+            const hostsJson = window.__hostsChoices || [['local','Localhost']];
+            renderHostsChecklist(hostsJson, selectedHostIds.length ? selectedHostIds : ['local']);
+
+            scheduleHostsDirty = false;
+            setPickLogsButtonState(true);
+            schedulerStatusDiv.innerHTML = `
+                <p class="${s.enabled ? 'text-green-400' : 'text-yellow-400'} font-semibold">Status: ${s.enabled ? 'Enabled' : 'Disabled'}</p>
+                <p>Interval: every ${s.interval_hours || 6} hour(s)</p>
+                <p>Hosts: ${(s.hosts || []).length || 0} &nbsp; Logs: ${(s.sources || []).length || 0}</p>
+            `;
+        };
+
+        const loadHostChoices = async () => {
+            // Derive from existing /hosts endpoint output (already used elsewhere)
+            try {
+                const hostsData = await fetchApi('/hosts');
+                const tuples = [['local','Localhost']];
+                Object.entries(hostsData || {}).forEach(([hid, h]) => {
+                    tuples.push([hid, (h && h.friendly_name) ? h.friendly_name : hid]);
+                });
+                window.__hostsChoices = tuples;
+            } catch (_) {
+                window.__hostsChoices = [['local','Localhost']];
             }
         };
-        
+
+        const loadSchedules = async () => {
+            await loadHostChoices();
+            schedules = await fetchApi('/api/schedules');
+            if (!Array.isArray(schedules)) schedules = [];
+
+            scheduleSelect.innerHTML = '';
+            schedules.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = String(s.id);
+                opt.textContent = s.name || `Schedule ${s.id}`;
+                scheduleSelect.appendChild(opt);
+            });
+
+            if (!schedules.length) {
+                schedulerStatusDiv.innerHTML = '<p class="text-yellow-400 font-semibold">No schedules found.</p>';
+                return;
+            }
+
+            const desired = activeScheduleId || schedules[0].id;
+            scheduleSelect.value = String(desired);
+            setActiveSchedule(desired);
+            setPickLogsButtonState(true);
+        };
+
+        scheduleSelect?.addEventListener('change', () => {
+            const sid = parseInt(scheduleSelect.value, 10);
+            if (!Number.isFinite(sid)) return;
+            setActiveSchedule(sid);
+        });
+
+        addScheduleBtn?.addEventListener('click', async () => {
+            const name = (prompt('Schedule name?', 'New Schedule') || '').trim() || 'New Schedule';
+            try {
+                const created = await fetchApi('/api/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, enabled: false, interval_hours: 6, hosts: ['local'], sources: [] })
+                });
+                showToast('Schedule created', 'success');
+                activeScheduleId = created.id;
+                await loadSchedules();
+            } catch (_) {}
+        });
+
+        deleteScheduleBtn?.addEventListener('click', async () => {
+            if (!activeScheduleId) return;
+            if (!confirm('Delete this schedule?')) return;
+            try {
+                await fetchApi(apiScheduleUrl(activeScheduleId), { method: 'DELETE' });
+                showToast('Schedule deleted', 'success');
+                activeScheduleId = null;
+                await loadSchedules();
+            } catch (_) {}
+        });
+
+        const saveActiveSchedule = async (patch) => {
+            if (!activeScheduleId) return;
+            const data = await fetchApi(apiScheduleUrl(activeScheduleId), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(patch)
+            });
+            // Update local cache
+            const idx = schedules.findIndex(s => s.id === activeScheduleId);
+            if (idx >= 0) schedules[idx] = data;
+            setActiveSchedule(activeScheduleId);
+            return data;
+        };
+
+        scheduleHostsList?.addEventListener('change', () => {
+            scheduleHostsDirty = true;
+            setPickLogsButtonState(false);
+            if (schedulerStatusDiv) {
+                schedulerStatusDiv.innerHTML = '<p class="text-yellow-400 font-semibold">Host selection changed.</p><p class="text-xs text-gray-300">Click Save before picking logs.</p>';
+            }
+        });
+
+        saveScheduleBtn?.addEventListener('click', async () => {
+            const interval_hours = Math.max(1, parseInt(scheduleIntervalInput.value || '6', 10));
+            const enabled = !!scheduleEnabledInput.checked;
+            const hosts = getSelectedHostIds();
+            try {
+                await saveActiveSchedule({ interval_hours, enabled, hosts });
+                scheduleHostsDirty = false;
+                setPickLogsButtonState(true);
+                showToast('Schedule saved', 'success');
+            } catch (_) {}
+        });
+
+        const updateSchedulerStatus = async () => {
+            try {
+                await loadSchedules();
+            } catch (e) {
+                schedulerStatusDiv.innerHTML = `<p class="text-red-400 font-semibold">Error loading schedules.</p>`;
+            }
+        };
+
         const updateLogSelectionProgress = (message, progress = 0) => {
             logSelectionProgressDetails.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
             logSelectionProgressDetails.scrollTop = logSelectionProgressDetails.scrollHeight;
             logSelectionProgressBar.style.width = `${progress}%`;
             logSelectionProgressPercent.textContent = `${progress}%`;
+        };
+
+        const getSourcesStreamUrl = () => {
+            if (!activeScheduleId) return '/sources/table/stream';
+            const hosts = getSelectedHostIds();
+            const qp = encodeURIComponent(hosts.join(','));
+            return `/api/schedules/${activeScheduleId}/sources/table/stream?hosts=${qp}`;
         };
 
         const showRetrySection = (failedHosts) => {
@@ -2287,7 +2514,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 
                 try {
                     // Use streaming endpoint again for retry
-                    const eventSource = new EventSource('/sources/table/stream');
+                    const eventSource = new EventSource(getSourcesStreamUrl());
                     let newData = null;
                     
                     const retryPromise = new Promise((resolve, reject) => {
@@ -2453,6 +2680,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
         };
 
         selectLogsBtn.addEventListener('click', async () => {
+            if (scheduleHostsDirty) { showToast('Please click Save first (hosts changed).', 'error'); return; }
             logSelectionTitle.textContent = 'Select Logs to Monitor from All Hosts';
             logSelectionList.innerHTML = '';
             logSelectionModal.classList.remove('hidden');
@@ -2468,10 +2696,10 @@ aiAnalyseBtn.addEventListener('click', async () => {
             let hasError = false;
             
             try {
-                updateLogSelectionProgress('Fetching logs from all hosts...', 10);
+                updateLogSelectionProgress('Fetching logs from selected hosts... Please wait, this may take a while.', 10);
                 
                 // Use Server-Sent Events for streaming progress
-                const eventSource = new EventSource('/sources/table/stream');
+                const eventSource = new EventSource(getSourcesStreamUrl());
                 console.log('EventSource created, connection state:', eventSource.readyState);
                 
                 const streamPromise = new Promise((resolve, reject) => {
@@ -2731,32 +2959,39 @@ aiAnalyseBtn.addEventListener('click', async () => {
             }
         });
 
-        saveLogSelectionBtn.addEventListener('click', () => {
+        saveLogSelectionBtn.addEventListener('click', async () => {
             const selectedLogs = Array.from(logSelectionList.querySelectorAll('input:checked')).map(cb => JSON.parse(cb.value));
             scheduledSources = selectedLogs;
             selectedLogCountSpan.textContent = `${scheduledSources.length} logs selected`;
+
+            // Persist to the active schedule
+            if (activeScheduleId) {
+                try {
+                    await saveActiveSchedule({ sources: scheduledSources });
+                    showToast('Log selection saved to schedule', 'success');
+                } catch (_) {}
+            }
+
             logSelectionModal.classList.add('hidden');
         });
 
         cancelLogSelectionBtn.addEventListener('click', () => logSelectionModal.classList.add('hidden'));
 
         startScheduleBtn.addEventListener('click', async () => {
-            const interval = parseInt(scheduleIntervalInput.value);
+            if (!activeScheduleId) { showToast('No schedule selected.', 'error'); return; }
+
+            const interval_hours = Math.max(1, parseInt(scheduleIntervalInput.value || '6', 10));
             const webhookUrl = discordWebhookInput.value.trim();
             const provider = localStorage.getItem('analysis_provider') || 'openai';
 
-            if (scheduledSources.length === 0) { showToast('Select at least one log to monitor.', 'error'); return; }
-            if (!interval || interval < 1) { showToast('Interval must be at least 1 hour.', 'error'); return; }
+            if (scheduledSources.length === 0) { showToast('Select at least one log for this schedule.', 'error'); return; }
             if (!webhookUrl) { showToast('Discord webhook is required.', 'error'); return; }
-            
-            // Validate provider-specific requirements
+
+            // Provider-specific requirements
             if (provider === 'ollama') {
                 const ollamaUrl = localStorage.getItem('ollama_url');
                 const ollamaModel = localStorage.getItem('ollama_model');
-                if (!ollamaUrl || !ollamaModel) { 
-                    showToast('Ollama is not configured. Please set it up first.', 'error'); 
-                    return; 
-                }
+                if (!ollamaUrl || !ollamaModel) { showToast('Ollama is not configured. Please set it up first.', 'error'); return; }
             } else {
                 const openaiKeyEl = openaiApiKeyInput || apiKeyInput;
                 const apiKey = openaiKeyEl ? openaiKeyEl.value.trim() : '';
@@ -2764,33 +2999,19 @@ aiAnalyseBtn.addEventListener('click', async () => {
             }
 
             try {
-                const payload = { 
-                    sources: scheduledSources, 
-                    interval, 
-                    webhook_url: webhookUrl,
-                    analysis_provider: provider
-                };
-                
-                // Add provider-specific credentials
-                if (provider === 'openai') {
-                    const openaiKeyEl = openaiApiKeyInput || apiKeyInput;
-                    payload.api_key = openaiKeyEl ? openaiKeyEl.value.trim() : '';
-                }
-                
-                const data = await fetchApi('/schedule/start', {
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                showToast(data.message);
+                // Persist schedule config: enable + interval + hosts + sources
+                const hosts = getSelectedHostIds();
+                await saveActiveSchedule({ enabled: true, interval_hours, hosts, sources: scheduledSources });
+                showToast('Schedule started (enabled).', 'success');
                 updateSchedulerStatus();
             } catch (error) {}
         });
 
         stopScheduleBtn.addEventListener('click', async () => {
+            if (!activeScheduleId) { showToast('No schedule selected.', 'error'); return; }
             try {
-                const data = await fetchApi('/schedule/stop', { method: 'POST' });
-                showToast(data.message);
+                await saveActiveSchedule({ enabled: false });
+                showToast('Schedule stopped (disabled).', 'success');
                 updateSchedulerStatus();
             } catch (error) {}
         });
@@ -2870,7 +3091,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
             runNowBtn.disabled = true;
             runNowBtn.textContent = 'Running...';
 
-            runNowEventSource = new EventSource('/schedule/run_now/stream');
+            if (!activeScheduleId) { showToast('No schedule selected.', 'error'); resetRunNowUi(); return; }
+            runNowEventSource = new EventSource(`/api/schedules/${activeScheduleId}/run_now/stream`);
 
             runNowEventSource.onmessage = (event) => {
                 let data;
