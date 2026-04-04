@@ -530,6 +530,36 @@ def extract_log_time_range(log_content):
     return (start_dt or end_dt).isoformat(), (end_dt or start_dt).isoformat()
 
 
+def _resolve_hostname(host_id):
+    """Resolve the actual hostname from a host identifier.
+    
+    For 'local', returns 'localhost'.
+    For 'db-<id>', queries the database to get the actual hostname.
+    Otherwise, checks load_hosts() config.
+    """
+    if host_id == 'local':
+        return 'localhost'
+    
+    # Try to resolve database host (db-<id> format)
+    if host_id.startswith('db-'):
+        try:
+            host_id_num = int(host_id.split('-', 1)[1])
+            if has_app_context():
+                host_obj = Host.query.get(host_id_num)
+                if host_obj and host_obj.hostname:
+                    return host_obj.hostname
+        except Exception as e:
+            print(f"[DEBUG] Failed to resolve hostname for '{host_id}': {e}")
+    
+    # Fall back to config hosts
+    hosts = load_hosts() or {}
+    if host_id in hosts:
+        return hosts[host_id].get('friendly_name', host_id)
+    
+    # If nothing found, return the host_id as-is
+    return host_id
+
+
 def _send_discord_embed(webhook_url, title, description, color=3447003):
     if not webhook_url:
         return
@@ -553,24 +583,20 @@ def _send_discord_embed(webhook_url, title, description, color=3447003):
 
 def send_discord_notification(webhook_url, log_name, host_id, analysis_text, data_start=None, data_end=None):
     # Alert embed (red)
-    hosts = load_hosts() or {}
-    host_info = hosts.get(host_id, {'friendly_name': host_id})
-    friendly_name = host_info.get('friendly_name', host_id)
+    actual_hostname = _resolve_hostname(host_id)
 
     range_line = f"\n\nData range: {data_start} → {data_end}" if (data_start and data_end) else ''
-    title = f"🚨 AI Alert for: {log_name} on {friendly_name}"
+    title = f"🚨 AI Alert for: {log_name} on {actual_hostname}"
     desc = (analysis_text or '') + range_line
     _send_discord_embed(webhook_url, title, desc, color=15158332)
 
 
 def send_discord_status(webhook_url, log_name, host_id, message, data_start=None, data_end=None):
     # Info embed (blue)
-    hosts = load_hosts() or {}
-    host_info = hosts.get(host_id, {'friendly_name': host_id})
-    friendly_name = host_info.get('friendly_name', host_id)
+    actual_hostname = _resolve_hostname(host_id)
 
     range_line = f"\n\nData range: {data_start} → {data_end}" if (data_start and data_end) else ''
-    title = f"ℹ️ Analysis of {log_name} on {friendly_name}"
+    title = f"ℹ️ Analysis of {log_name} on {actual_hostname}"
     desc = (message or '') + range_line
     _send_discord_embed(webhook_url, title, desc, color=3447003)
 
