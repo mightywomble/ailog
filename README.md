@@ -6,6 +6,8 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-04-06 | v2.9.2 | Homepage: removed Top Noisy Servers + Recommendations and replaced with a large tech-themed logo panel matching the termix theme | ✅ Complete |
+| 2026-04-06 | v2.9.1 | UI polish: collapsible Hosts sidebar, cleaner toolbar (More menu), Suricata button shown only when configured, wizard restyled to match termix theme | ✅ Complete |
 | 2026-04-06 | v2.9.0 | Suricata integration: remote sensor config + incremental ingest, Suricata Stats dashboards (Overview/Endpoint Stats/Raw), persistence + selective restore | ✅ Complete |
 | 2026-04-04 | v2.8.0 | Discord alert hostname resolution - use actual server hostname instead of db-<id> identifier | ✅ Complete |
 | 2026-04-02 | v2.6.0 | Termix-style dark dashboard (default view), logs view on host click, global dark theme consistency pass | ✅ Complete |

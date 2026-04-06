@@ -47,39 +47,59 @@
         }
     </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+/* Hosts sidebar collapse */
+#hosts-sidebar.collapsed { width: 4.5rem !important; padding-left: 0.5rem; padding-right: 0.5rem; }
+#hosts-sidebar.collapsed #hosts-title { display: none; }
+#hosts-sidebar.collapsed #host-list-container { gap: 0.5rem; }
+#hosts-sidebar.collapsed .host-card { padding: 0.5rem; }
+#hosts-sidebar.collapsed .host-card h3,
+#hosts-sidebar.collapsed .host-card p { display: none; }
+#hosts-sidebar.collapsed .host-card .connection-indicator { margin-left: 0.25rem; }
+#hosts-sidebar.collapsed .host-card .host-info-btn,
+#hosts-sidebar.collapsed .host-card .host-logs-btn { width: 2.25rem; height: 2.25rem; }
+</style>
 </head>
 <body class="termix-text font-sans antialiased min-h-screen">
 
-    <header class="glass-container mx-4 mt-4 p-4 shadow-lg flex items-center justify-between flex-wrap gap-2">
-        <h1 class="text-2xl font-bold termix-text">AI Log Viewer</h1>
-        <div class="flex items-center space-x-4">
-            <div id="ai-provider-indicator" class="termix-chip" px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">
+    
+    <header class="glass-container mx-4 mt-4 p-4 shadow-lg flex items-center justify-between gap-3 relative z-50">
+        <div class="flex items-center gap-3 min-w-0">
+            <h1 class="text-2xl font-bold termix-text truncate">AI Log Viewer</h1>
+            <div id="ai-provider-indicator" class="termix-chip px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm hidden sm:inline-flex">
                 <span id="provider-label">Loading...</span>
             </div>
+        </div>
+
+        <div class="flex items-center gap-2 flex-wrap justify-end">
             <button id="add-devices-btn" onclick="openWizard()" class="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
-                Add Devices
+                <span class="hidden sm:inline">Add Devices</span>
             </button>
             <button id="settings-btn" class="button text-sm px-4 py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                Settings
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-0 sm:mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                <span class="hidden sm:inline">Settings</span>
             </button>
-            <button id="suricata-stats-btn" class="bg-purple-700 hover:bg-purple-600 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">Suricata Stats</button>
-            <button id="create-ansible-inventory-btn" class="bg-amber-500 hover:bg-amber-400 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors">
-                Create Ansible Inventory
-            </button>
-            <button id="create-ssh-config-btn" class="bg-amber-500 hover:bg-amber-400 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors">
-                Create SSH Config
-            </button>
-            <button id="rescan-all-btn" class="bg-amber-500 hover:bg-amber-400 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors">
-                Rescan All
-            </button>
-            <div id="sudo-mode-indicator" class="termix-chip" px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">SUDO MODE ENABLED</div>
+            <button id="suricata-stats-btn" class="bg-purple-700 hover:bg-purple-600 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors hidden">Suricata Stats</button>
+
+            <div class="relative">
+                <button id="toolbar-more-btn" class="bg-amber-500 hover:bg-amber-400 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button" aria-haspopup="true" aria-expanded="false">
+                    <span>More</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                </button>
+                <div id="toolbar-more-menu" class="hidden absolute right-0 mt-2 w-56 termix-panel border border-white/10 rounded-lg shadow-lg z-[9999] overflow-hidden">
+                    <button id="create-ansible-inventory-btn" class="w-full text-left px-4 py-3 text-sm hover:bg-white/5">Create Ansible Inventory</button>
+                    <button id="create-ssh-config-btn" class="w-full text-left px-4 py-3 text-sm hover:bg-white/5">Create SSH Config</button>
+                    <button id="rescan-all-btn" class="w-full text-left px-4 py-3 text-sm hover:bg-white/5">Rescan All</button>
+                </div>
+            </div>
+
+            <div id="sudo-mode-indicator" class="termix-chip px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm hidden sm:inline-flex">SUDO MODE ENABLED</div>
         </div>
     </header>
 
     <!-- Search Bar -->
-    <div class="glass-container mx-4 mt-4 p-4 shadow-lg">
+    <div class="glass-container mx-4 mt-4 p-4 shadow-lg relative z-10">
         <div class="flex items-center space-x-4">
             <div class="flex-1">
                 <input type="text" id="search-input" 
@@ -130,9 +150,12 @@
 
     <div class="flex flex-1 overflow-hidden m-4 gap-4" style="height: calc(100vh - 160px);">
         <!-- Host List Sidebar -->
-        <aside class="w-1/4 glass-container p-4 flex flex-col">
+        <aside id="hosts-sidebar" class="w-1/4 glass-container p-4 flex flex-col transition-all duration-200">
             <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold termix-text">Hosts</h2>
+                <h2 class="text-lg font-semibold termix-text" id="hosts-title">Hosts</h2>
+                <button id="hosts-collapse-btn" class="termix-btn" type="button" title="Collapse/Expand Hosts">
+                    <span id="hosts-collapse-icon">⟨</span>
+                </button>
             </div>
             <div id="host-list-container" class="flex-1 overflow-y-auto space-y-2">
                 <!-- Host cards will be populated here -->
@@ -169,11 +192,67 @@
                 </div>
             </div>
             <div class="grid grid-cols-2 gap-4" style="flex: 1; min-height: 0;">
-                <div class="termix-panel p-5 flex flex-col" style="min-height: 0;">
-                    <h2 class="termix-text font-semibold">Recent Activity</h2>
-                    <div id="dashboard-recent-activity" class="mt-3 space-y-2 overflow-auto" style="min-height: 0;">
-                        <div class="termix-muted text-sm">No recent activity yet.</div>
+                
+
+                <div class="termix-panel p-6 flex items-center justify-center col-span-2" style="min-height: 0;">
+                    <div class="w-full max-w-3xl">
+                        <div class="flex items-center gap-4">
+                            <div class="shrink-0">
+                                <svg width="92" height="92" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="AI Log Viewer logo">
+                                    <defs>
+                                        <linearGradient id="g1" x1="10" y1="12" x2="86" y2="84" gradientUnits="userSpaceOnUse">
+                                            <stop stop-color="#7C3AED"/>
+                                            <stop offset="1" stop-color="#22C55E"/>
+                                        </linearGradient>
+                                        <linearGradient id="g2" x1="20" y1="18" x2="78" y2="78" gradientUnits="userSpaceOnUse">
+                                            <stop stop-color="#A855F7"/>
+                                            <stop offset="1" stop-color="#3B82F6"/>
+                                        </linearGradient>
+                                    </defs>
+                                    <rect x="10" y="10" width="76" height="76" rx="18" stroke="url(#g1)" stroke-width="3" fill="rgba(255,255,255,0.03)"/>
+                                    <path d="M26 34H52" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
+                                    <path d="M26 44H58" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
+                                    <path d="M26 54H46" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
+                                    <circle cx="66" cy="42" r="10" stroke="url(#g1)" stroke-width="3" fill="rgba(124,58,237,0.10)"/>
+                                    <circle cx="66" cy="42" r="2.5" fill="#A855F7"/>
+                                    <path d="M58 42H52" stroke="#A855F7" stroke-width="3" stroke-linecap="round"/>
+                                    <path d="M66 52V62" stroke="#22C55E" stroke-width="3" stroke-linecap="round"/>
+                                    <circle cx="66" cy="66" r="4" fill="#22C55E"/>
+                                    <path d="M28 70V64" stroke="#60A5FA" stroke-width="4" stroke-linecap="round"/>
+                                    <path d="M38 70V60" stroke="#A855F7" stroke-width="4" stroke-linecap="round"/>
+                                    <path d="M48 70V66" stroke="#22C55E" stroke-width="4" stroke-linecap="round"/>
+                                    <path d="M58 70V56" stroke="#F59E0B" stroke-width="4" stroke-linecap="round"/>
+                                </svg>
+                            </div>
+                            <div class="min-w-0">
+                                <div class="termix-text text-2xl font-semibold tracking-tight">AI Log Viewer</div>
+                                <div class="termix-muted mt-1">Logs + AI analysis + sensor data dashboards in a single, fast interface.</div>
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    <span class="termix-chip">Logs</span>
+                                    <span class="termix-chip">AI</span>
+                                    <span class="termix-chip">Data</span>
+                                    <span class="termix-chip">Suricata</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div class="glass-container p-4 rounded-lg border border-white/10">
+                                <div class="termix-text font-semibold">Unified Logs</div>
+                                <div class="termix-muted text-sm mt-1">Local + remote log sources with fast search and viewing.</div>
+                            </div>
+                            <div class="glass-container p-4 rounded-lg border border-white/10">
+                                <div class="termix-text font-semibold">AI Analysis</div>
+                                <div class="termix-muted text-sm mt-1">On-demand and scheduled analysis with alert keywords.</div>
+                            </div>
+                            <div class="glass-container p-4 rounded-lg border border-white/10">
+                                <div class="termix-text font-semibold">Dashboards</div>
+                                <div class="termix-muted text-sm mt-1">Suricata stats, endpoint insights, and raw data tools.</div>
+                            </div>
+                        </div>
                     </div>
+                </div>
+
+
                 </div>
                 <div class="termix-panel p-5 flex flex-col">
                     <h2 class="termix-text font-semibold">Quick Actions</h2>
@@ -2196,8 +2275,8 @@
                                 <button class="delete-host-btn p-1 rounded hover:bg-white/5" data-host-id="${id}" title="Delete"><svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
                             </div>
                         </div>
-                        <p class="text-sm text-black mt-1">${host.description || 'No description'}</p>
-                        <p class="text-xs text-black font-mono mt-2">${host.user}@${host.ip}</p>
+                        <p class="text-sm termix-muted mt-1">${host.description || 'No description'}</p>
+                        <p class="text-xs termix-muted font-mono mt-2">${host.user}@${host.ip}</p>
                     `;
                     hostListDiv.appendChild(div);
                 }
@@ -3735,6 +3814,9 @@ aiAnalyseBtn.addEventListener('click', async () => {
         window.showToast = showToast;
         window.showDashboard = showDashboard;
 
+        // Toggle Suricata Stats button based on whether Suricata is configured
+        refreshSuricataConfiguredState();
+
         // --- INITIALIZATION ---
         populateHostCards();
     });
@@ -3756,6 +3838,22 @@ function _suricataRangeKeyFromSlider(v) {
 function _suricataSetRangeLabel(key) {
     const el = document.getElementById('suricata-range-label');
     if (el) el.textContent = key;
+}
+
+function setSuricataStatsButtonVisible(isVisible) {
+    const btn = document.getElementById('suricata-stats-btn');
+    if (!btn) return;
+    btn.classList.toggle('hidden', !isVisible);
+}
+
+async function refreshSuricataConfiguredState() {
+    try {
+        const sensors = await window.fetchApi('/suricata/config');
+        const ok = Array.isArray(sensors) && sensors.length > 0 && (sensors[0].host || sensors[0].user);
+        setSuricataStatsButtonVisible(!!ok);
+    } catch (e) {
+        setSuricataStatsButtonVisible(false);
+    }
 }
 
 function showSuricataStats() {
@@ -3824,6 +3922,7 @@ async function saveSuricataConfigFromForm() {
         currentSuricataSensorId = res?.id || currentSuricataSensorId;
         if (statusEl) statusEl.textContent = `Saved sensor #${currentSuricataSensorId}`;
         window.showToast('Suricata settings saved', 'success');
+        refreshSuricataConfiguredState();
     } catch (e) {
         if (statusEl) statusEl.textContent = 'Save failed';
     }
@@ -4413,6 +4512,67 @@ async function analyseSuricataRaw2() {
     document.getElementById('suricata-raw-ai-btn2') && document.getElementById('suricata-raw-ai-btn2').addEventListener('click', analyseSuricataRaw2);
     suricataStatsSelectTab('overview');
 })();
+
+
+
+// -----------------------------
+// Toolbar "More" menu + Hosts sidebar collapse
+// -----------------------------
+(function initToolbarMoreMenu() {
+    const btn = document.getElementById('toolbar-more-btn');
+    const menu = document.getElementById('toolbar-more-menu');
+    if (!btn || !menu) return;
+
+    const close = () => {
+        menu.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+    };
+    const open = () => {
+        menu.classList.remove('hidden');
+        btn.setAttribute('aria-expanded', 'true');
+    };
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = !menu.classList.contains('hidden');
+        if (isOpen) close(); else open();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('#toolbar-more-menu') || e.target.closest('#toolbar-more-btn')) return;
+        close();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') close();
+    });
+})();
+
+(function initHostsSidebarCollapse() {
+    const sidebar = document.getElementById('hosts-sidebar');
+    const btn = document.getElementById('hosts-collapse-btn');
+    const icon = document.getElementById('hosts-collapse-icon');
+    if (!sidebar || !btn) return;
+
+    const key = 'ui.hosts_sidebar_collapsed';
+
+    const apply = (collapsed) => {
+        sidebar.classList.toggle('collapsed', !!collapsed);
+        if (icon) icon.textContent = collapsed ? '⟩' : '⟨';
+    };
+
+    // initial
+    apply(localStorage.getItem(key) === '1');
+
+    btn.addEventListener('click', () => {
+        const next = !sidebar.classList.contains('collapsed');
+        localStorage.setItem(key, next ? '1' : '0');
+        apply(next);
+    });
+})();
+
+
+// -----------------------------
 
 </script>
     {% include "wizard.html" %}
