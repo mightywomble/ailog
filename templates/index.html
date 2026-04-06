@@ -192,11 +192,67 @@
                 </div>
             </div>
             <div class="grid grid-cols-2 gap-4" style="flex: 1; min-height: 0;">
-                <div class="termix-panel p-5 flex flex-col" style="min-height: 0;">
-                    <h2 class="termix-text font-semibold">Recent Activity</h2>
-                    <div id="dashboard-recent-activity" class="mt-3 space-y-2 overflow-auto" style="min-height: 0;">
-                        <div class="termix-muted text-sm">No recent activity yet.</div>
+                
+
+                <div class="termix-panel p-6 flex items-center justify-center col-span-2" style="min-height: 0;">
+                    <div class="w-full max-w-3xl">
+                        <div class="flex items-center gap-4">
+                            <div class="shrink-0">
+                                <svg width="92" height="92" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="AI Log Viewer logo">
+                                    <defs>
+                                        <linearGradient id="g1" x1="10" y1="12" x2="86" y2="84" gradientUnits="userSpaceOnUse">
+                                            <stop stop-color="#7C3AED"/>
+                                            <stop offset="1" stop-color="#22C55E"/>
+                                        </linearGradient>
+                                        <linearGradient id="g2" x1="20" y1="18" x2="78" y2="78" gradientUnits="userSpaceOnUse">
+                                            <stop stop-color="#A855F7"/>
+                                            <stop offset="1" stop-color="#3B82F6"/>
+                                        </linearGradient>
+                                    </defs>
+                                    <rect x="10" y="10" width="76" height="76" rx="18" stroke="url(#g1)" stroke-width="3" fill="rgba(255,255,255,0.03)"/>
+                                    <path d="M26 34H52" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
+                                    <path d="M26 44H58" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
+                                    <path d="M26 54H46" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
+                                    <circle cx="66" cy="42" r="10" stroke="url(#g1)" stroke-width="3" fill="rgba(124,58,237,0.10)"/>
+                                    <circle cx="66" cy="42" r="2.5" fill="#A855F7"/>
+                                    <path d="M58 42H52" stroke="#A855F7" stroke-width="3" stroke-linecap="round"/>
+                                    <path d="M66 52V62" stroke="#22C55E" stroke-width="3" stroke-linecap="round"/>
+                                    <circle cx="66" cy="66" r="4" fill="#22C55E"/>
+                                    <path d="M28 70V64" stroke="#60A5FA" stroke-width="4" stroke-linecap="round"/>
+                                    <path d="M38 70V60" stroke="#A855F7" stroke-width="4" stroke-linecap="round"/>
+                                    <path d="M48 70V66" stroke="#22C55E" stroke-width="4" stroke-linecap="round"/>
+                                    <path d="M58 70V56" stroke="#F59E0B" stroke-width="4" stroke-linecap="round"/>
+                                </svg>
+                            </div>
+                            <div class="min-w-0">
+                                <div class="termix-text text-2xl font-semibold tracking-tight">AI Log Viewer</div>
+                                <div class="termix-muted mt-1">Logs + AI analysis + sensor data dashboards in a single, fast interface.</div>
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    <span class="termix-chip">Logs</span>
+                                    <span class="termix-chip">AI</span>
+                                    <span class="termix-chip">Data</span>
+                                    <span class="termix-chip">Suricata</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div class="glass-container p-4 rounded-lg border border-white/10">
+                                <div class="termix-text font-semibold">Unified Logs</div>
+                                <div class="termix-muted text-sm mt-1">Local + remote log sources with fast search and viewing.</div>
+                            </div>
+                            <div class="glass-container p-4 rounded-lg border border-white/10">
+                                <div class="termix-text font-semibold">AI Analysis</div>
+                                <div class="termix-muted text-sm mt-1">On-demand and scheduled analysis with alert keywords.</div>
+                            </div>
+                            <div class="glass-container p-4 rounded-lg border border-white/10">
+                                <div class="termix-text font-semibold">Dashboards</div>
+                                <div class="termix-muted text-sm mt-1">Suricata stats, endpoint insights, and raw data tools.</div>
+                            </div>
+                        </div>
                     </div>
+                </div>
+
+
                 </div>
                 <div class="termix-panel p-5 flex flex-col">
                     <h2 class="termix-text font-semibold">Quick Actions</h2>
@@ -4514,6 +4570,10 @@ async function analyseSuricataRaw2() {
         apply(next);
     });
 })();
+
+
+// -----------------------------
+
 </script>
     {% include "wizard.html" %}
 </body>

@@ -20,7 +20,7 @@ import ast
 import tempfile
 from sqlalchemy import text as sql_text
 import shutil
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket, UiRecommendationState
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services, execute_remote_command
 
 # --- INITIALIZATION ---
@@ -284,6 +284,9 @@ def get_ssh_prefix_args(user, ip):
         "-o", "BatchMode=yes", f"{user}@{ip}"
     ]
 
+
+
+# -----------------------------
 # --- SEARCH FUNCTIONALITY ---
 @app.route('/search', methods=['POST'])
 def search_logs():
