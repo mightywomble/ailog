@@ -1,10 +1,10 @@
 <!-- Device Onboarding Wizard Modal -->
-<div id="wizardModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+<div id="wizardModal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50">
+    <div class="glass-container w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-white/10">
         <!-- Header -->
-        <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 flex justify-between items-center">
-            <h2 class="text-2xl font-bold">Add Devices Wizard</h2>
-            <button onclick="closeWizard()" class="text-white hover:text-gray-200">
+        <div class="termix-panel px-6 py-4 flex justify-between items-center border-b border-white/10">
+            <h2 class="text-xl font-semibold termix-text">Add Devices Wizard</h2>
+            <button onclick="closeWizard()" class="termix-muted hover:termix-text">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                 </svg>
@@ -12,25 +12,25 @@
         </div>
 
         <!-- Progress Steps -->
-        <div class="px-6 py-4 border-b bg-gray-50">
+        <div class="px-6 py-4 border-b border-white/10 bg-white/5">
             <div class="flex justify-between items-center">
                 <div class="flex-1 text-center">
-                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-blue-600 text-white font-bold" id="step1-indicator">1</div>
+                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-purple-700 text-white font-bold" id="step1-indicator">1</div>
                     <p class="text-sm font-medium mt-2">Device Entry</p>
                 </div>
-                <div class="flex-grow h-1 bg-gray-300 mx-2"></div>
+                <div class="flex-grow h-1 bg-white/10 mx-2"></div>
                 <div class="flex-1 text-center">
-                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-300 text-gray-600 font-bold" id="step2-indicator">2</div>
+                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/10 text-gray-200 font-bold" id="step2-indicator">2</div>
                     <p class="text-sm font-medium mt-2">Verify Connection</p>
                 </div>
-                <div class="flex-grow h-1 bg-gray-300 mx-2"></div>
+                <div class="flex-grow h-1 bg-white/10 mx-2"></div>
                 <div class="flex-1 text-center">
-                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-300 text-gray-600 font-bold" id="step3-indicator">3</div>
+                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/10 text-gray-200 font-bold" id="step3-indicator">3</div>
                     <p class="text-sm font-medium mt-2">Collect Info</p>
                 </div>
-                <div class="flex-grow h-1 bg-gray-300 mx-2"></div>
+                <div class="flex-grow h-1 bg-white/10 mx-2"></div>
                 <div class="flex-1 text-center">
-                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-300 text-gray-600 font-bold" id="step4-indicator">4</div>
+                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/10 text-gray-200 font-bold" id="step4-indicator">4</div>
                     <p class="text-sm font-medium mt-2">Complete</p>
                 </div>
             </div>
@@ -40,27 +40,27 @@
         <div class="px-6 py-6">
             <!-- Step 1: Device Entry -->
             <div id="step1" class="wizard-step">
-                <h3 class="text-xl font-bold mb-4">Enter Device Details</h3>
+                <h3 class="text-xl font-semibold termix-text mb-4">Enter Device Details</h3>
                 
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">IP Addresses or Hostnames</label>
+                        <label class="block text-sm font-medium termix-muted mb-1">IP Addresses or Hostnames</label>
                         <textarea id="deviceIPs" placeholder="192.168.1.10&#10;192.168.1.11&#10;server.example.com" 
-                                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2"
                                   rows="4"></textarea>
-                        <p class="text-xs text-gray-500 mt-1">Enter one IP/hostname per line, or comma-separated</p>
+                        <p class="text-xs termix-muted mt-1">Enter one IP/hostname per line, or comma-separated</p>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">SSH Username(s)</label>
+                        <label class="block text-sm font-medium termix-muted mb-1">SSH Username(s)</label>
                         <input type="text" id="sshUsername" placeholder="root or ubuntu or user@host for different users"
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                        <p class="text-xs text-gray-500 mt-1">Single username for all, or comma-separated for each IP</p>
+                               class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2">
+                        <p class="text-xs termix-muted mt-1">Single username for all, or comma-separated for each IP</p>
                     </div>
 
                     <!-- SSH Key Selection -->
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-3">SSH Authentication (Private Key)</label>
+                        <label class="block text-sm font-medium termix-muted mb-3">SSH Authentication (Private Key)</label>
                         
                         <div class="flex gap-4 mb-4">
                             <label class="flex items-center cursor-pointer">
@@ -75,21 +75,21 @@
 
                         <!-- File Input -->
                         <div id="keyFileDiv" class="mb-4">
-                            <input type="file" id="keyFile" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                            <p class="text-xs text-gray-500 mt-1">Select your private SSH key file (usually ~/.ssh/id_rsa or similar)</p>
+                            <input type="file" id="keyFile" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2">
+                            <p class="text-xs termix-muted mt-1">Select your private SSH key file (usually ~/.ssh/id_rsa or similar)</p>
                         </div>
 
                         <!-- Paste Input -->
                         <div id="keyPasteDiv" class="mb-4 hidden">
                             <textarea id="keyContent" placeholder="Paste your private key here (-----BEGIN PRIVATE KEY-----)"
-                                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                      class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2"
                                       rows="6"></textarea>
-                            <p class="text-xs text-gray-500 mt-1">Paste your private SSH key content (include the -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY----- lines)</p>
+                            <p class="text-xs termix-muted mt-1">Paste your private SSH key content (include the -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY----- lines)</p>
                         </div>
 
                         <!-- Stored Keys Option -->
                         <div id="storedKeysDiv" class="mt-4">
-                            <select id="storedKeySelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <select id="storedKeySelect" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2">
                                 <option value="">-- Or select a stored key --</option>
                             </select>
                         </div>
@@ -99,60 +99,60 @@
 
             <!-- Step 2: Connectivity Verification -->
             <div id="step2" class="wizard-step hidden">
-                <h3 class="text-xl font-bold mb-4">Verify SSH Connectivity</h3>
+                <h3 class="text-xl font-semibold termix-text mb-4">Verify SSH Connectivity</h3>
                 
                 <div class="mb-4">
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div id="progressBar" class="bg-blue-600 h-2 rounded-full" style="width: 0%"></div>
+                    <div class="w-full bg-white/10 rounded-full h-2">
+                        <div id="progressBar" class="bg-purple-700 h-2 rounded-full" style="width: 0%"></div>
                     </div>
-                    <p class="text-sm text-gray-600 mt-2"><span id="progressText">0/0</span> devices verified</p>
+                    <p class="text-sm termix-muted mt-2"><span id="progressText">0/0</span> devices verified</p>
                 </div>
 
-                <div id="verificationResults" class="space-y-2 max-h-64 overflow-y-auto border border-gray-300 rounded-lg p-4 bg-gray-50">
-                    <p class="text-gray-500 text-sm">Testing connections...</p>
+                <div id="verificationResults" class="space-y-2 max-h-64 overflow-y-auto border border-white/10 rounded-lg p-4 bg-white/5">
+                    <p class="termix-muted text-sm">Testing connections...</p>
                 </div>
             </div>
 
             <!-- Step 3: System Information Collection -->
             <div id="step3" class="wizard-step hidden">
-                <h3 class="text-xl font-bold mb-4">Collecting System Information</h3>
+                <h3 class="text-xl font-semibold termix-text mb-4">Collecting System Information</h3>
                 
                 <div class="mb-4">
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div id="collectionProgressBar" class="bg-blue-600 h-2 rounded-full" style="width: 0%"></div>
+                    <div class="w-full bg-white/10 rounded-full h-2">
+                        <div id="collectionProgressBar" class="bg-purple-700 h-2 rounded-full" style="width: 0%"></div>
                     </div>
-                    <p class="text-sm text-gray-600 mt-2"><span id="collectionProgressText">0/0</span> devices scanned</p>
+                    <p class="text-sm termix-muted mt-2"><span id="collectionProgressText">0/0</span> devices scanned</p>
                 </div>
 
-                <div id="collectionLog" class="space-y-2 max-h-64 overflow-y-auto border border-gray-300 rounded-lg p-4 bg-gray-50 font-mono text-xs">
-                    <p class="text-gray-500">Collecting system information...</p>
+                <div id="collectionLog" class="space-y-2 max-h-64 overflow-y-auto border border-white/10 rounded-lg p-4 bg-white/5 font-mono text-xs">
+                    <p class="termix-muted">Collecting system information...</p>
                 </div>
             </div>
 
             <!-- Step 4: Completion -->
             <div id="step4" class="wizard-step hidden">
-                <h3 class="text-xl font-bold mb-4">✓ Devices Added Successfully</h3>
+                <h3 class="text-xl font-semibold termix-text mb-4">✓ Devices Added Successfully</h3>
                 
                 <div id="completionSummary" class="space-y-4">
-                    <div class="bg-green-50 border border-green-200 rounded-lg p-4">
-                        <p class="text-green-800 font-medium" id="completionMessage"></p>
+                    <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+                        <p class="text-green-300 font-medium" id="completionMessage"></p>
                     </div>
 
                     <div>
-                        <h4 class="font-medium text-gray-700 mb-2">Added Devices:</h4>
+                        <h4 class="font-medium termix-muted mb-2">Added Devices:</h4>
                         <div id="addedDevicesList" class="space-y-2">
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Assign to Group (Optional)</label>
-                        <select id="groupSelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <label class="block text-sm font-medium termix-muted mb-2">Assign to Group (Optional)</label>
+                        <select id="groupSelect" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2">
                             <option value="">-- No group --</option>
                         </select>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Assign Tags (Optional)</label>
+                        <label class="block text-sm font-medium termix-muted mb-2">Assign Tags (Optional)</label>
                         <div id="tagCheckboxes" class="space-y-2">
                         </div>
                     </div>
@@ -161,16 +161,16 @@
         </div>
 
         <!-- Footer -->
-        <div class="flex justify-between items-center px-6 py-4 border-t bg-gray-50">
-            <button onclick="previousStep()" id="prevBtn" class="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-100 hidden">
+        <div class="flex justify-between items-center px-6 py-4 border-t bg-white/5">
+            <button onclick="previousStep()" id="prevBtn" class="termix-btn hidden">
                 ← Previous
             </button>
             <div></div>
             <div class="flex gap-3">
-                <button onclick="closeWizard()" id="cancelBtn" class="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-100">
+                <button onclick="closeWizard()" id="cancelBtn" class="termix-btn">
                     Cancel
                 </button>
-                <button onclick="nextStep()" id="nextBtn" class="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700">
+                <button onclick="nextStep()" id="nextBtn" class="bg-purple-700 hover:bg-purple-600 text-white px-6 py-2 rounded-lg font-medium transition-colors">
                     Next →
                 </button>
             </div>
@@ -236,16 +236,16 @@ function updateWizardUI() {
     for (let i = 1; i <= 4; i++) {
         const indicator = document.getElementById(`step${i}-indicator`);
         if (i < currentWizardStep) {
-            indicator.classList.remove('bg-gray-300', 'text-gray-600');
+            indicator.classList.remove('bg-gray-300', 'termix-muted');
             indicator.classList.add('bg-green-600', 'text-white');
             indicator.textContent = '✓';
         } else if (i === currentWizardStep) {
-            indicator.classList.remove('bg-gray-300', 'text-gray-600');
-            indicator.classList.add('bg-blue-600', 'text-white');
+            indicator.classList.remove('bg-gray-300', 'termix-muted');
+            indicator.classList.add('bg-purple-700', 'text-white');
             indicator.textContent = i;
         } else {
-            indicator.classList.remove('bg-blue-600', 'bg-green-600', 'text-white');
-            indicator.classList.add('bg-gray-300', 'text-gray-600');
+            indicator.classList.remove('bg-purple-700', 'bg-green-600', 'text-white');
+            indicator.classList.add('bg-gray-300', 'termix-muted');
             indicator.textContent = i;
         }
     }
@@ -342,7 +342,7 @@ async function proceedToStep2() {
     updateWizardUI();
     
     const resultsDiv = document.getElementById('verificationResults');
-    resultsDiv.innerHTML = '<p class="text-gray-500 text-sm">Testing connections...</p>';
+    resultsDiv.innerHTML = '<p class="termix-muted text-sm">Testing connections...</p>';
     
     try {
         // Create wizard session
@@ -461,7 +461,7 @@ async function proceedToStep3() {
     updateWizardUI();
     
     const logDiv = document.getElementById('collectionLog');
-    logDiv.innerHTML = '<p class="text-gray-600">Starting system information collection...</p>';
+    logDiv.innerHTML = '<p class="termix-muted">Starting system information collection...</p>';
     
     try {
         const collectPayload = {
@@ -512,10 +512,10 @@ async function proceedToStep3() {
                         
                         if (eventData.type === 'start') {
                             totalHosts = eventData.total;
-                            logDiv.innerHTML = `<p class="text-gray-600">Collecting system info from ${totalHosts} hosts...</p>`;
+                            logDiv.innerHTML = `<p class="termix-muted">Collecting system info from ${totalHosts} hosts...</p>`;
                         } 
                         else if (eventData.type === 'progress') {
-                            logDiv.innerHTML = `<p class="text-gray-600">Processing host ${eventData.current + 1} of ${eventData.total}: ${eventData.message}</p>`;
+                            logDiv.innerHTML = `<p class="termix-muted">Processing host ${eventData.current + 1} of ${eventData.total}: ${eventData.message}</p>`;
                         }
                         else if (eventData.type === 'log') {
                             const ip = eventData.ip;
@@ -529,8 +529,8 @@ async function proceedToStep3() {
                             
                             const timestamp = new Date().toLocaleTimeString();
                             const logLine = document.createElement('p');
-                            logLine.className = 'text-xs text-gray-700';
-                            logLine.innerHTML = `<span class="text-gray-500">${timestamp}</span> ${eventData.message}`;
+                            logLine.className = 'text-xs termix-muted';
+                            logLine.innerHTML = `<span class="termix-muted">${timestamp}</span> ${eventData.message}`;
                             ipSections[ip].appendChild(logLine);
                             logDiv.scrollTop = logDiv.scrollHeight;
                         }
@@ -603,7 +603,7 @@ async function proceedToStep4() {
         data.devices.forEach(device => {
             const li = document.createElement('div');
             li.className = 'bg-white border border-gray-200 rounded p-2 text-sm';
-            li.innerHTML = `<p class="font-medium">${device.hostname}</p><p class="text-gray-600">${device.ip}</p>`;
+            li.innerHTML = `<p class="font-medium">${device.hostname}</p><p class="termix-muted">${device.ip}</p>`;
             devicesList.appendChild(li);
         });
     } catch (error) {
