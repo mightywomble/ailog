@@ -888,38 +888,41 @@
     </div>
     
     <!-- Add/Edit Host Modal -->
-    <div id="host-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="bg-white/80 backdrop-blur-lg rounded-lg shadow-xl p-6 w-full max-w-lg">
-             <h3 id="host-modal-title" class="text-xl font-semibold mb-6 text-black">Add New Host</h3>
-             <form id="host-form" class="space-y-4">
-                 <input type="hidden" id="host-id-input">
-                 <div>
-                     <label for="host-friendly-name-input" class="block text-sm font-medium text-black">Friendly Name</label>
-                     <input type="text" id="host-friendly-name-input" class="mt-1 w-full bg-white/80 border border-white/10 rounded px-3 py-2" required>
-                 </div>
-                 <div>
-                     <label for="host-ip-input" class="block text-sm font-medium text-black">IP Address or Hostname</label>
-                     <input type="text" id="host-ip-input" class="mt-1 w-full bg-white/80 border border-white/10 rounded px-3 py-2" required>
-                 </div>
-                 <div>
-                     <label for="host-user-input" class="block text-sm font-medium text-black">SSH User</label>
-                     <input type="text" id="host-user-input" class="mt-1 w-full bg-white/80 border border-white/10 rounded px-3 py-2" required>
-                 </div>
-                 <div>
-                     <label for="host-description-input" class="block text-sm font-medium text-black">Description</label>
-                     <textarea id="host-description-input" rows="2" class="mt-1 w-full bg-white/80 border border-white/10 rounded px-3 py-2"></textarea>
-                 </div>
-                 
-                 <div id="host-test-status" class="text-sm p-2 rounded-md hidden"></div>
-
-                 <div class="flex justify-between items-center pt-4">
-                    <button type="button" id="host-modal-cancel-btn" class="px-4 py-2 rounded-md bg-white/10 hover:bg-white/50">Cancel</button>
-                    <div id="host-form-actions" class="flex items-center space-x-2">
-                        <button type="button" id="host-test-btn" class="px-4 py-2 rounded-md bg-yellow-500 hover:bg-yellow-400 text-black">Test Connection</button>
-                        <button type="submit" id="host-save-btn" class="px-4 py-2 rounded-md bg-green-600 hover:bg-green-500 hidden">Save Host</button>
+    <div id="host-modal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50">
+        <div class="glass-container w-full max-w-lg overflow-hidden border border-white/10">
+            <div class="termix-panel px-6 py-4 flex items-center justify-between border-b border-white/10">
+                <h3 id="host-modal-title" class="text-xl font-semibold termix-text">Add New Host</h3>
+                <button type="button" id="host-modal-x" class="termix-muted hover:termix-text text-2xl leading-none" aria-label="Close">&times;</button>
+            </div>
+            <div class="p-6">
+                <form id="host-form" class="space-y-4">
+                    <input type="hidden" id="host-id-input">
+                    <div>
+                        <label for="host-friendly-name-input" class="block text-sm font-medium termix-muted mb-1">Friendly Name</label>
+                        <input type="text" id="host-friendly-name-input" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100" required>
                     </div>
-                 </div>
-             </form>
+                    <div>
+                        <label for="host-ip-input" class="block text-sm font-medium termix-muted mb-1">IP Address or Hostname</label>
+                        <input type="text" id="host-ip-input" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100" required>
+                    </div>
+                    <div>
+                        <label for="host-user-input" class="block text-sm font-medium termix-muted mb-1">SSH User</label>
+                        <input type="text" id="host-user-input" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100" required>
+                    </div>
+                    <div>
+                        <label for="host-description-input" class="block text-sm font-medium termix-muted mb-1">Description</label>
+                        <textarea id="host-description-input" rows="2" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100"></textarea>
+                    </div>
+                    <div id="host-test-status" class="text-sm p-3 rounded-lg border border-white/10 bg-white/5 hidden"></div>
+                    <div class="flex justify-between items-center pt-2">
+                        <button type="button" id="host-modal-cancel-btn" class="termix-btn">Cancel</button>
+                        <div id="host-form-actions" class="flex items-center space-x-2">
+                            <button type="button" id="host-test-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors">Test Connection</button>
+                            <button type="submit" id="host-save-btn" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors hidden">Save Host</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -1006,6 +1009,7 @@
         const hostTestBtn = document.getElementById('host-test-btn');
         const hostSaveBtn = document.getElementById('host-save-btn');
         const hostModalCancelBtn = document.getElementById('host-modal-cancel-btn');
+        const hostModalXBtn = document.getElementById('host-modal-x');
         
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progress-bar');
@@ -2513,6 +2517,9 @@
                 hostModal.classList.add('hidden');
                 settingsModal.classList.remove('hidden');
             });
+        if (typeof hostModalXBtn !== 'undefined' && hostModalXBtn) {
+            hostModalXBtn.addEventListener('click', () => hostModalCancelBtn.click());
+        }
         }
         
         hostListDiv.addEventListener('click', async (e) => {
