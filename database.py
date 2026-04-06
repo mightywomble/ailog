@@ -272,3 +272,137 @@ class ScheduleSource(db.Model):
             'type': self.source_type,
             'name': self.source_name,
         }
+
+
+# -----------------------------
+# Suricata (remote sensor) data
+# -----------------------------
+
+class SuricataSensor(db.Model):
+    __tablename__ = 'suricata_sensors'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False)
+    host = db.Column(db.String(256), nullable=False)
+    user = db.Column(db.String(64), nullable=False)
+    ssh_key_id = db.Column(db.Integer, db.ForeignKey('ssh_keys.id'), nullable=True)
+    log_dir = db.Column(db.String(512), nullable=False, default='/var/log/suricata')
+    enabled = db.Column(db.Boolean, default=True)
+    ingest_interval_seconds = db.Column(db.Integer, default=30)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    ssh_key = db.relationship('SSHKey')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'host': self.host,
+            'user': self.user,
+            'ssh_key_id': self.ssh_key_id,
+            'log_dir': self.log_dir,
+            'enabled': bool(self.enabled),
+            'ingest_interval_seconds': self.ingest_interval_seconds,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SuricataIngestState(db.Model):
+    __tablename__ = 'suricata_ingest_state'
+
+    id = db.Column(db.Integer, primary_key=True)
+    sensor_id = db.Column(db.Integer, db.ForeignKey('suricata_sensors.id'), nullable=False, index=True)
+    filename = db.Column(db.String(64), nullable=False)  # eve.json, fast.log, stats.log, suricata.log
+
+    last_inode = db.Column(db.String(64), nullable=True)
+    last_size = db.Column(db.Integer, nullable=True)
+    last_offset = db.Column(db.Integer, nullable=False, default=0)
+    last_mtime = db.Column(db.Integer, nullable=True)
+
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    sensor = db.relationship('SuricataSensor')
+
+    __table_args__ = (
+        db.UniqueConstraint('sensor_id', 'filename', name='uq_suricata_ingest_state_sensor_filename'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'sensor_id': self.sensor_id,
+            'filename': self.filename,
+            'last_inode': self.last_inode,
+            'last_size': self.last_size,
+            'last_offset': self.last_offset,
+            'last_mtime': self.last_mtime,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SuricataStatsCounterBucket(db.Model):
+    __tablename__ = 'suricata_stats_counter_buckets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    sensor_id = db.Column(db.Integer, db.ForeignKey('suricata_sensors.id'), nullable=False, index=True)
+    bucket_ts = db.Column(db.Integer, nullable=False, index=True)  # epoch seconds bucket start
+    counter = db.Column(db.String(256), nullable=False, index=True)
+    tm_name = db.Column(db.String(128), nullable=True)
+    value = db.Column(db.BigInteger, nullable=False)
+
+    sensor = db.relationship('SuricataSensor')
+
+    __table_args__ = (
+        db.Index('idx_suricata_stats_sensor_bucket_counter', 'sensor_id', 'bucket_ts', 'counter'),
+    )
+
+
+class SuricataFastAlertBucket(db.Model):
+    __tablename__ = 'suricata_fast_alert_buckets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    sensor_id = db.Column(db.Integer, db.ForeignKey('suricata_sensors.id'), nullable=False, index=True)
+    bucket_ts = db.Column(db.Integer, nullable=False, index=True)
+    sid = db.Column(db.Integer, nullable=True, index=True)
+    msg = db.Column(db.String(512), nullable=True)
+    classification = db.Column(db.String(256), nullable=True)
+    priority = db.Column(db.Integer, nullable=True)
+    proto = db.Column(db.String(16), nullable=True)
+    src_ip = db.Column(db.String(64), nullable=True, index=True)
+    dst_ip = db.Column(db.String(64), nullable=True, index=True)
+    src_port = db.Column(db.Integer, nullable=True, index=True)
+    dst_port = db.Column(db.Integer, nullable=True, index=True)
+    count = db.Column(db.Integer, nullable=False, default=1)
+
+    sensor = db.relationship('SuricataSensor')
+
+    __table_args__ = (
+        db.Index('idx_suricata_fast_sensor_bucket', 'sensor_id', 'bucket_ts'),
+    )
+
+
+class SuricataAlertBucket(db.Model):
+    __tablename__ = 'suricata_alert_buckets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    sensor_id = db.Column(db.Integer, db.ForeignKey('suricata_sensors.id'), nullable=False, index=True)
+    bucket_ts = db.Column(db.Integer, nullable=False, index=True)
+    signature_id = db.Column(db.Integer, nullable=True, index=True)
+    signature = db.Column(db.String(512), nullable=True)
+    category = db.Column(db.String(256), nullable=True)
+    severity = db.Column(db.Integer, nullable=True)
+    src_ip = db.Column(db.String(64), nullable=True, index=True)
+    dst_ip = db.Column(db.String(64), nullable=True, index=True)
+    src_port = db.Column(db.Integer, nullable=True, index=True)
+    dst_port = db.Column(db.Integer, nullable=True, index=True)
+    proto = db.Column(db.String(16), nullable=True)
+    app_proto = db.Column(db.String(32), nullable=True)
+    count = db.Column(db.Integer, nullable=False, default=1)
+
+    sensor = db.relationship('SuricataSensor')
+
+    __table_args__ = (
+        db.Index('idx_suricata_alert_sensor_bucket', 'sensor_id', 'bucket_ts'),
+    )

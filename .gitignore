@@ -16,3 +16,16 @@ hosts.json
 instance/*.db
 instance/*.db-journal
 instance/*.db-wal
+
+# Local runtime / database artifacts
+instance/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment files
+.env
+.env.*

@@ -20,8 +20,8 @@ import ast
 import tempfile
 from sqlalchemy import text as sql_text
 import shutil
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource
-from wizard_helpers import test_ssh_connection, collect_system_info, collect_services
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket
+from wizard_helpers import test_ssh_connection, collect_system_info, collect_services, execute_remote_command
 
 # --- INITIALIZATION ---
 app = Flask(__name__)
@@ -33,8 +33,43 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
 # Create database tables on startup
+
+def _ensure_suricata_endpoint_columns():
+    """Lightweight SQLite migration: add endpoint/port columns used by Endpoint Stats."""
+    try:
+        uri = str(app.config.get('SQLALCHEMY_DATABASE_URI') or '')
+        if not uri.startswith('sqlite'):
+            return
+    except Exception:
+        return
+
+    def _col_exists(table: str, col: str) -> bool:
+        try:
+            rows = db.session.execute(sql_text(f"PRAGMA table_info({table})")).fetchall()
+            return any(r[1] == col for r in rows)
+        except Exception:
+            return False
+
+    def _add_col(table: str, col: str, decl: str):
+        if _col_exists(table, col):
+            return
+        try:
+            db.session.execute(sql_text(f"ALTER TABLE {table} ADD COLUMN {col} {decl}"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    for c, decl in [('src_ip','TEXT'),('dst_ip','TEXT'),('src_port','INTEGER'),('dst_port','INTEGER')]:
+        _add_col('suricata_fast_alert_buckets', c, decl)
+
+    for c, decl in [('src_ip','TEXT'),('dst_ip','TEXT'),('src_port','INTEGER'),('dst_port','INTEGER'),('proto','TEXT'),('app_proto','TEXT')]:
+        _add_col('suricata_alert_buckets', c, decl)
+
+
+
 with app.app_context():
     db.create_all()
+    _ensure_suricata_endpoint_columns()
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -134,6 +169,14 @@ DEFAULT_ALERT_KEYWORDS = DISCORD_ALERT_KEYWORDS
 
 def get_ai_search_prompt():
     return (_setting_get('ai.search_prompt', DEFAULT_AI_SEARCH_PROMPT) or DEFAULT_AI_SEARCH_PROMPT).strip()
+
+DEFAULT_SURICATA_PROMPT = "Analyse this data and provide a summary and executive summary for an engineer to understand what it is telling them."
+
+def get_suricata_prompt():
+    return _setting_get('suricata.prompt', DEFAULT_SURICATA_PROMPT)
+
+def set_suricata_prompt(prompt: str):
+    _setting_set('suricata.prompt', (prompt or DEFAULT_SURICATA_PROMPT).strip())
 
 
 def get_ai_alert_keywords():
@@ -1349,6 +1392,18 @@ def ai_search_config():
         return jsonify({'search_prompt': get_ai_search_prompt(), 'alert_keywords': get_ai_alert_keywords(), 'message': 'AI search settings saved.'})
     return jsonify({'search_prompt': get_ai_search_prompt(), 'alert_keywords': get_ai_alert_keywords()})
 
+@app.route('/suricata/prompt', methods=['GET', 'POST'])
+def suricata_prompt_config():
+    if request.method == 'GET':
+        return jsonify({'prompt': get_suricata_prompt()})
+
+    data = request.get_json(force=True, silent=True) or {}
+    prompt = (data.get('prompt') or '').strip()
+    if not prompt:
+        prompt = DEFAULT_SURICATA_PROMPT
+    set_suricata_prompt(prompt)
+    return jsonify({'prompt': get_suricata_prompt()})
+
 
 @app.route('/discord/config', methods=['GET', 'POST'])
 def discord_config():
@@ -1544,6 +1599,50 @@ def analyse_log():
             discord_sent = True
 
         return jsonify({'analysis': analysis, 'discord_sent': discord_sent})
+    except Exception as e:
+        return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
+
+
+@app.route('/suricata/analyse', methods=['POST'])
+def suricata_analyse():
+    data = request.get_json(silent=True) or {}
+    log_content = data.get('log_content')
+    log_name = data.get('log_name') or 'Suricata Raw Data'
+    provider = data.get('provider', 'openai')
+
+    if not log_content:
+        return jsonify({'error': 'Missing log_content.'}), 400
+
+    prompt = (data.get('prompt') or '').strip() or get_suricata_prompt()
+
+    try:
+        if provider == 'ollama':
+            config = load_config()
+            ollama_url = config.get('ollama_url')
+            ollama_model = config.get('ollama_model')
+            if not ollama_url or not ollama_model:
+                return jsonify({'error': 'Ollama not configured. Please set it up in Settings.'}), 400
+            analysis = analyse_with_ollama(f"{prompt}\n\n{log_content}", log_name, ollama_url, ollama_model)
+        else:
+            api_key = data.get('api_key')
+            if not api_key:
+                return jsonify({'error': 'OpenAI API key not provided.'}), 400
+
+            truncated_content = log_content
+            if len(log_content) > MAX_CHAR_COUNT:
+                truncated_content = f"[--- Data truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+
+            client = openai.OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that analyses Suricata data."},
+                    {"role": "user", "content": f"{prompt}\n\n--- DATA for {log_name} ---\n{truncated_content}"},
+                ]
+            )
+            analysis = response.choices[0].message.content
+
+        return jsonify({'analysis': analysis})
     except Exception as e:
         return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
 
@@ -2193,8 +2292,791 @@ def initialize_app():
     print("============================")
 
 
+# --- SURICATA SENSOR SUPPORT ---
+SURICATA_ALLOWED_FILES = ['eve.json', 'fast.log', 'stats.log', 'suricata.log']
+
+# Cache SSH key temp files (key_id -> path)
+_suricata_key_cache = {}
+
+def _suricata_cleanup_key_cache():
+    for p in list(_suricata_key_cache.values()):
+        try:
+            if p and os.path.exists(p):
+                os.unlink(p)
+        except Exception:
+            pass
+
+atexit.register(_suricata_cleanup_key_cache)
+
+
+def _suricata_get_ssh_key_path(ssh_key_id: int | None) -> str | None:
+    """Return a local temp file path containing the SSH private key for this id."""
+    if not ssh_key_id:
+        return None
+    if ssh_key_id in _suricata_key_cache and os.path.exists(_suricata_key_cache[ssh_key_id]):
+        return _suricata_key_cache[ssh_key_id]
+
+    key = SSHKey.query.get(int(ssh_key_id))
+    if not key:
+        return None
+
+    tf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
+    tf.write(key.key_content or '')
+    tf.flush()
+    tf.close()
+    os.chmod(tf.name, 0o600)
+    _suricata_key_cache[ssh_key_id] = tf.name
+    return tf.name
+
+
+def _suricata_bucket_ts(epoch_seconds: int, bucket_size: int) -> int:
+    return int(epoch_seconds // bucket_size) * bucket_size
+
+
+def _parse_suricata_ts(value: str) -> int | None:
+    """Parse Suricata timestamp strings to epoch seconds."""
+    if not value:
+        return None
+    v = value.strip()
+    # eve.json timestamps are ISO-like; allow trailing Z
+    try:
+        if v.endswith('Z'):
+            v = v[:-1] + '+00:00'
+        dt = datetime.datetime.fromisoformat(v)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        pass
+    # fast.log timestamps are MM/DD/YYYY-HH:MM:SS.uuuuuu
+    try:
+        dt = datetime.datetime.strptime(v, '%m/%d/%Y-%H:%M:%S.%f')
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return None
+
+
+def _suricata_remote_cmd(user: str, host: str, cmd: str, ssh_key_path: str | None, timeout: int = 20) -> tuple[bool, str]:
+    return execute_remote_command(user, host, cmd, ssh_key_path=ssh_key_path, timeout=timeout)
+
+
+def _suricata_remote_stat(user: str, host: str, ssh_key_path: str | None, path: str) -> dict:
+    # inode size mtime
+    ok, out = _suricata_remote_cmd(user, host, f"sudo stat -c '%i %s %Y' {shlex.quote(path)}", ssh_key_path, timeout=20)
+    if not ok:
+        return {'ok': False, 'error': out.strip()[:200]}
+    try:
+        inode, size, mtime = out.strip().split()[:3]
+        return {'ok': True, 'inode': inode, 'size': int(size), 'mtime': int(mtime)}
+    except Exception:
+        return {'ok': False, 'error': f'Could not parse stat output: {out.strip()[:200]}'}
+
+
+def _suricata_incremental_read(user: str, host: str, ssh_key_path: str | None, path: str, offset: int, max_bytes: int) -> tuple[bool, str]:
+    # dd is widely available and allows byte offsets; cap read size.
+    cmd = f"sudo dd if={shlex.quote(path)} bs=1 skip={int(offset)} count={int(max_bytes)} status=none 2>/dev/null"
+    return _suricata_remote_cmd(user, host, cmd, ssh_key_path, timeout=60)
+
+
+def _suricata_get_or_create_state(sensor_id: int, filename: str) -> SuricataIngestState:
+    st = SuricataIngestState.query.filter_by(sensor_id=sensor_id, filename=filename).first()
+    if st:
+        return st
+    st = SuricataIngestState(sensor_id=sensor_id, filename=filename, last_offset=0)
+    db.session.add(st)
+    db.session.commit()
+    return st
+
+
+def _suricata_ingest_fast_log(sensor: SuricataSensor, content: str, bucket_size: int) -> dict:
+    # Format:
+    # 03/21/2021-20:24:02.524057  [**] [1:2006380:14] MSG [**] [Classification: ...] [Priority: 1] {TCP} src:port -> dst:port
+    rx = re.compile(r'^(?P<ts>\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+)\s+\[\*\*\]\s+\[(?P<gid>\d+):(?P<sid>\d+):(?P<rev>\d+)\]\s+(?P<msg>.*?)\s+\[\*\*\]\s+\[Classification:\s+(?P<class>.*?)\]\s+\[Priority:\s+(?P<prio>\d+)\]\s+\{(?P<proto>\w+)\}\s+(?P<src>[^\s]+)\s+->\s+(?P<dst>[^\s]+)')
+    rows = 0
+    for line in content.splitlines():
+        m = rx.match(line)
+        if not m:
+            continue
+        epoch = _parse_suricata_ts(m.group('ts'))
+        if epoch is None:
+            continue
+        bts = _suricata_bucket_ts(epoch, bucket_size)
+        sid = int(m.group('sid'))
+        msg = (m.group('msg') or '')[:512]
+        classification = (m.group('class') or '')[:256]
+        priority = int(m.group('prio'))
+        proto = (m.group('proto') or '')[:16]
+        src_raw = m.group('src')
+        dst_raw = m.group('dst')
+        src_ip, src_port = None, None
+        dst_ip, dst_port = None, None
+        try:
+            if src_raw and ':' in src_raw:
+                src_ip, sp = src_raw.rsplit(':', 1)
+                src_port = int(sp)
+            else:
+                src_ip = src_raw
+        except Exception:
+            pass
+        try:
+            if dst_raw and ':' in dst_raw:
+                dst_ip, dp = dst_raw.rsplit(':', 1)
+                dst_port = int(dp)
+            else:
+                dst_ip = dst_raw
+        except Exception:
+            pass
+
+        db.session.add(SuricataFastAlertBucket(
+            sensor_id=sensor.id,
+            bucket_ts=bts,
+            sid=sid,
+            msg=msg,
+            classification=classification,
+            priority=priority,
+            proto=proto,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            src_port=src_port,
+            dst_port=dst_port,
+            count=1,
+        ))
+        rows += 1
+    return {'fast_rows': rows}
+
+
+def _suricata_ingest_eve_alerts(sensor: SuricataSensor, content: str, bucket_size: int) -> dict:
+    rows = 0
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if obj.get('event_type') != 'alert':
+            continue
+        epoch = _parse_suricata_ts(obj.get('timestamp') or '')
+        if epoch is None:
+            continue
+        bts = _suricata_bucket_ts(epoch, bucket_size)
+        alert = obj.get('alert') or {}
+        sig_id = alert.get('signature_id')
+        sig = (alert.get('signature') or '')[:512]
+        cat = (alert.get('category') or '')[:256]
+        sev = alert.get('severity')
+        try:
+            sig_id = int(sig_id) if sig_id is not None else None
+        except Exception:
+            sig_id = None
+        try:
+            sev = int(sev) if sev is not None else None
+        except Exception:
+            sev = None
+
+        src_ip = (obj.get('src_ip') or None)
+        dst_ip = (obj.get('dest_ip') or obj.get('dst_ip') or None)
+        src_port = obj.get('src_port')
+        dst_port = obj.get('dest_port') or obj.get('dst_port')
+        proto = (obj.get('proto') or None)
+        app_proto = (obj.get('app_proto') or None)
+        try:
+            src_port = int(src_port) if src_port is not None else None
+        except Exception:
+            src_port = None
+        try:
+            dst_port = int(dst_port) if dst_port is not None else None
+        except Exception:
+            dst_port = None
+        db.session.add(SuricataAlertBucket(
+            sensor_id=sensor.id,
+            bucket_ts=bts,
+            signature_id=sig_id,
+            signature=sig,
+            category=cat,
+            severity=sev,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            src_port=src_port,
+            dst_port=dst_port,
+            proto=proto,
+            app_proto=app_proto,
+            count=1,
+        ))
+        rows += 1
+    return {'eve_alert_rows': rows}
+
+
+def _suricata_ingest_stats_log(sensor: SuricataSensor, content: str, bucket_size: int, allow_counters: set[str]) -> dict:
+    # Parse blocks starting with: Date: 4/8/2024 -- 16:17:28 (uptime: ...)
+    # Then table lines: counter | TM Name | Value
+    date_rx = re.compile(r'^Date:\s+(?P<d>\d{1,2}/\d{1,2}/\d{4})\s+--\s+(?P<t>\d{2}:\d{2}:\d{2})')
+    row_rx = re.compile(r'^(?P<counter>[A-Za-z0-9_\.\-]+)\s*\|\s*(?P<tm>[^|]+?)\s*\|\s*(?P<val>-?\d+)\s*$')
+
+    current_epoch = None
+    rows = 0
+    for line in content.splitlines():
+        line = line.rstrip('\n')
+        dm = date_rx.match(line.strip())
+        if dm:
+            try:
+                dt = datetime.datetime.strptime(dm.group('d') + ' ' + dm.group('t'), '%m/%d/%Y %H:%M:%S')
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+                current_epoch = int(dt.timestamp())
+            except Exception:
+                current_epoch = None
+            continue
+        rm = row_rx.match(line)
+        if not rm or current_epoch is None:
+            continue
+        counter = rm.group('counter')
+        if allow_counters and counter not in allow_counters:
+            continue
+        tm = (rm.group('tm') or '').strip()[:128]
+        try:
+            val = int(rm.group('val'))
+        except Exception:
+            continue
+        bts = _suricata_bucket_ts(current_epoch, bucket_size)
+        db.session.add(SuricataStatsCounterBucket(
+            sensor_id=sensor.id,
+            bucket_ts=bts,
+            counter=counter,
+            tm_name=tm,
+            value=val,
+        ))
+        rows += 1
+    return {'stats_rows': rows}
+
+
+def suricata_ingest_sensor(sensor: SuricataSensor, bucket_size: int, max_bytes_per_file: int = 2_000_000) -> dict:
+    """Incrementally ingest Suricata files for a single sensor."""
+    ssh_key_path = None
+    with app.app_context():
+        ssh_key_path = _suricata_get_ssh_key_path(sensor.ssh_key_id)
+
+    base = sensor.log_dir.rstrip('/')
+    summary = {'sensor_id': sensor.id, 'files': {}, 'errors': []}
+
+    # Only store a few counters that are useful for graphs/KPIs
+    allow_counters = {
+        'decoder.pkts',
+        'decoder.bytes',
+        'capture.kernel_drops',
+        'capture.kernel_packets',
+        'tcp.reassembly_gap',
+        'detect.alert',
+        'flow.memuse',
+        'tcp.memuse',
+    }
+
+    for fn in SURICATA_ALLOWED_FILES:
+        full = f"{base}/{fn}"
+        st = _suricata_get_or_create_state(sensor.id, fn)
+        stat = _suricata_remote_stat(sensor.user, sensor.host, ssh_key_path, full)
+        if not stat.get('ok'):
+            summary['files'][fn] = {'ok': False, 'error': stat.get('error')}
+            continue
+
+        inode = str(stat['inode'])
+        size = int(stat['size'])
+        mtime = int(stat['mtime'])
+
+        # Rotation/truncation detection
+        if st.last_inode and st.last_inode != inode:
+            st.last_offset = 0
+        if st.last_size is not None and size < int(st.last_size or 0):
+            st.last_offset = 0
+
+        offset = int(st.last_offset or 0)
+        if offset > size:
+            offset = 0
+
+        to_read = min(max_bytes_per_file, max(0, size - offset))
+        if to_read <= 0:
+            st.last_inode = inode
+            st.last_size = size
+            st.last_mtime = mtime
+            db.session.commit()
+            summary['files'][fn] = {'ok': True, 'read_bytes': 0, 'size': size, 'mtime': mtime}
+            continue
+
+        ok, chunk = _suricata_incremental_read(sensor.user, sensor.host, ssh_key_path, full, offset, to_read)
+        if not ok:
+            summary['files'][fn] = {'ok': False, 'error': (chunk or '').strip()[:200]}
+            continue
+
+        # Ingest content
+        try:
+            if fn == 'fast.log':
+                out = _suricata_ingest_fast_log(sensor, chunk, bucket_size)
+            elif fn == 'eve.json':
+                out = _suricata_ingest_eve_alerts(sensor, chunk, bucket_size)
+            elif fn == 'stats.log':
+                out = _suricata_ingest_stats_log(sensor, chunk, bucket_size, allow_counters)
+            else:
+                out = {'skipped': True}
+
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            summary['errors'].append(f"{fn}: {str(e)[:200]}")
+            out = {'error': str(e)[:200]}
+
+        # Update ingest state
+        st.last_inode = inode
+        st.last_size = size
+        st.last_mtime = mtime
+        st.last_offset = offset + len(chunk.encode('utf-8', errors='ignore'))
+        db.session.commit()
+
+        summary['files'][fn] = {'ok': True, 'read_bytes': to_read, 'size': size, 'mtime': mtime, **out}
+
+    return summary
+
+
+def suricata_ingest_all_enabled() -> list[dict]:
+    results = []
+    with app.app_context():
+        sensors = SuricataSensor.query.filter_by(enabled=True).all()
+        for sensor in sensors:
+            try:
+                results.append(suricata_ingest_sensor(sensor, bucket_size=60))
+            except Exception as e:
+                results.append({'sensor_id': sensor.id, 'error': str(e)[:200]})
+    return results
+
+
+def startup_suricata_ingest_jobs():
+    """Ensure there is one APScheduler job to ingest Suricata sensors."""
+    def _job():
+        try:
+            suricata_ingest_all_enabled()
+        except Exception as e:
+            print(f"[WARN] Suricata ingest job failed: {e}")
+
+    # Run every 30s; sensors can be individually throttled later.
+    scheduler.add_job(_job, trigger='interval', seconds=30, id='suricata_ingest', replace_existing=True)
+
+
+@app.route('/suricata/config', methods=['GET', 'POST'])
+def suricata_config():
+    if request.method == 'GET':
+        sensors = SuricataSensor.query.order_by(SuricataSensor.updated_at.desc(), SuricataSensor.id.desc()).all()
+        return jsonify([s.to_dict() for s in sensors])
+
+    data = request.get_json(force=True, silent=True) or {}
+    sensor_id = data.get('id')
+
+    name = (data.get('name') or 'Suricata Sensor').strip()[:128]
+    host = (data.get('host') or '').strip()[:256]
+    user = (data.get('user') or '').strip()[:64]
+    log_dir = (data.get('log_dir') or '/var/log/suricata').strip()[:512]
+    enabled = bool(data.get('enabled', True))
+    ingest_interval_seconds = int(data.get('ingest_interval_seconds') or 30)
+    ingest_interval_seconds = max(5, min(3600, ingest_interval_seconds))
+    ssh_key_id = data.get('ssh_key_id')
+    ssh_key_id = int(ssh_key_id) if str(ssh_key_id).isdigit() else None
+
+    if not host or not user:
+        return jsonify({'error': 'host and user are required'}), 400
+
+    if sensor_id:
+        sensor = SuricataSensor.query.get(int(sensor_id))
+        if not sensor:
+            return jsonify({'error': 'sensor not found'}), 404
+    else:
+        # If the UI didn't send an id, update the most recent sensor (single-sensor UX)
+        sensor = SuricataSensor.query.order_by(SuricataSensor.updated_at.desc(), SuricataSensor.id.desc()).first()
+        if not sensor:
+            sensor = SuricataSensor()
+            db.session.add(sensor)
+
+    sensor.name = name
+    sensor.host = host
+    sensor.user = user
+    sensor.log_dir = log_dir
+    sensor.enabled = enabled
+    sensor.ingest_interval_seconds = ingest_interval_seconds
+    sensor.ssh_key_id = ssh_key_id
+
+    db.session.commit()
+
+    return jsonify(sensor.to_dict())
+
+
+@app.route('/suricata/test', methods=['POST'])
+def suricata_test():
+    data = request.get_json(force=True, silent=True) or {}
+    host = (data.get('host') or '').strip()
+    user = (data.get('user') or '').strip()
+    log_dir = (data.get('log_dir') or '/var/log/suricata').strip()
+    ssh_key_id = data.get('ssh_key_id')
+    ssh_key_id = int(ssh_key_id) if str(ssh_key_id).isdigit() else None
+
+    if not host or not user:
+        return jsonify({'error': 'host and user are required'}), 400
+
+    ssh_key_path = None
+    with app.app_context():
+        ssh_key_path = _suricata_get_ssh_key_path(ssh_key_id)
+
+    conn = test_ssh_connection(user, host, ssh_key_path, timeout=8)
+    if conn.get('status') != 'success':
+        return jsonify({'ok': False, 'connection': conn}), 200
+
+    # Check directory listing
+    ok, out = _suricata_remote_cmd(user, host, f"sudo ls -1 {shlex.quote(log_dir)}", ssh_key_path, timeout=20)
+    dir_ok = bool(ok)
+
+    files = {}
+    for fn in SURICATA_ALLOWED_FILES:
+        full = log_dir.rstrip('/') + '/' + fn
+        stat = _suricata_remote_stat(user, host, ssh_key_path, full)
+        files[fn] = stat
+
+    return jsonify({
+        'ok': True,
+        'connection': conn,
+        'dir_ok': dir_ok,
+        'dir_list': out.splitlines()[:200] if ok else out.strip()[:200],
+        'files': files,
+    })
+
+
+@app.route('/suricata/ingest/run_once', methods=['POST'])
+def suricata_ingest_run_once():
+    data = request.get_json(force=True, silent=True) or {}
+    sensor_id = data.get('sensor_id')
+    bucket_size = int(data.get('bucket_size') or 60)
+    bucket_size = max(60, min(3600, bucket_size))
+
+    with app.app_context():
+        if sensor_id:
+            sensor = SuricataSensor.query.get(int(sensor_id))
+            if not sensor:
+                return jsonify({'error': 'sensor not found'}), 404
+            res = suricata_ingest_sensor(sensor, bucket_size=bucket_size)
+            return jsonify(res)
+        else:
+            return jsonify({'results': suricata_ingest_all_enabled()})
+
+
+@app.route('/suricata/stats', methods=['GET'])
+def suricata_stats():
+    sensor_id = request.args.get('sensor_id', type=int)
+    range_key = (request.args.get('range') or '24h').strip()
+    if range_key not in ('1h', '6h', '24h', '7d'):
+        range_key = '24h'
+
+    seconds = {'1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800}[range_key]
+    now = int(time.time())
+    start = now - seconds
+
+    with app.app_context():
+        if sensor_id:
+            sensor = SuricataSensor.query.get(int(sensor_id))
+        else:
+            sensor = SuricataSensor.query.order_by(SuricataSensor.id.asc()).first()
+        if not sensor:
+            return jsonify({'error': 'no sensor configured'}), 400
+
+        # Alerts time series (prefer eve buckets, fallback to fast buckets)
+        eve_series = db.session.query(SuricataAlertBucket.bucket_ts, sql_text('sum(count) as c'))\
+            .filter(SuricataAlertBucket.sensor_id == sensor.id, SuricataAlertBucket.bucket_ts >= start)\
+            .group_by(SuricataAlertBucket.bucket_ts)\
+            .order_by(SuricataAlertBucket.bucket_ts.asc()).all()
+
+        fast_series = db.session.query(SuricataFastAlertBucket.bucket_ts, sql_text('sum(count) as c'))\
+            .filter(SuricataFastAlertBucket.sensor_id == sensor.id, SuricataFastAlertBucket.bucket_ts >= start)\
+            .group_by(SuricataFastAlertBucket.bucket_ts)\
+            .order_by(SuricataFastAlertBucket.bucket_ts.asc()).all()
+
+        series = eve_series if eve_series else fast_series
+        alerts_timeseries = [{'ts': int(ts), 'alerts': int(c)} for (ts, c) in series]
+
+        total_alerts = sum(p['alerts'] for p in alerts_timeseries)
+        alerts_per_hour = (total_alerts / (seconds / 3600)) if seconds else 0
+
+        # Top signatures
+        top = db.session.query(SuricataAlertBucket.signature, sql_text('sum(count) as c'))\
+            .filter(SuricataAlertBucket.sensor_id == sensor.id, SuricataAlertBucket.bucket_ts >= start)\
+            .group_by(SuricataAlertBucket.signature)\
+            .order_by(sql_text('c desc')).limit(10).all()
+        top_signatures = [{'signature': (sig or 'unknown'), 'count': int(c)} for (sig, c) in top]
+
+        # Pie by category
+        cat = db.session.query(SuricataAlertBucket.category, sql_text('sum(count) as c'))\
+            .filter(SuricataAlertBucket.sensor_id == sensor.id, SuricataAlertBucket.bucket_ts >= start)\
+            .group_by(SuricataAlertBucket.category)\
+            .order_by(sql_text('c desc')).limit(8).all()
+        pie_categories = [{'category': (categ or 'unknown'), 'count': int(c)} for (categ, c) in cat]
+
+        # Selected stats counters timeseries
+        counters = ['decoder.pkts', 'decoder.bytes', 'capture.kernel_drops', 'tcp.reassembly_gap', 'detect.alert']
+        counter_series = {}
+        for cn in counters:
+            rows = db.session.query(SuricataStatsCounterBucket.bucket_ts, SuricataStatsCounterBucket.value)\
+                .filter(SuricataStatsCounterBucket.sensor_id == sensor.id, SuricataStatsCounterBucket.bucket_ts >= start, SuricataStatsCounterBucket.counter == cn)\
+                .order_by(SuricataStatsCounterBucket.bucket_ts.asc()).all()
+            counter_series[cn] = [{'ts': int(ts), 'value': int(v)} for (ts, v) in rows]
+
+        # KPIs (simple v1)
+        kpis = {
+            'total_alerts': int(total_alerts),
+            'alerts_per_hour': float(alerts_per_hour),
+        }
+
+        return jsonify({
+            'sensor': sensor.to_dict(),
+            'range': range_key,
+            'kpis': kpis,
+            'alerts_timeseries': alerts_timeseries,
+            'top_signatures': top_signatures,
+            'pie_categories': pie_categories,
+            'counter_series': counter_series,
+            # Back-compat keys used by older frontend code
+            'alerts_series': alerts_timeseries,
+            'fast_alerts_series': [],
+            'stats_series': counter_series,
+        })
+
 
 # --- NEW WIZARD & SSH KEY MANAGEMENT ENDPOINTS ---
+
+@app.route('/suricata/endpoints', methods=['GET'])
+def suricata_endpoints():
+    """Return a simple endpoint summary by parsing recent fast.log + eve.json (alerts only)."""
+    sensor_id = request.args.get('sensor_id', type=int)
+    range_key = (request.args.get('range') or '24h').strip()
+    if range_key not in ('1h', '6h', '24h', '7d'):
+        range_key = '24h'
+
+    with app.app_context():
+        if sensor_id:
+            sensor = SuricataSensor.query.get(int(sensor_id))
+        else:
+            sensor = SuricataSensor.query.order_by(SuricataSensor.id.asc()).first()
+        if not sensor:
+            return jsonify({'error': 'no sensor configured'}), 400
+
+        ssh_key_path = _suricata_get_ssh_key_path(sensor.ssh_key_id)
+        base = sensor.log_dir.rstrip('/')
+
+        # Read recent lines (simple + fast). For deep history, use the DB buckets instead.
+        ok_fast, fast_txt = _suricata_remote_cmd(sensor.user, sensor.host, f"sudo tail -n 5000 {shlex.quote(base + '/fast.log')} 2>/dev/null", ssh_key_path, timeout=30)
+        ok_eve, eve_txt = _suricata_remote_cmd(sensor.user, sensor.host, f"sudo tail -n 5000 {shlex.quote(base + '/eve.json')} 2>/dev/null", ssh_key_path, timeout=30)
+
+        endpoints = {}
+
+        # Parse fast.log endpoints
+        fast_rx = re.compile(r'^(?P<ts>\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+).*?\{(?P<proto>\w+)\}\s+(?P<src_ip>\d+\.\d+\.\d+\.\d+):(?P<src_port>\d+)\s+->\s+(?P<dst_ip>\d+\.\d+\.\d+\.\d+):(?P<dst_port>\d+)')
+        if ok_fast:
+            for line in (fast_txt or '').splitlines():
+                m = fast_rx.match(line)
+                if not m:
+                    continue
+                dst = m.group('dst_ip')
+                proto = m.group('proto')
+                key = f"{dst}"
+                ent = endpoints.setdefault(key, {'endpoint': key, 'alerts': 0, 'protocols': {}, 'sources': {}})
+                ent['alerts'] += 1
+                ent['protocols'][proto] = ent['protocols'].get(proto, 0) + 1
+                src = m.group('src_ip')
+                ent['sources'][src] = ent['sources'].get(src, 0) + 1
+
+        # Parse eve.json alerts endpoints
+        if ok_eve:
+            for line in (eve_txt or '').splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if obj.get('event_type') != 'alert':
+                    continue
+                dst = obj.get('dest_ip')
+                src = obj.get('src_ip')
+                proto = obj.get('proto') or obj.get('app_proto') or 'unknown'
+                if not dst:
+                    continue
+                key = f"{dst}"
+                ent = endpoints.setdefault(key, {'endpoint': key, 'alerts': 0, 'protocols': {}, 'sources': {}})
+                ent['alerts'] += 1
+                ent['protocols'][proto] = ent['protocols'].get(proto, 0) + 1
+                if src:
+                    ent['sources'][src] = ent['sources'].get(src, 0) + 1
+
+        # Shape response: top protocols/sources
+        out = []
+        for ent in endpoints.values():
+            top_protos = sorted(ent['protocols'].items(), key=lambda x: x[1], reverse=True)[:5]
+            top_src = sorted(ent['sources'].items(), key=lambda x: x[1], reverse=True)[:5]
+            out.append({
+                'endpoint': ent['endpoint'],
+                'alerts': ent['alerts'],
+                'top_protocols': [{'name': n, 'count': c} for (n, c) in top_protos],
+                'top_sources': [{'ip': n, 'count': c} for (n, c) in top_src],
+            })
+
+        out.sort(key=lambda x: x['alerts'], reverse=True)
+        return jsonify({'sensor': sensor.to_dict(), 'range': range_key, 'endpoints': out[:200]})
+
+
+
+@app.route('/suricata/endpoint_stats', methods=['GET'])
+def suricata_endpoint_stats():
+    """DB-backed endpoint/port/source aggregates for the Endpoint Stats dashboard."""
+    sensor_id = request.args.get('sensor_id', type=int)
+    range_key = (request.args.get('range') or '24h').strip()
+    if range_key not in ('1h', '6h', '24h', '7d'):
+        range_key = '24h'
+    seconds = {'1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800}[range_key]
+    now = int(time.time())
+    start_ts = now - seconds
+
+    with app.app_context():
+        if sensor_id:
+            sensor = SuricataSensor.query.get(int(sensor_id))
+        else:
+            sensor = SuricataSensor.query.order_by(SuricataSensor.updated_at.desc(), SuricataSensor.id.desc()).first()
+        if not sensor:
+            return jsonify({'error': 'no sensor configured'}), 400
+
+        try:
+            have = db.session.query(sql_text('count(1)')).select_from(SuricataFastAlertBucket)                .filter(SuricataFastAlertBucket.sensor_id == sensor.id, SuricataFastAlertBucket.bucket_ts >= start_ts, SuricataFastAlertBucket.dst_ip.isnot(None)).scalar()
+        except Exception:
+            have = 0
+
+        if not have:
+            base = suricata_endpoints()
+            try:
+                payload = base.get_json()
+            except Exception:
+                payload = {'endpoints': []}
+            eps = payload.get('endpoints') or []
+            return jsonify({
+                'sensor': sensor.to_dict(),
+                'range': range_key,
+                'total_endpoints': len({e.get('endpoint') for e in eps if e.get('endpoint')}),
+                'alerts_by_endpoint': eps
+            })
+
+        rows = db.session.query(SuricataFastAlertBucket.dst_ip, sql_text('sum(count) as c'))            .filter(SuricataFastAlertBucket.sensor_id == sensor.id, SuricataFastAlertBucket.bucket_ts >= start_ts, SuricataFastAlertBucket.dst_ip.isnot(None))            .group_by(SuricataFastAlertBucket.dst_ip)            .order_by(sql_text('c desc')).limit(500).all()
+        alerts_by_endpoint = [{'endpoint': ip, 'alerts': int(c)} for (ip, c) in rows if ip]
+
+        port_rows = db.session.query(SuricataFastAlertBucket.dst_port, sql_text('sum(count) as c'))            .filter(SuricataFastAlertBucket.sensor_id == sensor.id, SuricataFastAlertBucket.bucket_ts >= start_ts, SuricataFastAlertBucket.dst_port.isnot(None))            .group_by(SuricataFastAlertBucket.dst_port)            .order_by(sql_text('c desc')).limit(200).all()
+        alerts_by_port = [{'port': int(p), 'alerts': int(c)} for (p, c) in port_rows if p is not None]
+
+        # If ports/sources are missing (older ingests before we stored dst_port/src_ip), derive them from a recent fast.log tail.
+        if not alerts_by_port:
+            try:
+                ssh_key_path = _suricata_get_ssh_key_path(sensor.ssh_key_id)
+                base_dir = sensor.log_dir.rstrip('/')
+                ok_fast, fast_txt = _suricata_remote_cmd(sensor.user, sensor.host, f"sudo tail -n 20000 {shlex.quote(base_dir + '/fast.log')} 2>/dev/null", ssh_key_path, timeout=30)
+                if ok_fast:
+                    fast_rx = re.compile(r'^(?P<ts>\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+).*?\{(?P<proto>\w+)\}\s+(?P<src_ip>\d+\.\d+\.\d+\.\d+):(?P<src_port>\d+)\s+->\s+(?P<dst_ip>\d+\.\d+\.\d+\.\d+):(?P<dst_port>\d+)')
+                    port_counts = {}
+                    ep_counts = {}
+                    src_by_ep = {}
+                    matrix_counts = {}
+                    for line in (fast_txt or '').splitlines():
+                        m = fast_rx.match(line)
+                        if not m:
+                            continue
+                        ep = m.group('dst_ip')
+                        dp = int(m.group('dst_port'))
+                        sp = m.group('src_ip')
+                        ep_counts[ep] = ep_counts.get(ep, 0) + 1
+                        port_counts[dp] = port_counts.get(dp, 0) + 1
+                        src_by_ep.setdefault(ep, {})[sp] = src_by_ep[ep].get(sp, 0) + 1
+                        key = (ep, dp)
+                        matrix_counts[key] = matrix_counts.get(key, 0) + 1
+
+                    if ep_counts:
+                        # override alerts_by_endpoint only if DB seems empty-ish
+                        if not alerts_by_endpoint:
+                            alerts_by_endpoint = [{'endpoint': k, 'alerts': v} for k,v in sorted(ep_counts.items(), key=lambda x: x[1], reverse=True)]
+                        alerts_by_port = [{'port': int(k), 'alerts': int(v)} for k,v in sorted(port_counts.items(), key=lambda x: x[1], reverse=True)]
+
+                        top_eps = [e['endpoint'] for e in alerts_by_endpoint[:12]]
+                        top_ports = [p['port'] for p in alerts_by_port[:8]]
+                        matrix = [{'endpoint': ep, 'port': int(port), 'alerts': int(c)} for (ep, port), c in matrix_counts.items() if ep in top_eps and port in top_ports]
+
+                        top_sources = []
+                        for ep in top_eps[:5]:
+                            srcs = sorted((src_by_ep.get(ep) or {}).items(), key=lambda x: x[1], reverse=True)[:5]
+                            top_sources.append({'endpoint': ep, 'sources': [{'ip': s, 'count': int(c)} for s,c in srcs]})
+            except Exception:
+                pass
+
+        top_eps = [e['endpoint'] for e in alerts_by_endpoint[:12]]
+        top_ports = [p['port'] for p in alerts_by_port[:8]]
+        matrix = []
+        if top_eps and top_ports:
+            mrows = db.session.query(SuricataFastAlertBucket.dst_ip, SuricataFastAlertBucket.dst_port, sql_text('sum(count) as c'))                .filter(SuricataFastAlertBucket.sensor_id == sensor.id, SuricataFastAlertBucket.bucket_ts >= start_ts, SuricataFastAlertBucket.dst_ip.in_(top_eps), SuricataFastAlertBucket.dst_port.in_(top_ports))                .group_by(SuricataFastAlertBucket.dst_ip, SuricataFastAlertBucket.dst_port).all()
+            matrix = [{'endpoint': ip, 'port': int(port), 'alerts': int(c)} for (ip, port, c) in mrows]
+
+        src_rows = db.session.query(SuricataFastAlertBucket.dst_ip, SuricataFastAlertBucket.src_ip, sql_text('sum(count) as c'))            .filter(SuricataFastAlertBucket.sensor_id == sensor.id, SuricataFastAlertBucket.bucket_ts >= start_ts, SuricataFastAlertBucket.dst_ip.isnot(None), SuricataFastAlertBucket.src_ip.isnot(None))            .group_by(SuricataFastAlertBucket.dst_ip, SuricataFastAlertBucket.src_ip)            .order_by(sql_text('c desc')).limit(2000).all()
+        top_sources_by_endpoint = {}
+        for dst, src, c in src_rows:
+            if not dst or not src:
+                continue
+            top_sources_by_endpoint.setdefault(dst, []).append({'ip': src, 'count': int(c)})
+
+        top_sources = []
+        for ep in top_eps[:5]:
+            srcs = sorted(top_sources_by_endpoint.get(ep, []), key=lambda x: x['count'], reverse=True)[:5]
+            top_sources.append({'endpoint': ep, 'sources': srcs})
+
+        return jsonify({
+            'sensor': sensor.to_dict(),
+            'range': range_key,
+            'total_endpoints': int(len(alerts_by_endpoint)),
+            'alerts_by_endpoint': alerts_by_endpoint,
+            'alerts_by_port': alerts_by_port,
+            'endpoint_port_matrix': matrix,
+            'top_sources': top_sources
+        })
+@app.route('/suricata/raw', methods=['POST'])
+def suricata_raw():
+    """Return raw tail output from a Suricata log file (optionally filtered by query)."""
+    data = request.get_json(force=True, silent=True) or {}
+    sensor_id = data.get('sensor_id')
+    filename = (data.get('filename') or 'suricata.log').strip()
+    query = (data.get('query') or '').strip()
+    max_lines = int(data.get('max_lines') or 500)
+    max_lines = max(10, min(5000, max_lines))
+
+    if filename not in SURICATA_ALLOWED_FILES:
+        return jsonify({'error': 'invalid filename'}), 400
+
+    with app.app_context():
+        if sensor_id:
+            sensor = SuricataSensor.query.get(int(sensor_id))
+        else:
+            sensor = SuricataSensor.query.order_by(SuricataSensor.id.asc()).first()
+        if not sensor:
+            return jsonify({'error': 'no sensor configured'}), 400
+
+        ssh_key_path = _suricata_get_ssh_key_path(sensor.ssh_key_id)
+        full = sensor.log_dir.rstrip('/') + '/' + filename
+
+        base_cmd = f"sudo tail -n {max_lines} {shlex.quote(full)} 2>/dev/null"
+        if query:
+            # Basic literal filter (case-insensitive). Avoid regex surprises.
+            base_cmd = base_cmd + f" | grep -i -F -- {shlex.quote(query)} || true"
+
+        ok, out = _suricata_remote_cmd(sensor.user, sensor.host, base_cmd, ssh_key_path, timeout=30)
+        if not ok:
+            return jsonify({'error': (out or '').strip()[:200]}), 500
+
+        return jsonify({'sensor': sensor.to_dict(), 'filename': filename, 'query': query, 'content': out})
+
 
 @app.route('/ssh-keys', methods=['GET'])
 def get_ssh_keys():
@@ -3030,6 +3912,7 @@ def restore_database_selective():
     - restore_hosts (replace-all)
     - restore_schedule (interval/is_running only)
     - restore_ai_search (prompt/keywords)
+    - restore_suricata (suricata sensors + prompt)
     '''
     try:
         db_path = _get_sqlite_db_file_path()
@@ -3052,8 +3935,9 @@ def restore_database_selective():
         restore_hosts = _flag('restore_hosts')
         restore_schedule = _flag('restore_schedule')
         restore_ai_search = _flag('restore_ai_search')
+        restore_suricata = _flag('restore_suricata')
 
-        if not any([restore_ai, restore_discord, restore_hosts, restore_schedule, restore_ai_search]):
+        if not any([restore_ai, restore_discord, restore_hosts, restore_schedule, restore_ai_search, restore_suricata]):
             return jsonify({'error': 'No restore categories selected'}), 400
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
@@ -3105,6 +3989,8 @@ def restore_database_selective():
                         keys |= {'discord_webhook_url'}
                     if restore_schedule:
                         keys |= {'schedule.is_running', 'schedule.interval_hours'}
+                    if restore_suricata:
+                        keys |= {'suricata.prompt'}
 
                     if keys:
                         cur = src.execute(
@@ -3118,7 +4004,35 @@ def restore_database_selective():
                     # Fallback: try legacy scheduler_config.json style keys in a settings-like table (none), so skip.
                     pass
 
-            # HOSTS restore (replace-all)
+            
+
+            # SURICATA restore (replace-all for suricata_* tables)
+            if restore_suricata:
+                suri_tables = [
+                    'suricata_sensors',
+                    'suricata_ingest_state',
+                    'suricata_alert_buckets',
+                    'suricata_fast_alert_buckets',
+                    'suricata_stats_counter_buckets',
+                ]
+                suri_tables = [t for t in suri_tables if table_exists(src, t)]
+                if not suri_tables:
+                    return jsonify({'error': 'Backup does not contain Suricata tables'}), 400
+
+                # Delete then insert
+                for t in suri_tables:
+                    db.session.execute(sql_text(f"DELETE FROM {t}"))
+
+                for t in suri_tables:
+                    rows = read_table(src, t)
+                    if not rows:
+                        continue
+                    cols = list(rows[0].keys())
+                    placeholders = ','.join([f":{c}" for c in cols])
+                    col_list = ','.join(cols)
+                    stmt = sql_text(f"INSERT INTO {t} ({col_list}) VALUES ({placeholders})")
+                    exec_many(stmt, rows)
+# HOSTS restore (replace-all)
             if restore_hosts:
                 required_tables = ['hosts']
                 if not all(table_exists(src, t) for t in required_tables):
@@ -3384,5 +4298,4 @@ if __name__ == '__main__':
     atexit.register(lambda: scheduler.shutdown())
     
     # Start Flask app
-    app.run(host='0.0.0.0', port=5001, debug=False)
     app.run(host='0.0.0.0', port=5001, debug=False)
