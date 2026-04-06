@@ -78,6 +78,17 @@ This application is designed for use on a trusted, internal development network 
 * **Granular Sudo Permissions:** Minimal required permissions for enhanced security
 * **Network Isolation:** Designed for trusted internal networks only
 
+### 🟣 Suricata (Remote Sensor)
+- Configure a Suricata sensor under **Settings → Suricata Data** (host/user/log directory/SSH key)
+- Test SSH + sudo access and confirm the sensor can see `eve.json`, `fast.log`, `stats.log`, `suricata.log`
+- Incremental ingest into SQLite with rotation/truncation handling
+- **Suricata Stats** (toolbar button) dashboards:
+  - **Suricata Stats:** KPIs, alerts-over-time, engine counters, category breakdown, top signatures
+  - **Endpoint Data (Endpoint Stats):** total endpoints, alerts per endpoint, alerts per destination port, endpoint×port stacked chart, top sources to endpoints
+  - **Raw Data:** tail and search raw logs + AI Analyse using a dedicated Suricata prompt
+- Backup/restore: Suricata settings/prompt included in DB backup; selective restore includes a Suricata checkbox
+
+
 ## 🛠 Installation & Setup
 
 ### System Requirements
@@ -541,3 +552,16 @@ For issues, feature requests, or questions:
 2. Review application logs for detailed error information
 3. Open an issue on the project repository
 4. Include system information and error logs for faster resolution
+
+## Suricata Quick Start
+1. Open **Settings → Suricata Data** and enter host/user/log dir (default `/var/log/suricata`) and optional SSH key.
+2. Click **Test Connection** to verify SSH + sudo + log visibility.
+3. Click **Run Ingest Once** to populate the local SQLite cache (the scheduler also ingests periodically).
+4. Click **Suricata Stats** in the toolbar and use:
+   - The range slider (1h / 6h / 24h / 7d)
+   - Tabs: **Suricata Stats**, **Endpoint Data**, **Raw Data**
+
+### Suricata Raw Data AI Analyse
+- Configure the Suricata prompt in **Settings → AI Search → Suricata AI Prompt**
+- Use **Suricata Stats → Raw Data → AI Analyse** to analyze the currently loaded raw log tail
+
