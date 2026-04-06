@@ -236,16 +236,19 @@ function updateWizardUI() {
     for (let i = 1; i <= 4; i++) {
         const indicator = document.getElementById(`step${i}-indicator`);
         if (i < currentWizardStep) {
-            indicator.classList.remove('bg-gray-300', 'termix-muted');
-            indicator.classList.add('bg-green-600', 'text-white');
+            // completed
+            indicator.classList.remove('bg-white/10', 'text-gray-200');
+            indicator.classList.add('bg-purple-700', 'text-white');
             indicator.textContent = '✓';
         } else if (i === currentWizardStep) {
-            indicator.classList.remove('bg-gray-300', 'termix-muted');
+            // active
+            indicator.classList.remove('bg-white/10', 'text-gray-200');
             indicator.classList.add('bg-purple-700', 'text-white');
             indicator.textContent = i;
         } else {
-            indicator.classList.remove('bg-purple-700', 'bg-green-600', 'text-white');
-            indicator.classList.add('bg-gray-300', 'termix-muted');
+            // upcoming
+            indicator.classList.remove('bg-purple-700', 'text-white');
+            indicator.classList.add('bg-white/10', 'text-gray-200');
             indicator.textContent = i;
         }
     }
@@ -269,7 +272,7 @@ function previousStep() {
 
 async function nextStep() {
     if (currentWizardStep === 1) {
-        if (!validateStep1()) return;
+        if (!await validateStep1()) return;
         await proceedToStep2();
     } else if (currentWizardStep === 2) {
         await proceedToStep3();
@@ -281,7 +284,7 @@ async function nextStep() {
     }
 }
 
-function validateStep1() {
+async function validateStep1() {
     const ipsInput = document.getElementById('deviceIPs').value.trim();
     const usersInput = document.getElementById('sshUsername').value.trim();
     
@@ -290,6 +293,12 @@ function validateStep1() {
         return false;
     }
     
+    // Reset run-specific state (so Back -> edit -> Next starts fresh)
+    wizardData.validatedHosts = [];
+    wizardData.collectedInfo = [];
+    wizardData.addedDevices = [];
+    wizardData.validationFailures = {};
+
     // Parse IPs
     wizardData.ips = ipsInput.split('\n').map(ip => ip.trim()).filter(ip => ip.length > 0);
     if (wizardData.ips.length === 0) {
@@ -345,6 +354,9 @@ async function proceedToStep2() {
     resultsDiv.innerHTML = '<p class="termix-muted text-sm">Testing connections...</p>';
     
     try {
+        wizardData.validatedHosts = [];
+        wizardData.validationFailures = {};
+
         // Create wizard session
         const sessionResp = await fetch('/wizard/session/create', { method: 'POST' });
         const sessionData = await sessionResp.json();
@@ -415,17 +427,47 @@ async function proceedToStep2() {
                 progressText.textContent = `${data.current + 1}/${data.total}`;
             } else if (data.type === 'result') {
                 const statusIcon = data.status === 'success' ? '✓' : data.status === 'auth_error' ? '⚠' : '✗';
-                const statusColor = data.status === 'success' ? 'text-green-600' : data.status === 'auth_error' ? 'text-yellow-600' : 'text-red-600';
-                
+                const statusColor = data.status === 'success' ? 'text-green-300' : data.status === 'auth_error' ? 'text-amber-300' : 'text-red-300';
+                const msg = (data.message || '').toString();
+
                 const resultDiv = document.createElement('div');
-                resultDiv.className = `flex items-center justify-between p-2 border rounded ${statusColor}`;
-                resultDiv.innerHTML = `
-                    <span class="font-medium">${data.ip}</span>
-                    <span class="text-lg">${statusIcon}</span>
-                `;
+                resultDiv.className = 'flex items-center justify-between gap-3 p-2 rounded border border-white/10 bg-white/5';
+                resultDiv.title = msg;
+
+                const left = document.createElement('div');
+                left.className = 'min-w-0';
+                left.innerHTML = `<div class="font-medium termix-text truncate">${data.ip}</div><div class="termix-muted text-xs truncate">${msg || '&nbsp;'}</div>`;
+
+                const right = document.createElement('div');
+                right.className = 'flex items-center gap-2';
+                const icon = document.createElement('span');
+                icon.className = `text-lg ${statusColor}`;
+                icon.textContent = statusIcon;
+                right.appendChild(icon);
+
+                if (data.status !== 'success') {
+                    // clickable info icon to explain why verification failed
+                    const infoBtn = document.createElement('button');
+                    infoBtn.type = 'button';
+                    infoBtn.className = 'termix-btn';
+                    infoBtn.textContent = 'i';
+                    infoBtn.title = 'Why did this fail?';
+                    infoBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        alert(msg || 'Verification failed.');
+                    });
+                    right.appendChild(infoBtn);
+
+                    wizardData.validationFailures[data.ip] = msg || 'Verification failed.';
+                }
+
+                resultDiv.appendChild(left);
+                resultDiv.appendChild(right);
+
                 resultsDiv.appendChild(resultDiv);
                 resultElements[data.ip] = resultDiv;
-                
+
                 if (data.status === 'success') {
                     // Use the username entered in step 1, not something derived from the IP
                     const defaultUser = (wizardData.usernames && wizardData.usernames.length > 0) ? wizardData.usernames[0] : 'root';
@@ -512,6 +554,7 @@ async function proceedToStep3() {
                         
                         if (eventData.type === 'start') {
                             totalHosts = eventData.total;
+                            document.getElementById('collectionProgressText').textContent = `0/${totalHosts}`;
                             logDiv.innerHTML = `<p class="termix-muted">Collecting system info from ${totalHosts} hosts...</p>`;
                         } 
                         else if (eventData.type === 'progress') {
@@ -538,10 +581,12 @@ async function proceedToStep3() {
                             completedHosts = eventData.current;
                             const progressPercent = (completedHosts / totalHosts) * 100;
                             document.getElementById('collectionProgressBar').style.width = progressPercent + '%';
+                            document.getElementById('collectionProgressText').textContent = `${completedHosts}/${totalHosts}`;
                         }
                         else if (eventData.type === 'complete') {
                             wizardData.collectedInfo = eventData.results || [];
                             document.getElementById('collectionProgressBar').style.width = '100%';
+                            document.getElementById('collectionProgressText').textContent = `${eventData.total}/${eventData.total}`;
                             
                             const summaryLine = document.createElement('p');
                             summaryLine.className = 'text-green-600 font-medium mt-4';
@@ -596,16 +641,34 @@ async function proceedToStep4() {
         
         wizardData.addedDevices = data.devices;
         
-        document.getElementById('completionMessage').textContent = `${data.devices.length} device(s) added successfully!`;
+        const counts = data.counts || {added: (data.devices||[]).length, skipped: (data.skipped||[]).length, total: (devices||[]).length};
+        document.getElementById('completionMessage').textContent = `${counts.added} device(s) added successfully!${counts.skipped ? ' (' + counts.skipped + ' skipped)' : ''}`;
         
         const devicesList = document.getElementById('addedDevicesList');
         devicesList.innerHTML = '';
         data.devices.forEach(device => {
             const li = document.createElement('div');
-            li.className = 'bg-white border border-gray-200 rounded p-2 text-sm';
-            li.innerHTML = `<p class="font-medium">${device.hostname}</p><p class="termix-muted">${device.ip}</p>`;
+            li.className = 'glass-container border border-white/10 rounded-lg p-3 text-sm bg-white/5';
+            li.innerHTML = `<p class="font-medium termix-text">${device.hostname}</p><p class="termix-muted">${device.ip}</p>`;
             devicesList.appendChild(li);
         });
+
+        const skipped = data.skipped || [];
+        if (skipped.length) {
+            const hdr = document.createElement('div');
+            hdr.className = 'mt-4';
+            hdr.innerHTML = `<h4 class="font-medium termix-muted mb-2">Skipped Devices:</h4>`;
+            devicesList.appendChild(hdr);
+
+            skipped.forEach(s => {
+                const li = document.createElement('div');
+                li.className = 'glass-container border border-amber-500/30 rounded-lg p-3 text-sm bg-amber-500/10';
+                const ip = s.ip || '(unknown)';
+                const reason = s.reason || 'skipped';
+                li.innerHTML = `<p class="font-medium termix-text">${ip}</p><p class="text-amber-200 text-xs">${reason}</p>`;
+                devicesList.appendChild(li);
+            });
+        }
     } catch (error) {
         alert(`Error adding devices: ${error.message}`);
     }

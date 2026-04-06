@@ -19,8 +19,9 @@ from functools import lru_cache
 import ast
 import tempfile
 from sqlalchemy import text as sql_text
+from sqlalchemy.exc import IntegrityError
 import shutil
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket, UiRecommendationState
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services, execute_remote_command
 
 # --- INITIALIZATION ---
@@ -3267,82 +3268,97 @@ def collect_host_info():
 def add_devices_from_wizard():
     """Add multiple devices from wizard with collected info"""
     try:
-        data = request.get_json()
-        devices = data.get('devices', [])
+        data = request.get_json() or {}
+        devices = data.get('devices', []) or []
         ssh_key_id = data.get('ssh_key_id')
         
         if not devices:
             return jsonify({'error': 'No devices provided'}), 400
         
         added_hosts = []
+        skipped_hosts = []
+        
+        # Use nested transactions (SAVEPOINT) so one failure doesn't rollback everything.
         for device in devices:
+            ip = (device or {}).get('ip')
+            if not ip:
+                skipped_hosts.append({'ip': None, 'reason': 'missing ip'})
+                continue
+            
+            # Skip duplicates by IP (common case when rerunning wizard)
+            existing = Host.query.filter_by(ip_address=ip).first()
+            if existing:
+                skipped_hosts.append({'ip': ip, 'reason': 'already exists', 'existing_id': existing.id, 'hostname': existing.hostname})
+                continue
+            
             try:
-                host = Host(
-                    hostname=device.get('hostname', device['ip']),
-                    friendly_name=device.get('friendly_name', device['ip']),
-                    ip_address=device['ip'],
-                    ssh_user=device.get('user', 'root'),
-                    ssh_key_id=ssh_key_id,
-                    description=device.get('description', ''),
-                    status='online'
-                )
-                db.session.add(host)
-                db.session.flush()
-                
-                if device.get('system_info'):
-                    sys_info = device['system_info']
-                    system_info = SystemInfo(
-                        host_id=host.id,
-                        os_version=sys_info.get('os_version'),
-                        hostname=sys_info.get('hostname'),
-                        ram_total=sys_info.get('ram_total'),
-                        ram_used=sys_info.get('ram_used'),
-                        disk_total=sys_info.get('disk_total'),
-                        disk_used=sys_info.get('disk_used'),
-                        cpu_type=sys_info.get('cpu_type'),
-                        cpu_cores=sys_info.get('cpu_cores'),
-                        netbird_ip=sys_info.get('netbird_ip'),
-                        main_ip=sys_info.get('main_ip')
+                with db.session.begin_nested():
+                    host = Host(
+                        hostname=device.get('hostname', ip),
+                        friendly_name=device.get('friendly_name', ip),
+                        ip_address=ip,
+                        ssh_user=device.get('user', 'root'),
+                        ssh_key_id=ssh_key_id,
+                        description=device.get('description', ''),
+                        status='online'
                     )
-                    db.session.add(system_info)
-                
-                if device.get('services'):
-                    for svc in device['services']:
-                        service = Service(
+                    db.session.add(host)
+                    db.session.flush()
+                    
+                    if device.get('system_info'):
+                        sys_info = device['system_info']
+                        system_info = SystemInfo(
                             host_id=host.id,
-                            service_name=svc.get('service_name'),
-                            status=svc.get('status'),
-                            is_running=svc.get('is_running', False)
+                            os_version=sys_info.get('os_version'),
+                            hostname=sys_info.get('hostname'),
+                            ram_total=sys_info.get('ram_total'),
+                            ram_used=sys_info.get('ram_used'),
+                            disk_total=sys_info.get('disk_total'),
+                            disk_used=sys_info.get('disk_used'),
+                            cpu_type=sys_info.get('cpu_type'),
+                            cpu_cores=sys_info.get('cpu_cores'),
+                            netbird_ip=sys_info.get('netbird_ip'),
+                            main_ip=sys_info.get('main_ip')
                         )
-                        db.session.add(service)
-                
-                log_content = f"Host onboarded from wizard\nIP: {device['ip']}\nUser: {device.get('user')}\nSystem Info collected: {bool(device.get('system_info'))}"
-                host_log = HostLog(
-                    host_id=host.id,
-                    log_content=log_content,
-                    log_type='setup'
-                )
-                db.session.add(host_log)
-                
-                added_hosts.append({
-                    'id': host.id,
-                    'hostname': host.hostname,
-                    'ip': host.ip_address
-                })
+                        db.session.add(system_info)
+                    
+                    if device.get('services'):
+                        for svc in device['services']:
+                            service = Service(
+                                host_id=host.id,
+                                service_name=svc.get('service_name'),
+                                status=svc.get('status'),
+                                is_running=svc.get('is_running', False)
+                            )
+                            db.session.add(service)
+                    
+                    log_content = f"Host onboarded from wizard\nIP: {ip}\nUser: {device.get('user')}\nSystem Info collected: {bool(device.get('system_info'))}"
+                    host_log = HostLog(
+                        host_id=host.id,
+                        log_content=log_content,
+                        log_type='setup'
+                    )
+                    db.session.add(host_log)
+                    
+                    added_hosts.append({'id': host.id, 'hostname': host.hostname, 'ip': host.ip_address})
+            except IntegrityError as e:
+                skipped_hosts.append({'ip': ip, 'reason': 'integrity error'})
+                continue
             except Exception as e:
-                print(f"Error adding device {device}: {e}")
-                db.session.rollback()
+                skipped_hosts.append({'ip': ip, 'reason': str(e)[:200]})
                 continue
         
         db.session.commit()
         return jsonify({
-            'message': f'Added {len(added_hosts)} devices',
-            'devices': added_hosts
+            'message': f'Added {len(added_hosts)} devices ({len(skipped_hosts)} skipped)',
+            # Back-compat: keep 'devices' as the added devices list
+            'devices': added_hosts,
+            'skipped': skipped_hosts,
+            'counts': {'added': len(added_hosts), 'skipped': len(skipped_hosts), 'total': len(devices)},
         }), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/hosts/db/<int:host_id>/info', methods=['GET'])
 def get_host_info(host_id):
