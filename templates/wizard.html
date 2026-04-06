@@ -554,6 +554,7 @@ async function proceedToStep3() {
                         
                         if (eventData.type === 'start') {
                             totalHosts = eventData.total;
+                            document.getElementById('collectionProgressText').textContent = `0/${totalHosts}`;
                             logDiv.innerHTML = `<p class="termix-muted">Collecting system info from ${totalHosts} hosts...</p>`;
                         } 
                         else if (eventData.type === 'progress') {
@@ -580,10 +581,12 @@ async function proceedToStep3() {
                             completedHosts = eventData.current;
                             const progressPercent = (completedHosts / totalHosts) * 100;
                             document.getElementById('collectionProgressBar').style.width = progressPercent + '%';
+                            document.getElementById('collectionProgressText').textContent = `${completedHosts}/${totalHosts}`;
                         }
                         else if (eventData.type === 'complete') {
                             wizardData.collectedInfo = eventData.results || [];
                             document.getElementById('collectionProgressBar').style.width = '100%';
+                            document.getElementById('collectionProgressText').textContent = `${eventData.total}/${eventData.total}`;
                             
                             const summaryLine = document.createElement('p');
                             summaryLine.className = 'text-green-600 font-medium mt-4';
@@ -638,7 +641,8 @@ async function proceedToStep4() {
         
         wizardData.addedDevices = data.devices;
         
-        document.getElementById('completionMessage').textContent = `${data.devices.length} device(s) added successfully!`;
+        const counts = data.counts || {added: (data.devices||[]).length, skipped: (data.skipped||[]).length, total: (devices||[]).length};
+        document.getElementById('completionMessage').textContent = `${counts.added} device(s) added successfully!${counts.skipped ? ' (' + counts.skipped + ' skipped)' : ''}`;
         
         const devicesList = document.getElementById('addedDevicesList');
         devicesList.innerHTML = '';
@@ -648,6 +652,23 @@ async function proceedToStep4() {
             li.innerHTML = `<p class="font-medium termix-text">${device.hostname}</p><p class="termix-muted">${device.ip}</p>`;
             devicesList.appendChild(li);
         });
+
+        const skipped = data.skipped || [];
+        if (skipped.length) {
+            const hdr = document.createElement('div');
+            hdr.className = 'mt-4';
+            hdr.innerHTML = `<h4 class="font-medium termix-muted mb-2">Skipped Devices:</h4>`;
+            devicesList.appendChild(hdr);
+
+            skipped.forEach(s => {
+                const li = document.createElement('div');
+                li.className = 'glass-container border border-amber-500/30 rounded-lg p-3 text-sm bg-amber-500/10';
+                const ip = s.ip || '(unknown)';
+                const reason = s.reason || 'skipped';
+                li.innerHTML = `<p class="font-medium termix-text">${ip}</p><p class="text-amber-200 text-xs">${reason}</p>`;
+                devicesList.appendChild(li);
+            });
+        }
     } catch (error) {
         alert(`Error adding devices: ${error.message}`);
     }
