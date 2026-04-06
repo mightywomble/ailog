@@ -6,6 +6,8 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-04-06 | v2.9.0 | Suricata integration: remote sensor config + incremental ingest, Suricata Stats dashboards (Overview/Endpoint Stats/Raw), persistence + selective restore | ✅ Complete |
+| 2026-04-04 | v2.8.0 | Discord alert hostname resolution - use actual server hostname instead of db-<id> identifier | ✅ Complete |
 | 2026-04-02 | v2.6.0 | Termix-style dark dashboard (default view), logs view on host click, global dark theme consistency pass | ✅ Complete |
 | 2026-04-02 | v2.5.0 | Multi-schedule system (DB schedules), host-first selection per schedule, queued serial execution, schedule-scoped Run Now SSE + log picker | ✅ Complete |
 | 2026-04-02 | v2.4.0 | DB-backed Settings + Backup/Selective Restore, AI Search prompt/keywords, Run Now SSE progress, Export improvements, Rescan/Netbird enhancements | ✅ Complete |
@@ -76,6 +78,17 @@ This application is designed for use on a trusted, internal development network 
 * **SSH Key Authentication:** Passwordless SSH access with proper key-based security
 * **Granular Sudo Permissions:** Minimal required permissions for enhanced security
 * **Network Isolation:** Designed for trusted internal networks only
+
+### 🟣 Suricata (Remote Sensor)
+- Configure a Suricata sensor under **Settings → Suricata Data** (host/user/log directory/SSH key)
+- Test SSH + sudo access and confirm the sensor can see `eve.json`, `fast.log`, `stats.log`, `suricata.log`
+- Incremental ingest into SQLite with rotation/truncation handling
+- **Suricata Stats** (toolbar button) dashboards:
+  - **Suricata Stats:** KPIs, alerts-over-time, engine counters, category breakdown, top signatures
+  - **Endpoint Data (Endpoint Stats):** total endpoints, alerts per endpoint, alerts per destination port, endpoint×port stacked chart, top sources to endpoints
+  - **Raw Data:** tail and search raw logs + AI Analyse using a dedicated Suricata prompt
+- Backup/restore: Suricata settings/prompt included in DB backup; selective restore includes a Suricata checkbox
+
 
 ## 🛠 Installation & Setup
 
@@ -540,3 +553,16 @@ For issues, feature requests, or questions:
 2. Review application logs for detailed error information
 3. Open an issue on the project repository
 4. Include system information and error logs for faster resolution
+
+## Suricata Quick Start
+1. Open **Settings → Suricata Data** and enter host/user/log dir (default `/var/log/suricata`) and optional SSH key.
+2. Click **Test Connection** to verify SSH + sudo + log visibility.
+3. Click **Run Ingest Once** to populate the local SQLite cache (the scheduler also ingests periodically).
+4. Click **Suricata Stats** in the toolbar and use:
+   - The range slider (1h / 6h / 24h / 7d)
+   - Tabs: **Suricata Stats**, **Endpoint Data**, **Raw Data**
+
+### Suricata Raw Data AI Analyse
+- Configure the Suricata prompt in **Settings → AI Search → Suricata AI Prompt**
+- Use **Suricata Stats → Raw Data → AI Analyse** to analyze the currently loaded raw log tail
+

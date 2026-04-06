@@ -46,6 +46,7 @@
             }
         }
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="termix-text font-sans antialiased min-h-screen">
 
@@ -63,6 +64,7 @@
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 Settings
             </button>
+            <button id="suricata-stats-btn" class="bg-purple-700 hover:bg-purple-600 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">Suricata Stats</button>
             <button id="create-ansible-inventory-btn" class="bg-amber-500 hover:bg-amber-400 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors">
                 Create Ansible Inventory
             </button>
@@ -243,6 +245,173 @@
                 </div>
             </div>
         </div>
+        <div id="suricata-stats-view" class="hidden flex-1 flex flex-col gap-4 termix-view" style="height: 100%;">
+            <div class="termix-panel p-4 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <button id="back-to-dashboard-from-suricata" class="termix-btn" type="button">Back</button>
+                    <div>
+                        <div class="termix-text font-semibold">Suricata Stats</div>
+
+            <div id="suricata-stats-tabs" class="termix-panel p-3 flex flex-wrap items-center gap-2">
+                <button class="suricata-stats-tab button text-sm px-4 py-2 bg-purple-700 text-white" data-suri-tab="overview" type="button">Suricata Stats</button>
+                <button class="suricata-stats-tab button text-sm px-4 py-2" data-suri-tab="endpoints" type="button">Endpoint Data</button>
+                <button class="suricata-stats-tab button text-sm px-4 py-2" data-suri-tab="raw" type="button">Raw Data</button>
+            </div>
+                        <div class="termix-muted text-xs">Charts and summaries from /var/log/suricata</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <label class="text-sm termix-muted">Range</label>
+                    <input id="suricata-range-slider" type="range" min="0" max="3" step="1" value="2" />
+                    <span id="suricata-range-label" class="text-sm text-gray-200">24h</span>
+                </div>
+            </div>
+            <div class="suricata-stats-panel" data-suri-panel="overview">
+                <div class="termix-panel p-4">
+                    <h3 class="termix-text font-semibold">Interesting numbers</h3>
+                    <div class="mt-3 grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <div class="termix-stat"><div class="termix-muted text-xs">Total alerts</div><div id="suricata-kpi-total-alerts" class="termix-text text-xl font-semibold">-</div></div>
+                        <div class="termix-stat"><div class="termix-muted text-xs">Alerts/hour</div><div id="suricata-kpi-alerts-per-hour" class="termix-text text-xl font-semibold">-</div></div>
+                        <div class="termix-stat"><div class="termix-muted text-xs">Kernel drops</div><div id="suricata-kpi-kernel-drops" class="termix-text text-xl font-semibold">-</div></div>
+                        <div class="termix-stat"><div class="termix-muted text-xs">TCP gaps</div><div id="suricata-kpi-tcp-gaps" class="termix-text text-xl font-semibold">-</div></div>
+                        <div class="termix-stat"><div class="termix-muted text-xs">Sensor</div><div id="suricata-kpi-sensor" class="termix-text text-xl font-semibold">-</div></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" style="flex: 1; min-height: 0;">
+                    <div class="termix-panel p-4 flex flex-col" style="min-height:0;">
+                        <h3 class="termix-text font-semibold">Alerts over time</h3>
+                        <div class="flex-1" style="min-height: 0;">
+                            <canvas id="suricata-alerts-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="termix-panel p-4 flex flex-col" style="min-height:0;">
+                        <h3 class="termix-text font-semibold">Engine counters</h3>
+                        <div class="flex-1" style="min-height: 0;">
+                            <canvas id="suricata-counters-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="termix-panel p-4 flex flex-col" style="min-height:0;">
+                        <h3 class="termix-text font-semibold">Alerts by category</h3>
+                        <div class="flex-1" style="min-height: 0;">
+                            <canvas id="suricata-category-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="termix-panel p-4 flex flex-col" style="min-height:0; overflow:auto;">
+                        <h3 class="termix-text font-semibold">Top signatures</h3>
+                        <table class="w-full text-sm mt-3">
+                            <thead class="text-xs termix-muted">
+                                <tr><th class="text-left py-2">Signature</th><th class="text-right py-2">Count</th></tr>
+                            </thead>
+                            <tbody id="suricata-top-signatures" class="text-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+
+<div class="suricata-stats-panel hidden" data-suri-panel="endpoints">
+    <div class="termix-panel p-4">
+        <div class="flex items-center gap-2 flex-wrap mb-3">
+            <button id="suricata-endpoints-refresh-btn2" class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors" type="button">Refresh Endpoint Stats</button>
+            <input id="suricata-endpoints-search2" class="rounded-lg px-3 py-2 bg-white/5 border border-white/10 text-gray-100 text-sm" placeholder="Filter endpoints..." />
+            <span id="suricata-endpoints-status2" class="text-sm termix-muted"></span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+            <div class="termix-stat"><div class="termix-muted text-xs">Total Endpoints</div><div id="suricata-endpoints-kpi-total" class="termix-text text-xl font-semibold">-</div></div>
+            <div class="termix-stat"><div class="termix-muted text-xs">Total Alerts (top endpoints)</div><div id="suricata-endpoints-kpi-alerts" class="termix-text text-xl font-semibold">-</div></div>
+            <div class="termix-stat"><div class="termix-muted text-xs">Top Port</div><div id="suricata-endpoints-kpi-top-port" class="termix-text text-xl font-semibold">-</div></div>
+            <div class="termix-stat"><div class="termix-muted text-xs">Top Endpoint</div><div id="suricata-endpoints-kpi-top-endpoint" class="termix-text text-xl font-semibold">-</div></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" style="min-height: 0;">
+            <div class="termix-panel p-4 flex flex-col" style="min-height:0;">
+                <h3 class="termix-text font-semibold">Alerts by Endpoint (Top)</h3>
+                <div class="flex-1" style="min-height: 0;">
+                    <canvas id="suricata-endpoints-pie"></canvas>
+                </div>
+            </div>
+            <div class="termix-panel p-4 flex flex-col" style="min-height:0;">
+                <h3 class="termix-text font-semibold">Alerts by Destination Port (Top)</h3>
+                <div class="flex-1" style="min-height: 0;">
+                    <canvas id="suricata-ports-bar"></canvas>
+                </div>
+            </div>
+            <div class="termix-panel p-4 flex flex-col lg:col-span-2" style="min-height:0;">
+                <h3 class="termix-text font-semibold">Alerts per Port per Endpoint (Top)</h3>
+                <div class="flex-1" style="min-height: 0;">
+                    <canvas id="suricata-endpoint-ports-stacked"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4" style="min-height: 0;">
+            <div class="termix-panel p-4" style="overflow:auto;">
+                <h3 class="termix-text font-semibold">Top 5 Sources to Top Endpoints</h3>
+                <div class="overflow-auto border border-white/10 rounded-md mt-3">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs termix-muted bg-white/5">
+                            <tr><th class="text-left py-2 px-3">Endpoint</th><th class="text-left py-2 px-3">Top Sources</th></tr>
+                        </thead>
+                        <tbody id="suricata-top-sources-table" class="text-gray-200"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="termix-panel p-4" style="overflow:auto;">
+                <h3 class="termix-text font-semibold">Alerts per Endpoint</h3>
+                <div class="overflow-auto border border-white/10 rounded-md mt-3">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs termix-muted bg-white/5">
+                            <tr><th class="text-left py-2 px-3">Endpoint</th><th class="text-right py-2 px-3">Alerts</th></tr>
+                        </thead>
+                        <tbody id="suricata-endpoints-table2" class="text-gray-200"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<div class="suricata-stats-panel hidden" data-suri-panel="raw">
+    <div class="termix-panel p-4 space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-6 gap-2">
+            <div>
+                <label class="block text-xs termix-muted mb-1">File</label>
+                <select id="suricata-raw-file2" class="w-full rounded-lg px-3 py-2 bg-white/5 border border-white/10 text-gray-100 text-sm">
+                    <option value="suricata.log">suricata.log</option>
+                    <option value="stats.log">stats.log</option>
+                    <option value="fast.log">fast.log</option>
+                    <option value="eve.json">eve.json</option>
+                </select>
+            </div>
+            <div class="md:col-span-3">
+                <label class="block text-xs termix-muted mb-1">Search</label>
+                <input id="suricata-raw-query2" class="w-full rounded-lg px-3 py-2 bg-white/5 border border-white/10 text-gray-100 text-sm" placeholder="optional substring filter" />
+            </div>
+            <div>
+                <label class="block text-xs termix-muted mb-1">Lines</label>
+                <input id="suricata-raw-lines2" type="number" min="10" max="5000" value="500" class="w-full rounded-lg px-3 py-2 bg-white/5 border border-white/10 text-gray-100 text-sm" />
+            </div>
+            <div class="flex items-end gap-2">
+                <button id="suricata-raw-refresh-btn2" class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 text-sm rounded-md font-medium" type="button">Load</button>
+                <button id="suricata-raw-ai-btn2" class="button px-4 py-2 text-sm" type="button">AI Analyse</button>
+            </div>
+        </div>
+        <span id="suricata-raw-status2" class="text-sm termix-muted"></span>
+        <div class="overflow-auto border border-white/10 rounded-md" style="max-height:520px">
+            <table class="w-full text-xs">
+                <thead class="text-xs termix-muted bg-white/5">
+                    <tr><th class="text-right py-2 px-3 w-12">#</th><th class="text-left py-2 px-3">Line</th></tr>
+                </thead>
+                <tbody id="suricata-raw-table2" class="text-gray-200 font-mono"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</div>
+            </div>
+        </div>
     </div>
 
 <!-- AI Analysis Modal -->
@@ -304,7 +473,10 @@
                         <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="remote-hosts">
                             <span class="text-sm font-medium text-gray-200">🌐 Remote Hosts</span>
                         </button>
-                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="backup-database">
+                                                <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="suricata-data">
+                            <span class="text-sm font-medium text-gray-200">🟣 Suricata Data</span>
+                        </button>
+<button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="backup-database">
                             <span class="text-sm font-medium text-gray-200">💾 Backup Database</span>
                         </button>
                     </nav>
@@ -384,6 +556,16 @@
                             <div class="flex gap-2">
                                 <button id="save-ai-search-btn" class="button px-4 py-2 text-sm">Save</button>
                                 <span id="ai-search-save-status" class="text-xs termix-muted self-center"></span>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-white/10 pt-4 space-y-2">
+                            <h5 class="font-medium text-white">Suricata AI Prompt</h5>
+                            <p class="text-sm termix-muted">Used by the Suricata Raw Data AI Analyse button.</p>
+                            <textarea id="suricata-ai-prompt" class="w-full p-3 rounded-md bg-gray-900 text-white text-sm border border-white/10" rows="4"></textarea>
+                            <div class="flex items-center gap-2">
+                                <button id="save-suricata-prompt-btn" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors">Save Suricata Prompt</button>
+                                <span id="suricata-prompt-save-status" class="text-sm termix-muted"></span>
                             </div>
                         </div>
 
@@ -470,7 +652,132 @@
                         <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
                     </section>
 
-                    <!-- Backup Database Section -->
+                    <!-- Suricata Data Section -->
+                    <section id="suricata-data-section" class="settings-section space-y-4 hidden">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="font-semibold text-lg text-white">Suricata Data</h4>
+                                <p class="text-sm termix-muted">Configure a Suricata sensor (remote) and verify SSH + sudo access to /var/log/suricata.</p>
+                            </div>
+                        </div>
+
+                        <div id="suricata-tabs" class="flex flex-wrap gap-2">
+                            <button id="suricata-tab-server" class="suricata-tab button text-sm px-4 py-2 bg-purple-700 text-white" type="button" data-tab="server">Server Data</button>
+                            <button id="suricata-tab-endpoints" class="suricata-tab button text-sm px-4 py-2" type="button" data-tab="endpoints">Endpoint Data</button>
+                            <button id="suricata-tab-raw" class="suricata-tab button text-sm px-4 py-2" type="button" data-tab="raw">Raw Data</button>
+                        </div>
+
+                        <div id="suricata-tab-server-panel" class="suricata-tab-panel space-y-4" data-tab-panel="server">
+
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-sm termix-muted mb-1">Sensor Name</label>
+                                <input id="suricata-sensor-name" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100" placeholder="Home Sniffer" />
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <label class="flex items-center gap-2 text-sm text-gray-200">
+                                    <input id="suricata-sensor-enabled" type="checkbox" checked>
+                                    Enabled
+                                </label>
+                                <div class="flex-1">
+                                    <label class="block text-sm termix-muted mb-1">Ingest Interval (sec)</label>
+                                    <input id="suricata-ingest-interval" type="number" min="5" max="3600" value="30" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100" />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm termix-muted mb-1">Host</label>
+                                <input id="suricata-host" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100" placeholder="sniffer.netbird.cloud" />
+                            </div>
+                            <div>
+                                <label class="block text-sm termix-muted mb-1">SSH User</label>
+                                <input id="suricata-user" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100" placeholder="david" />
+                            </div>
+
+                            <div>
+                                <label class="block text-sm termix-muted mb-1">SSH Key</label>
+                                <select id="suricata-ssh-key" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100">
+                                    <option value="">(default)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm termix-muted mb-1">Suricata Log Directory</label>
+                                <input id="suricata-log-dir" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100" value="/var/log/suricata" />
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button id="suricata-test-btn" class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors">Test Connection</button>
+                            <button id="suricata-save-btn" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors">Save</button>
+                            <button id="suricata-ingest-once-btn" class="button px-4 py-2 text-sm">Run Ingest Once</button>
+                            <span id="suricata-settings-status" class="text-sm termix-muted"></span>
+                        </div>
+
+                        <div id="suricata-ingest-progress" class="hidden">
+                            <div class="w-full bg-gray-300 rounded-full h-2">
+                                <div id="suricata-ingest-progress-bar" class="bg-purple-700 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                            <div id="suricata-ingest-log" class="mt-2 text-xs termix-muted font-mono bg-white/5 border border-white/10 rounded-md p-2 max-h-40 overflow-auto"></div>
+                        </div>
+
+                        <div class="border-t border-white/10 pt-4">
+                            <h5 class="font-medium text-white mb-2">Test Results</h5>
+                            <pre id="suricata-test-results" class="text-xs termix-muted bg-white/5 border border-white/10 rounded-md p-3 overflow-auto" style="max-height: 240px;">(run test)</pre>
+                        </div>
+                   
+                        </div> <!-- end server panel -->
+
+                        <div id="suricata-tab-endpoints-panel" class="suricata-tab-panel space-y-4 hidden" data-tab-panel="endpoints">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <button id="suricata-endpoints-refresh-btn" class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors" type="button">Refresh Endpoint Data</button>
+                                <input id="suricata-endpoints-search" class="rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100 text-sm" placeholder="Filter endpoints (ip/hostname)" />
+                                <span id="suricata-endpoints-status" class="text-sm termix-muted"></span>
+                            </div>
+                            <div class="overflow-auto border border-white/10 rounded-md">
+                                <table class="w-full text-sm">
+                                    <thead class="text-xs termix-muted bg-white/5">
+                                        <tr>
+                                            <th class="text-left py-2 px-3">Endpoint</th>
+                                            <th class="text-right py-2 px-3">Alerts</th>
+                                            <th class="text-left py-2 px-3">Top Protocols</th>
+                                            <th class="text-left py-2 px-3">Top Sources</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="suricata-endpoints-table" class="text-gray-200"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div id="suricata-tab-raw-panel" class="suricata-tab-panel space-y-4 hidden" data-tab-panel="raw">
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+                                <div>
+                                    <label class="block text-sm termix-muted mb-1">File</label>
+                                    <select id="suricata-raw-file" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100">
+                                        <option value="suricata.log">suricata.log</option>
+                                        <option value="stats.log">stats.log</option>
+                                        <option value="fast.log">fast.log</option>
+                                        <option value="eve.json">eve.json</option>
+                                    </select>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label class="block text-sm termix-muted mb-1">Search</label>
+                                    <input id="suricata-raw-query" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100" placeholder="optional (substring)" />
+                                </div>
+                                <div>
+                                    <label class="block text-sm termix-muted mb-1">Lines</label>
+                                    <input id="suricata-raw-lines" type="number" min="10" max="5000" value="500" class="w-full rounded-lg px-3 py-2 focus:outline-none bg-white/5 border border-white/10 text-gray-100" />
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <button id="suricata-raw-refresh-btn" class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors" type="button">Load Raw</button>
+                                <span id="suricata-raw-status" class="text-sm termix-muted"></span>
+                            </div>
+                            <pre id="suricata-raw-output" class="text-xs termix-muted bg-white/5 border border-white/10 rounded-md p-3 overflow-auto" style="max-height: 420px;">(load raw)</pre>
+                        </div>
+</section></section>
+
+<!-- Backup Database Section -->
                     
                     <!-- Backup Database Section -->
                     <section id="backup-database-section" class="settings-section space-y-4 hidden">
@@ -831,11 +1138,11 @@
                 clearTimeout(timeoutId);
                 if (error.name === 'AbortError') {
                     console.error("Request timed out:", endpoint);
-                    showToast('Request timed out. Please try again.', 'error');
+                    window.showToast('Request timed out. Please try again.', 'error');
                     throw new Error('Request timed out');
                 } else {
                     console.error("API Error:", error);
-                    showToast(error.message, 'error');
+                    window.showToast(error.message, 'error');
                     throw error;
                 }
             }
@@ -856,7 +1163,7 @@
             progressLogs.innerHTML = '';
 
             try {
-                const data = await fetchApi('/sources/table');
+                const data = await window.fetchApi('/sources/table');
                 tableData = data;
                 renderTableView(data);
                 
@@ -965,7 +1272,7 @@
             } catch (error) {
                 logTitle.textContent = `Error loading ${logName}`;
                 logContent.innerHTML = `<div class="text-center text-red-400 mt-16">${error.message}</div>`;
-                showToast(error.message, 'error');
+                window.showToast(error.message, 'error');
             }
         };
 
@@ -980,7 +1287,7 @@
 
                 // Schedules count
                 try {
-                    const sched = await fetchApi('/api/schedules');
+                    const sched = await window.fetchApi('/api/schedules');
                     if (dashboardTotalSchedulesEl) dashboardTotalSchedulesEl.textContent = String((sched || []).length);
                     if (dashboardDbStatusEl) {
                         dashboardDbStatusEl.textContent = 'Database: Healthy';
@@ -996,7 +1303,7 @@
             console.log('[DEBUG] Starting populateHostCards()');
             try {
                 console.log('[DEBUG] Fetching hosts from /hosts endpoint...');
-                const hostsData = await fetchApi('/hosts');
+                const hostsData = await window.fetchApi('/hosts');
                 console.log('[DEBUG] Received hosts data:', hostsData);
                 hosts = hostsData;
                 hostListContainer.innerHTML = '';
@@ -1021,7 +1328,7 @@
                 
                 // Select localhost by default
                 console.log('[DEBUG] Selecting localhost by default...');
-                showDashboard();
+                window.showDashboard();
                 updateDashboardStats();
                 // Do not auto-open logs on load; default to dashboard
                 // selectHost('local');
@@ -1223,9 +1530,9 @@
                                 throw new Error(info.error || `Rescan failed (${resp.status})`);
                             }
                             renderHostInfo(info);
-                            showToast('Rescan complete.', 'success');
+                            window.showToast('Rescan complete.', 'success');
                         } catch (err) {
-                            showToast(err.message || 'Rescan failed.', 'error');
+                            window.showToast(err.message || 'Rescan failed.', 'error');
                         } finally {
                             rescanBtn.disabled = false;
                             rescanBtn.textContent = 'Rescan';
@@ -1319,7 +1626,7 @@
                         currentEventSource.close();
                         break;
                     case 'error':
-                        showToast(data.message, 'error');
+                        window.showToast(data.message, 'error');
                         topProgressContainer.classList.add('hidden');
                         if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
                         sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${data.message}</li>`;
@@ -1330,7 +1637,7 @@
 
             currentEventSource.onerror = (err) => {
                 console.error("EventSource failed:", err);
-                showToast('Connection to server failed. Check if the backend is running.', 'error');
+                window.showToast('Connection to server failed. Check if the backend is running.', 'error');
                 topProgressContainer.classList.add('hidden');
                 if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
                 if (currentEventSource) currentEventSource.close();
@@ -1406,7 +1713,7 @@
         const loadSettingsFromBackend = async () => {
             try {
                 // Load AI config from backend
-                const aiConfig = await fetchApi('/ai/config');
+                const aiConfig = await window.fetchApi('/ai/config');
                 const provider = aiConfig.provider || 'openai';
                 
                 // Update localStorage with config from backend
@@ -1415,7 +1722,7 @@
                 // Status dots
                 setStatusDot(openaiKeyStatusDot, !!aiConfig.openai_configured);
                 try {
-                    const dc = await fetchApi('/discord/config', { method: 'GET' });
+                    const dc = await window.fetchApi('/discord/config', { method: 'GET' });
                     setStatusDot(discordWebhookStatusDot, !!dc.configured);
                     if (dc.webhook_url && discordWebhookInput) discordWebhookInput.value = dc.webhook_url;
                 } catch (_) {
@@ -1428,7 +1735,7 @@
                     console.log('OpenAI is configured on backend');
                 } else if (provider === 'ollama' && aiConfig.ollama_configured) {
                     // Ollama is configured
-                    const ollamaConfig = await fetchApi('/ollama/config', { method: 'GET' });
+                    const ollamaConfig = await window.fetchApi('/ollama/config', { method: 'GET' });
                     if (ollamaConfig.ollama_url) {
                         localStorage.setItem('ollama_url', ollamaConfig.ollama_url);
                     }
@@ -1482,7 +1789,7 @@
 
         const loadAiSearchSettings = async () => {
             try {
-                const cfg = await fetchApi('/ai/search-config', { method: 'GET' });
+                const cfg = await window.fetchApi('/ai/search-config', { method: 'GET' });
                 if (aiSearchPromptTextarea && cfg.search_prompt) aiSearchPromptTextarea.value = cfg.search_prompt;
                 renderAlertKeywords(cfg.alert_keywords || []);
             } catch (e) {
@@ -1495,7 +1802,7 @@
                 search_prompt: aiSearchPromptTextarea ? aiSearchPromptTextarea.value.trim() : '',
                 alert_keywords: collectAlertKeywords(),
             };
-            const resp = await fetchApi('/ai/search-config', {
+            const resp = await window.fetchApi('/ai/search-config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -1510,7 +1817,7 @@
                     if (aiSearchSaveStatus) aiSearchSaveStatus.textContent = 'Saving...';
                     await saveAiSearchSettings();
                     if (aiSearchSaveStatus) aiSearchSaveStatus.textContent = 'Saved.';
-                    showToast('AI Search settings saved.', 'success');
+                    window.showToast('AI Search settings saved.', 'success');
                 } catch (e) {
                     if (aiSearchSaveStatus) aiSearchSaveStatus.textContent = 'Save failed.';
                 } finally {
@@ -1527,7 +1834,7 @@
                     if (alertKeywordsSaveStatus) alertKeywordsSaveStatus.textContent = 'Saving...';
                     await saveAiSearchSettings();
                     if (alertKeywordsSaveStatus) alertKeywordsSaveStatus.textContent = 'Saved.';
-                    showToast('Alert keywords saved.', 'success');
+                    window.showToast('Alert keywords saved.', 'success');
                 } catch (e) {
                     if (alertKeywordsSaveStatus) alertKeywordsSaveStatus.textContent = 'Save failed.';
                 } finally {
@@ -1554,7 +1861,7 @@
         // Load current provider configuration on settings open
         const loadCurrentProviderConfig = async () => {
             try {
-                const aiConfig = await fetchApi('/ai/config');
+                const aiConfig = await window.fetchApi('/ai/config');
                 providerDropdown.value = aiConfig.provider;
                 showProviderConfigPanel(aiConfig.provider, aiConfig);
             } catch (error) {
@@ -1582,7 +1889,7 @@
                 }
 
                 // Populate field from backend (plaintext as requested)
-                fetchApi('/openai/config', { method: 'GET' })
+                window.fetchApi('/openai/config', { method: 'GET' })
                     .then(cfg => { if (cfg.api_key) openaiApiKeyInput.value = cfg.api_key; })
                     .catch(() => {});
             } else if (provider === 'ollama') {
@@ -1618,7 +1925,7 @@
                 openaiTestStatus.textContent = 'Testing saved API key...';
                 openaiTestStatus.className = 'text-xs text-yellow-600 mt-2';
                 try {
-                    await fetchApi('/openai/test-saved', { method: 'GET' });
+                    await window.fetchApi('/openai/test-saved', { method: 'GET' });
                     openaiTestStatus.textContent = '✅ Saved API key is valid!';
                     openaiTestStatus.className = 'text-xs text-green-600 mt-2';
                     setStatusDot(openaiKeyStatusDot, true);
@@ -1643,7 +1950,7 @@
                 const client = new (function() {
                     this.testKey = async function(key) {
                         // We'll test by trying to save the config
-                        const res = await fetchApi('/openai/config', {
+                        const res = await window.fetchApi('/openai/config', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ api_key: key })
@@ -1670,7 +1977,7 @@
                 currentConfigStatus.classList.remove('hidden');
                 updateProviderIndicator();
                 
-                showToast('OpenAI configured as default AI provider');
+                window.showToast('OpenAI configured as default AI provider');
             } catch (error) {
                 openaiTestStatus.textContent = `❌ ${error.message}`;
                 openaiTestStatus.className = 'text-xs text-red-600 mt-2';
@@ -1694,7 +2001,7 @@
             ollamaUrlTestStatus.className = 'text-xs text-yellow-600 mt-2';
             
             try {
-                const res = await fetchApi('/ollama/test', {
+                const res = await window.fetchApi('/ollama/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ollama_url: url })
@@ -1727,7 +2034,7 @@
         getModelsBtn.addEventListener('click', async () => {
             const url = ollamaApiUrlInput.value.trim();
             if (!url) {
-                showToast('Please test the Ollama connection first', 'error');
+                window.showToast('Please test the Ollama connection first', 'error');
                 return;
             }
             await loadOllamaModels(url);
@@ -1741,7 +2048,7 @@
             modelsList.innerHTML = '<div class="col-span-2 text-sm termix-muted">Loading models...</div>';
             
             try {
-                const data = await fetchApi('/ollama/models', {
+                const data = await window.fetchApi('/ollama/models', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ollama_url: url })
@@ -1772,10 +2079,10 @@
                     modelsList.appendChild(label);
                 });
                 
-                showToast(`Found ${models.length} model(s)`);
+                window.showToast(`Found ${models.length} model(s)`);
             } catch (error) {
                 modelsList.innerHTML = `<div class="col-span-2 text-sm text-red-400">Error: ${error.message}</div>`;
-                showToast(`Error loading models: ${error.message}`, 'error');
+                window.showToast(`Error loading models: ${error.message}`, 'error');
             } finally {
                 getModelsBtn.disabled = false;
                 getModelsBtn.textContent = 'Get Models';
@@ -1800,7 +2107,7 @@
             ollamaModelTestStatus.className = 'text-xs text-yellow-600 mt-2';
             
             try {
-                const res = await fetchApi('/ollama/test', {
+                const res = await window.fetchApi('/ollama/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ollama_url: url, model: model })
@@ -1819,7 +2126,7 @@
                     localStorage.setItem('analysis_provider', 'ollama');
                     
                     try {
-                        await fetchApi('/ollama/config', {
+                        await window.fetchApi('/ollama/config', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ ollama_url: url, ollama_model: model })
@@ -1833,7 +2140,7 @@
                     currentConfigStatus.classList.remove('hidden');
                     updateProviderIndicator();
                     
-                    showToast('Ollama configured as default AI provider');
+                    window.showToast('Ollama configured as default AI provider');
                 } else {
                     throw new Error(res.error);
                 }
@@ -1873,7 +2180,7 @@
 
         const populateHostList = async () => {
             try {
-                const hosts = await fetchApi('/hosts');
+                const hosts = await window.fetchApi('/hosts');
                 hostListDiv.innerHTML = '';
                 if (Object.keys(hosts).length === 0) {
                      hostListDiv.innerHTML = `<p class="text-sm termix-muted text-center">No remote hosts configured.</p>`;
@@ -1924,6 +2231,10 @@
             if (sectionId === 'prompts') {
                 loadAiSearchSettings();
             }
+            if (sectionId === 'suricata') {
+                loadSuricataConfigIntoForm();
+                loadSuricataPromptSettings();
+            }
             
             // Mark button as active
             const activeBtn = document.querySelector(`.settings-nav-btn[data-section="${sectionId}"]`);
@@ -1951,7 +2262,7 @@
         if (dashboardExportSshBtn && createSshConfigBtn) dashboardExportSshBtn.addEventListener('click', () => createSshConfigBtn.click());
 
         if (backToDashboardBtn) backToDashboardBtn.addEventListener('click', () => {
-            showDashboard();
+            window.showDashboard();
         });
 
         settingsBtn.addEventListener('click', () => {
@@ -1969,9 +2280,9 @@
             createAnsibleInventoryBtn.addEventListener('click', async () => {
                 try {
                     await downloadFromPost('/export/ansible-inventory', 'inventory.yaml');
-                    showToast('Downloaded Ansible inventory.', 'success');
+                    window.showToast('Downloaded Ansible inventory.', 'success');
                 } catch (err) {
-                    showToast(err.message || 'Failed to create inventory.', 'error');
+                    window.showToast(err.message || 'Failed to create inventory.', 'error');
                 }
             });
         }
@@ -1980,9 +2291,9 @@
             createSshConfigBtn.addEventListener('click', async () => {
                 try {
                     await downloadFromPost('/export/ssh-config', 'ssh_config');
-                    showToast('Downloaded SSH config.', 'success');
+                    window.showToast('Downloaded SSH config.', 'success');
                 } catch (err) {
-                    showToast(err.message || 'Failed to create SSH config.', 'error');
+                    window.showToast(err.message || 'Failed to create SSH config.', 'error');
                 }
             });
         }
@@ -2019,10 +2330,10 @@
                     if (!resp.ok || data.error) {
                         throw new Error(data.error || `Rescan all failed (${resp.status})`);
                     }
-                    showToast(`Rescan complete: ${data.successful}/${data.total} successful`, 'success');
+                    window.showToast(`Rescan complete: ${data.successful}/${data.total} successful`, 'success');
                     await populateHostCards();
                 } catch (err) {
-                    showToast(err.message || 'Rescan all failed.', 'error');
+                    window.showToast(err.message || 'Rescan all failed.', 'error');
                 } finally {
                     clearInterval(timer);
                     rescanAllBtn.disabled = false;
@@ -2063,9 +2374,9 @@
                     a.remove();
                     setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
 
-                    showToast('Database backup downloaded.', 'success');
+                    window.showToast('Database backup downloaded.', 'success');
                 } catch (err) {
-                    showToast(err.message || 'Backup failed.', 'error');
+                    window.showToast(err.message || 'Backup failed.', 'error');
                 }
             });
         }
@@ -2097,6 +2408,7 @@
                     fd.append('restore_hosts', document.getElementById('restore-hosts')?.checked ? '1' : '0');
                     fd.append('restore_schedule', document.getElementById('restore-schedule')?.checked ? '1' : '0');
                     fd.append('restore_ai_search', document.getElementById('restore-ai-search')?.checked ? '1' : '0');
+                    fd.append('restore_suricata', document.getElementById('restore-suricata')?.checked ? '1' : '0');
 
                     const resp = await fetch('/admin/db/restore-selective', { method: 'POST', body: fd });
                     const data = await resp.json().catch(() => ({}));
@@ -2104,10 +2416,10 @@
                         throw new Error(data.error || `Restore failed (${resp.status})`);
                     }
 
-                    showToast('Database restored. Refreshing host list...', 'success');
+                    window.showToast('Database restored. Refreshing host list...', 'success');
                     await populateHostCards();
                 } catch (err) {
-                    showToast(err.message || 'Restore failed.', 'error');
+                    window.showToast(err.message || 'Restore failed.', 'error');
                 } finally {
                     restoreDbBtn.textContent = originalText;
                     restoreDbBtn.disabled = false;
@@ -2134,14 +2446,14 @@
             if (!button) return;
             const hostId = button.dataset.hostId;
             if (button.classList.contains('edit-host-btn')) {
-                const hosts = await fetchApi('/hosts');
+                const hosts = await window.fetchApi('/hosts');
                 const hostData = hosts[hostId];
                 if (hostData) openHostModal({ id: hostId, ...hostData });
             }
             if (button.classList.contains('delete-host-btn')) {
                 if (confirm('Are you sure you want to delete this host?')) {
-                    await fetchApi(`/hosts/delete/${hostId}`, { method: 'DELETE' });
-                    showToast('Host deleted.');
+                    await window.fetchApi(`/hosts/delete/${hostId}`, { method: 'DELETE' });
+                    window.showToast('Host deleted.');
                     populateHostList();
                     populateHostCards();
                 }
@@ -2155,7 +2467,7 @@
             hostSaveBtn.classList.add('hidden');
             hostTestBtn.disabled = true;
             try {
-                const res = await fetchApi('/hosts/test', {
+                const res = await window.fetchApi('/hosts/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ip: hostIpInput.value, user: hostUserInput.value })
@@ -2188,8 +2500,8 @@
             const url = hostId ? `/hosts/update/${hostId}` : '/hosts/add';
             const method = hostId ? 'PUT' : 'POST';
             try {
-                await fetchApi(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(hostData) });
-                showToast(`Host ${hostId ? 'updated' : 'added'} successfully.`);
+                await window.fetchApi(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(hostData) });
+                window.showToast(`Host ${hostId ? 'updated' : 'added'} successfully.`);
                 hostModal.classList.add('hidden');
                 settingsModal.classList.remove('hidden');
                 populateHostList();
@@ -2217,7 +2529,7 @@
             ollamaTestStatus.classList.remove('hidden');
             
             try {
-                const res = await fetchApi('/ollama/test', {
+                const res = await window.fetchApi('/ollama/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ollama_url: url })
@@ -2308,7 +2620,7 @@
             } catch (error) {
                 logContentTitle.textContent = `Error loading ${currentLogName}`;
                 logContentContainer.innerHTML = `<div class="text-center text-red-400 mt-16">${error.message}</div>`;
-                showToast(error.message, 'error');
+                window.showToast(error.message, 'error');
             }
         });
 
@@ -2316,7 +2628,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
             const provider = localStorage.getItem('analysis_provider') || 'openai';
             
             if (!currentLogContent) {
-                showToast('No log content to analyse.', 'error');
+                window.showToast('No log content to analyse.', 'error');
                 return;
             }
             
@@ -2325,13 +2637,13 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 const ollamaUrl = localStorage.getItem('ollama_url');
                 const ollamaModel = localStorage.getItem('ollama_model');
                 if (!ollamaUrl || !ollamaModel) {
-                    showToast('Ollama is not configured. Please set it up in Settings.', 'error');
+                    window.showToast('Ollama is not configured. Please set it up in Settings.', 'error');
                     return;
                 }
             } else {
                 const apiKey = localStorage.getItem('openai_api_key');
                 if (!apiKey) {
-                    showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
+                    window.showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
                     return;
                 }
             }
@@ -2360,13 +2672,13 @@ aiAnalyseBtn.addEventListener('click', async () => {
                     requestBody.api_key = localStorage.getItem('openai_api_key');
                 }
                 
-                const data = await fetchApi('/analyse', {
+                const data = await window.fetchApi('/analyse', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestBody)
                 });
                 
-                if (data.discord_sent) showToast('Issue detected! Alert sent to Discord.', 'info');
+                if (data.discord_sent) window.showToast('Issue detected! Alert sent to Discord.', 'info');
 
                 aiAnalysisContent.innerHTML = data.analysis.replace(/\n/g, '<br>');
                 
@@ -2374,7 +2686,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                     aiAnalysisModal.classList.add('hidden');
                 });
                 
-                showToast(`Analysis complete using ${provider.toUpperCase()}`);
+                window.showToast(`Analysis complete using ${provider.toUpperCase()}`);
             } catch (error) {
                 aiAnalysisContent.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
             } finally {
@@ -2455,7 +2767,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
         const loadHostChoices = async () => {
             // Derive from existing /hosts endpoint output (already used elsewhere)
             try {
-                const hostsData = await fetchApi('/hosts');
+                const hostsData = await window.fetchApi('/hosts');
                 const tuples = [['local','Localhost']];
                 Object.entries(hostsData || {}).forEach(([hid, h]) => {
                     tuples.push([hid, (h && h.friendly_name) ? h.friendly_name : hid]);
@@ -2468,7 +2780,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
         const loadSchedules = async () => {
             await loadHostChoices();
-            schedules = await fetchApi('/api/schedules');
+            schedules = await window.fetchApi('/api/schedules');
             if (!Array.isArray(schedules)) schedules = [];
 
             scheduleSelect.innerHTML = '';
@@ -2499,12 +2811,12 @@ aiAnalyseBtn.addEventListener('click', async () => {
         addScheduleBtn?.addEventListener('click', async () => {
             const name = (prompt('Schedule name?', 'New Schedule') || '').trim() || 'New Schedule';
             try {
-                const created = await fetchApi('/api/schedules', {
+                const created = await window.fetchApi('/api/schedules', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name, enabled: false, interval_hours: 6, hosts: ['local'], sources: [] })
                 });
-                showToast('Schedule created', 'success');
+                window.showToast('Schedule created', 'success');
                 activeScheduleId = created.id;
                 await loadSchedules();
             } catch (_) {}
@@ -2514,8 +2826,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
             if (!activeScheduleId) return;
             if (!confirm('Delete this schedule?')) return;
             try {
-                await fetchApi(apiScheduleUrl(activeScheduleId), { method: 'DELETE' });
-                showToast('Schedule deleted', 'success');
+                await window.fetchApi(apiScheduleUrl(activeScheduleId), { method: 'DELETE' });
+                window.showToast('Schedule deleted', 'success');
                 activeScheduleId = null;
                 await loadSchedules();
             } catch (_) {}
@@ -2523,7 +2835,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
         const saveActiveSchedule = async (patch) => {
             if (!activeScheduleId) return;
-            const data = await fetchApi(apiScheduleUrl(activeScheduleId), {
+            const data = await window.fetchApi(apiScheduleUrl(activeScheduleId), {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(patch)
@@ -2551,7 +2863,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 await saveActiveSchedule({ interval_hours, enabled, hosts });
                 scheduleHostsDirty = false;
                 setPickLogsButtonState(true);
-                showToast('Schedule saved', 'success');
+                window.showToast('Schedule saved', 'success');
             } catch (_) {}
         });
 
@@ -2674,7 +2986,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                     } else {
                         setTimeout(() => {
                             progressContainer.classList.add('hidden');
-                            showToast('All hosts connected successfully!', 'success');
+                            window.showToast('All hosts connected successfully!', 'success');
                         }, 2000);
                     }
                     
@@ -2789,7 +3101,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
         };
 
         selectLogsBtn.addEventListener('click', async () => {
-            if (scheduleHostsDirty) { showToast('Please click Save first (hosts changed).', 'error'); return; }
+            if (scheduleHostsDirty) { window.showToast('Please click Save first (hosts changed).', 'error'); return; }
             logSelectionTitle.textContent = 'Select Logs to Monitor from All Hosts';
             logSelectionList.innerHTML = '';
             logSelectionModal.classList.remove('hidden');
@@ -3077,7 +3389,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
             if (activeScheduleId) {
                 try {
                     await saveActiveSchedule({ sources: scheduledSources });
-                    showToast('Log selection saved to schedule', 'success');
+                    window.showToast('Log selection saved to schedule', 'success');
                 } catch (_) {}
             }
 
@@ -3087,40 +3399,40 @@ aiAnalyseBtn.addEventListener('click', async () => {
         cancelLogSelectionBtn.addEventListener('click', () => logSelectionModal.classList.add('hidden'));
 
         startScheduleBtn.addEventListener('click', async () => {
-            if (!activeScheduleId) { showToast('No schedule selected.', 'error'); return; }
+            if (!activeScheduleId) { window.showToast('No schedule selected.', 'error'); return; }
 
             const interval_hours = Math.max(1, parseInt(scheduleIntervalInput.value || '6', 10));
             const webhookUrl = discordWebhookInput.value.trim();
             const provider = localStorage.getItem('analysis_provider') || 'openai';
 
-            if (scheduledSources.length === 0) { showToast('Select at least one log for this schedule.', 'error'); return; }
-            if (!webhookUrl) { showToast('Discord webhook is required.', 'error'); return; }
+            if (scheduledSources.length === 0) { window.showToast('Select at least one log for this schedule.', 'error'); return; }
+            if (!webhookUrl) { window.showToast('Discord webhook is required.', 'error'); return; }
 
             // Provider-specific requirements
             if (provider === 'ollama') {
                 const ollamaUrl = localStorage.getItem('ollama_url');
                 const ollamaModel = localStorage.getItem('ollama_model');
-                if (!ollamaUrl || !ollamaModel) { showToast('Ollama is not configured. Please set it up first.', 'error'); return; }
+                if (!ollamaUrl || !ollamaModel) { window.showToast('Ollama is not configured. Please set it up first.', 'error'); return; }
             } else {
                 const openaiKeyEl = openaiApiKeyInput || apiKeyInput;
                 const apiKey = openaiKeyEl ? openaiKeyEl.value.trim() : '';
-                if (!apiKey) { showToast('OpenAI API key is required.', 'error'); return; }
+                if (!apiKey) { window.showToast('OpenAI API key is required.', 'error'); return; }
             }
 
             try {
                 // Persist schedule config: enable + interval + hosts + sources
                 const hosts = getSelectedHostIds();
                 await saveActiveSchedule({ enabled: true, interval_hours, hosts, sources: scheduledSources });
-                showToast('Schedule started (enabled).', 'success');
+                window.showToast('Schedule started (enabled).', 'success');
                 updateSchedulerStatus();
             } catch (error) {}
         });
 
         stopScheduleBtn.addEventListener('click', async () => {
-            if (!activeScheduleId) { showToast('No schedule selected.', 'error'); return; }
+            if (!activeScheduleId) { window.showToast('No schedule selected.', 'error'); return; }
             try {
                 await saveActiveSchedule({ enabled: false });
-                showToast('Schedule stopped (disabled).', 'success');
+                window.showToast('Schedule stopped (disabled).', 'success');
                 updateSchedulerStatus();
             } catch (error) {}
         });
@@ -3184,7 +3496,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
         };
 
         runNowBtn.addEventListener('click', async () => {
-            if (scheduledSources.length === 0) { showToast('Please select logs for the schedule first.', 'error'); return; }
+            if (scheduledSources.length === 0) { window.showToast('Please select logs for the schedule first.', 'error'); return; }
 
             // Reset + show progress UI
             if (runNowEventSource) {
@@ -3200,7 +3512,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
             runNowBtn.disabled = true;
             runNowBtn.textContent = 'Running...';
 
-            if (!activeScheduleId) { showToast('No schedule selected.', 'error'); resetRunNowUi(); return; }
+            if (!activeScheduleId) { window.showToast('No schedule selected.', 'error'); resetRunNowUi(); return; }
             runNowEventSource = new EventSource(`/api/schedules/${activeScheduleId}/run_now/stream`);
 
             runNowEventSource.onmessage = (event) => {
@@ -3214,7 +3526,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 } else if (data.status === 'log') {
                     if (data.message) appendProgressLog(formatRunNowLogMessage(data.message));
                 } else if (data.status === 'error') {
-                    if (data.message) showToast(data.message, 'error');
+                    if (data.message) window.showToast(data.message, 'error');
                     if (progressMessage && data.message) progressMessage.textContent = data.message;
                     if (progressBar) progressBar.style.width = '100%';
                     appendProgressLog('Error.');
@@ -3235,7 +3547,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
             runNowEventSource.onerror = (err) => {
                 console.error('Run Now EventSource failed:', err);
-                showToast('Run Now stream connection failed.', 'error');
+                window.showToast('Run Now stream connection failed.', 'error');
                 try { runNowEventSource.close(); } catch (_) {}
                 runNowEventSource = null;
                 runNowBtn.disabled = false;
@@ -3252,15 +3564,15 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
             try {
                 // If field is empty, backend will test saved webhook
-                await fetchApi('/discord/test', {
+                await window.fetchApi('/discord/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ webhook_url: webhookUrl })
                 });
-                showToast('Discord webhook test sent.', 'success');
+                window.showToast('Discord webhook test sent.', 'success');
                 setStatusDot(discordWebhookStatusDot, true);
             } catch (error) {
-                showToast(error.message || 'Discord test failed.', 'error');
+                window.showToast(error.message || 'Discord test failed.', 'error');
                 setStatusDot(discordWebhookStatusDot, false);
             } finally {
                 testDiscordBtn.disabled = false;
@@ -3277,7 +3589,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
         const performSearch = async () => {
             const query = searchInput.value.trim();
             if (!query) {
-                showToast('Please enter a search query', 'error');
+                window.showToast('Please enter a search query', 'error');
                 return;
             }
 
@@ -3298,7 +3610,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                     case_sensitive: caseSensitiveCheckbox.checked
                 };
 
-                const results = await fetchApi('/search', {
+                const results = await window.fetchApi('/search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(searchData)
@@ -3418,10 +3730,691 @@ aiAnalyseBtn.addEventListener('click', async () => {
         const showEmptyLogsCheckbox = document.getElementById('show-empty-logs');
         showEmptyLogsCheckbox.addEventListener('change', filterLogsBySize);
 
+        // expose key helpers for other scripts
+        window.fetchApi = fetchApi;
+        window.showToast = showToast;
+        window.showDashboard = showDashboard;
+
         // --- INITIALIZATION ---
         populateHostCards();
     });
-    </script>
+    
+
+// -----------------------------
+// Suricata UI
+// -----------------------------
+let suricataAlertsChart = null;
+let suricataCountersChart = null;
+let suricataCategoryChart = null;
+let currentSuricataSensorId = null;
+
+function _suricataRangeKeyFromSlider(v) {
+    const map = ['1h','6h','24h','7d'];
+    return map[Math.max(0, Math.min(3, Number(v)||0))];
+}
+
+function _suricataSetRangeLabel(key) {
+    const el = document.getElementById('suricata-range-label');
+    if (el) el.textContent = key;
+}
+
+function showSuricataStats() {
+    const dashboardView = document.getElementById('dashboard-view');
+    const logsView = document.getElementById('logs-view');
+    const suriView = document.getElementById('suricata-stats-view');
+    if (dashboardView) dashboardView.classList.add('hidden');
+    if (logsView) logsView.classList.add('hidden');
+    if (suriView) suriView.classList.remove('hidden');
+
+    refreshSuricataStats();
+}
+
+async function loadSuricataConfigIntoForm() {
+    const statusEl = document.getElementById('suricata-settings-status');
+    if (statusEl) statusEl.textContent = 'Loading...';
+    try {
+        const sensors = await window.fetchApi('/suricata/config');
+        const keys = await window.fetchApi('/ssh-keys');
+
+        const keySel = document.getElementById('suricata-ssh-key');
+        if (keySel) {
+            keySel.innerHTML = '<option value="">(default)</option>';
+            (keys||[]).forEach(k => {
+                const opt = document.createElement('option');
+                opt.value = String(k.id);
+                opt.textContent = k.key_name;
+                keySel.appendChild(opt);
+            });
+        }
+
+        const sensor = (sensors && sensors.length) ? sensors[0] : null;
+        currentSuricataSensorId = sensor ? sensor.id : null;
+
+        document.getElementById('suricata-sensor-name').value = sensor?.name || 'Home Sniffer';
+        document.getElementById('suricata-host').value = sensor?.host || 'sniffer.netbird.cloud';
+        document.getElementById('suricata-user').value = sensor?.user || 'david';
+        document.getElementById('suricata-log-dir').value = sensor?.log_dir || '/var/log/suricata';
+        document.getElementById('suricata-sensor-enabled').checked = sensor ? !!sensor.enabled : true;
+        document.getElementById('suricata-ingest-interval').value = sensor?.ingest_interval_seconds || 30;
+        if (keySel) keySel.value = sensor?.ssh_key_id ? String(sensor.ssh_key_id) : '';
+
+        if (statusEl) statusEl.textContent = sensor ? `Loaded sensor #${sensor.id}` : 'No sensor saved yet.';
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'Failed to load Suricata config';
+    }
+}
+
+async function saveSuricataConfigFromForm() {
+    const statusEl = document.getElementById('suricata-settings-status');
+    if (statusEl) statusEl.textContent = 'Saving...';
+
+    const payload = {
+        id: currentSuricataSensorId,
+        name: document.getElementById('suricata-sensor-name').value,
+        host: document.getElementById('suricata-host').value,
+        user: document.getElementById('suricata-user').value,
+        log_dir: document.getElementById('suricata-log-dir').value,
+        enabled: document.getElementById('suricata-sensor-enabled').checked,
+        ingest_interval_seconds: Number(document.getElementById('suricata-ingest-interval').value || 30),
+        ssh_key_id: document.getElementById('suricata-ssh-key').value || null,
+    };
+
+    try {
+        const res = await window.fetchApi('/suricata/config', { method: 'POST', body: JSON.stringify(payload) });
+        currentSuricataSensorId = res?.id || currentSuricataSensorId;
+        if (statusEl) statusEl.textContent = `Saved sensor #${currentSuricataSensorId}`;
+        window.showToast('Suricata settings saved', 'success');
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'Save failed';
+    }
+}
+
+async function testSuricataConnection() {
+    const out = document.getElementById('suricata-test-results');
+    out.textContent = 'Testing...';
+    const payload = {
+        host: document.getElementById('suricata-host').value,
+        user: document.getElementById('suricata-user').value,
+        log_dir: document.getElementById('suricata-log-dir').value,
+        ssh_key_id: document.getElementById('suricata-ssh-key').value || null,
+    };
+    try {
+        const res = await window.fetchApi('/suricata/test', { method: 'POST', body: JSON.stringify(payload) });
+        out.textContent = JSON.stringify(res, null, 2);
+        window.showToast(res.ok ? 'Suricata test OK' : 'Suricata test failed', res.ok ? 'success' : 'error');
+    } catch (e) {
+        out.textContent = 'Test failed.';
+    }
+}
+
+async function runSuricataIngestOnce() {
+    const statusEl = document.getElementById('suricata-settings-status');
+    if (statusEl) statusEl.textContent = 'Ingesting...';
+    try {
+        const res = await window.fetchApi('/suricata/ingest/run_once', { method: 'POST', body: JSON.stringify({ sensor_id: currentSuricataSensorId }) });
+        if (statusEl) statusEl.textContent = 'Ingest complete';
+        window.showToast('Suricata ingest complete', 'success');
+        // Refresh charts if open
+        refreshSuricataStats();
+        // Show results in test pane for convenience
+        const out = document.getElementById('suricata-test-results');
+        if (out) out.textContent = JSON.stringify(res, null, 2);
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'Ingest failed';
+    }
+}
+
+function _ensureSuricataCharts() {
+    const alertsCtx = document.getElementById('suricata-alerts-chart');
+    const countersCtx = document.getElementById('suricata-counters-chart');
+    const catCtx = document.getElementById('suricata-category-chart');
+
+    if (alertsCtx && !suricataAlertsChart) {
+        suricataAlertsChart = new Chart(alertsCtx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'Alerts', data: [], borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.2)', tension: 0.2 }] },
+            options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#9ca3af' } }, y: { ticks: { color: '#9ca3af' } } }, plugins: { legend: { labels: { color: '#d1d5db' } } } }
+        });
+    }
+
+    if (countersCtx && !suricataCountersChart) {
+        suricataCountersChart = new Chart(countersCtx, {
+            type: 'line',
+            data: { labels: [], datasets: [
+                { label: 'decoder.pkts', data: [], borderColor: '#60a5fa', tension: 0.2 },
+                { label: 'capture.kernel_drops', data: [], borderColor: '#f59e0b', tension: 0.2 },
+                { label: 'tcp.reassembly_gap', data: [], borderColor: '#22c55e', tension: 0.2 },
+            ]},
+            options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#9ca3af' } }, y: { ticks: { color: '#9ca3af' } } }, plugins: { legend: { labels: { color: '#d1d5db' } } } }
+        });
+    }
+
+    if (catCtx && !suricataCategoryChart) {
+        suricataCategoryChart = new Chart(catCtx, {
+            type: 'doughnut',
+            data: { labels: [], datasets: [{ data: [], backgroundColor: ['#a855f7','#60a5fa','#22c55e','#f59e0b','#ef4444','#14b8a6','#e879f9','#94a3b8'] }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#d1d5db' } } } }
+        });
+    }
+}
+
+async function refreshSuricataStats() {
+    _ensureSuricataCharts();
+    const slider = document.getElementById('suricata-range-slider');
+    const key = _suricataRangeKeyFromSlider(slider ? slider.value : 2);
+    _suricataSetRangeLabel(key);
+
+    try {
+        const url = `/suricata/stats?range=${encodeURIComponent(key)}${currentSuricataSensorId ? `&sensor_id=${currentSuricataSensorId}` : ''}`;
+        const data = await window.fetchApi(url);
+
+        // KPIs
+        document.getElementById('suricata-kpi-total-alerts').textContent = data?.kpis?.total_alerts ?? '-';
+        document.getElementById('suricata-kpi-alerts-per-hour').textContent = data?.kpis?.alerts_per_hour ? data.kpis.alerts_per_hour.toFixed(1) : '-';
+        document.getElementById('suricata-kpi-sensor').textContent = data?.sensor?.name || data?.sensor?.host || '-';
+
+        // Attempt to show some counters as KPIs if present
+        const dropsSeries = data?.counter_series?.['capture.kernel_drops'] || [];
+        const gapSeries = data?.counter_series?.['tcp.reassembly_gap'] || [];
+        document.getElementById('suricata-kpi-kernel-drops').textContent = dropsSeries.length ? dropsSeries[dropsSeries.length-1].value : '-';
+        document.getElementById('suricata-kpi-tcp-gaps').textContent = gapSeries.length ? gapSeries[gapSeries.length-1].value : '-';
+
+        // Alerts chart
+        if (suricataAlertsChart) {
+            const labels = (data.alerts_timeseries || []).map(p => new Date(p.ts*1000).toLocaleString());
+            const vals = (data.alerts_timeseries || []).map(p => p.alerts);
+            suricataAlertsChart.data.labels = labels;
+            suricataAlertsChart.data.datasets[0].data = vals;
+            suricataAlertsChart.update();
+        }
+
+        // Counters chart (decoder.pkts, kernel_drops, tcp.gap)
+        if (suricataCountersChart) {
+            const base = data.counter_series || {};
+            const pick = (name) => (base[name]||[]);
+            const seriesA = pick('decoder.pkts');
+            const labels = seriesA.map(p => new Date(p.ts*1000).toLocaleString());
+            suricataCountersChart.data.labels = labels;
+            const ds = suricataCountersChart.data.datasets;
+            ds[0].data = seriesA.map(p => p.value);
+            ds[1].data = pick('capture.kernel_drops').map(p => p.value);
+            ds[2].data = pick('tcp.reassembly_gap').map(p => p.value);
+            suricataCountersChart.update();
+        }
+
+        // Category chart
+        if (suricataCategoryChart) {
+            const labels = (data.pie_categories || []).map(p => p.category);
+            const vals = (data.pie_categories || []).map(p => p.count);
+            suricataCategoryChart.data.labels = labels;
+            suricataCategoryChart.data.datasets[0].data = vals;
+            suricataCategoryChart.update();
+        }
+
+        // Top signatures table
+        const tbody = document.getElementById('suricata-top-signatures');
+        if (tbody) {
+            tbody.innerHTML = '';
+            (data.top_signatures || []).forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td class="py-2 pr-3">${row.signature}</td><td class="py-2 text-right">${row.count}</td>`;
+                tbody.appendChild(tr);
+            });
+        }
+
+    } catch (e) {
+        // ignore
+    }
+}
+
+// Wire events
+(function initSuricataUI(){
+    const btn = document.getElementById('suricata-stats-btn');
+    if (btn) btn.addEventListener('click', showSuricataStats);
+
+    const back = document.getElementById('back-to-dashboard-from-suricata');
+    if (back) back.addEventListener('click', () => { window.showDashboard(); });
+
+    const slider = document.getElementById('suricata-range-slider');
+    if (slider) slider.addEventListener('input', () => { refreshSuricataStats(); });
+
+    const dashboardOpen = document.getElementById('dashboard-open-settings');
+    if (dashboardOpen) dashboardOpen.addEventListener('click', () => { document.getElementById('settings-btn')?.click(); });
+
+    const testBtn = document.getElementById('suricata-test-btn');
+    if (testBtn) testBtn.addEventListener('click', testSuricataConnection);
+
+    const saveBtn = document.getElementById('suricata-save-btn');
+    if (saveBtn) saveBtn.addEventListener('click', saveSuricataConfigFromForm);
+
+    const ingestBtn = document.getElementById('suricata-ingest-once-btn');
+    if (ingestBtn) ingestBtn.addEventListener('click', runSuricataIngestOnce);
+})();
+
+
+
+// -----------------------------
+// Suricata tabs + richer feedback
+// -----------------------------
+function suricataSelectTab(tab) {
+    const tabs = document.querySelectorAll('#suricata-tabs .suricata-tab');
+    const panels = document.querySelectorAll('#suricata-data-section .suricata-tab-panel');
+    tabs.forEach(b => {
+        const active = b.dataset.tab === tab;
+        b.classList.toggle('bg-purple-700', active);
+        b.classList.toggle('text-white', active);
+    });
+    panels.forEach(p => {
+        const active = p.dataset.tabPanel === tab;
+        p.classList.toggle('hidden', !active);
+    });
+}
+
+function _suricataLog(msg) {
+    const log = document.getElementById('suricata-ingest-log');
+    if (!log) return;
+    const ts = new Date().toLocaleTimeString();
+    log.textContent += `[${ts}] ${msg}\n`;
+    log.scrollTop = log.scrollHeight;
+}
+
+async function runSuricataIngestOnce() {
+    const statusEl = document.getElementById('suricata-settings-status');
+    const progWrap = document.getElementById('suricata-ingest-progress');
+    const progBar = document.getElementById('suricata-ingest-progress-bar');
+    const btn = document.getElementById('suricata-ingest-once-btn');
+
+    if (btn) btn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Ingesting...';
+    if (progWrap) progWrap.classList.remove('hidden');
+    if (progBar) progBar.style.width = '5%';
+
+    _suricataLog('Starting ingest...');
+
+    try {
+        if (progBar) progBar.style.width = '15%';
+        _suricataLog('Calling /suricata/ingest/run_once');
+
+        const res = await window.fetchApi('/suricata/ingest/run_once', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sensor_id: currentSuricataSensorId })
+        });
+
+        if (progBar) progBar.style.width = '85%';
+        _suricataLog('Ingest complete.');
+
+        // Show results in test pane for convenience
+        const out = document.getElementById('suricata-test-results');
+        if (out) out.textContent = JSON.stringify(res, null, 2);
+
+        // Refresh charts if open
+        refreshSuricataStats();
+
+        if (progBar) progBar.style.width = '100%';
+        if (statusEl) statusEl.textContent = 'Ingest complete';
+        window.showToast('Suricata ingest complete', 'success');
+
+        setTimeout(() => {
+            if (progWrap) progWrap.classList.add('hidden');
+            if (progBar) progBar.style.width = '0%';
+            const log = document.getElementById('suricata-ingest-log');
+            if (log) log.textContent = '';
+        }, 1500);
+
+    } catch (e) {
+        _suricataLog('Ingest failed: ' + (e?.message || String(e)));
+        if (progBar) progBar.style.width = '100%';
+        if (statusEl) statusEl.textContent = 'Ingest failed';
+        window.showToast(e?.message || 'Ingest failed', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function refreshSuricataEndpoints() {
+    const statusEl = document.getElementById('suricata-endpoints-status');
+    const tbody = document.getElementById('suricata-endpoints-table');
+    const filterEl = document.getElementById('suricata-endpoints-search');
+    if (!tbody) return;
+
+    if (statusEl) statusEl.textContent = 'Loading...';
+    tbody.innerHTML = '';
+
+    const slider = document.getElementById('suricata-range-slider');
+    const range = _suricataRangeKeyFromSlider(slider ? slider.value : 2);
+
+    try {
+        const url = `/suricata/endpoints?range=${encodeURIComponent(range)}${currentSuricataSensorId ? `&sensor_id=${currentSuricataSensorId}` : ''}`;
+        const data = await window.fetchApi(url);
+        const q = (filterEl?.value || '').trim().toLowerCase();
+        const rows = (data.endpoints || []).filter(r => !q || String(r.endpoint||'').toLowerCase().includes(q));
+
+        rows.forEach(r => {
+            const tr = document.createElement('tr');
+            const protos = (r.top_protocols||[]).map(p => `${p.name}:${p.count}`).join(', ');
+            const srcs = (r.top_sources||[]).map(p => `${p.ip}:${p.count}`).join(', ');
+            tr.innerHTML = `
+                <td class="py-2 px-3">${r.endpoint}</td>
+                <td class="py-2 px-3 text-right">${r.alerts}</td>
+                <td class="py-2 px-3">${protos}</td>
+                <td class="py-2 px-3">${srcs}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        if (statusEl) statusEl.textContent = `Loaded ${rows.length} endpoints`;
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'Failed to load endpoints';
+    }
+}
+
+async function refreshSuricataRaw() {
+    const out = document.getElementById('suricata-raw-output');
+    const statusEl = document.getElementById('suricata-raw-status');
+    if (!out) return;
+
+    out.textContent = 'Loading...';
+    if (statusEl) statusEl.textContent = '';
+
+    const payload = {
+        sensor_id: currentSuricataSensorId,
+        filename: document.getElementById('suricata-raw-file')?.value,
+        query: document.getElementById('suricata-raw-query')?.value,
+        max_lines: Number(document.getElementById('suricata-raw-lines')?.value || 500),
+    };
+
+    try {
+        const res = await window.fetchApi('/suricata/raw', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        out.textContent = res.content || '';
+        if (statusEl) statusEl.textContent = `${res.filename} loaded`;
+    } catch (e) {
+        out.textContent = '(failed to load raw)';
+        if (statusEl) statusEl.textContent = 'Failed';
+    }
+}
+
+// Extra wiring for Suricata tabs
+(function initSuricataTabs(){
+    const tabBtns = document.querySelectorAll('#suricata-tabs .suricata-tab');
+    tabBtns.forEach(b => b.addEventListener('click', () => {
+        suricataSelectTab(b.dataset.tab);
+        if (b.dataset.tab === 'endpoints') refreshSuricataEndpoints();
+    }));
+
+    document.getElementById('suricata-endpoints-refresh-btn')?.addEventListener('click', refreshSuricataEndpoints);
+    document.getElementById('suricata-endpoints-search')?.addEventListener('input', refreshSuricataEndpoints);
+
+    document.getElementById('suricata-raw-refresh-btn')?.addEventListener('click', refreshSuricataRaw);
+
+    // default tab
+    suricataSelectTab('server');
+})();
+
+
+async function loadSuricataPromptSettings() {
+    const ta = document.getElementById('suricata-ai-prompt');
+    const st = document.getElementById('suricata-prompt-save-status');
+    if (!ta) return;
+    try {
+        const data = await window.fetchApi('/suricata/prompt');
+        ta.value = data.prompt || '';
+        if (st) st.textContent = '';
+    } catch (e) { if (st) st.textContent = 'Failed to load'; }
+}
+async function saveSuricataPromptSettings() {
+    const ta = document.getElementById('suricata-ai-prompt');
+    const st = document.getElementById('suricata-prompt-save-status');
+    if (!ta) return;
+    if (st) st.textContent = 'Saving...';
+    try {
+        const data = await window.fetchApi('/suricata/prompt', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({prompt: ta.value})
+        });
+        ta.value = data.prompt || ta.value;
+        if (st) st.textContent = 'Saved.';
+        window.showToast('Suricata prompt saved', 'success');
+    } catch (e) { if (st) st.textContent = 'Save failed.'; }
+}
+document.getElementById('save-suricata-prompt-btn')?.addEventListener('click', saveSuricataPromptSettings);
+
+
+function suricataStatsSelectTab(tab) {
+    document.querySelectorAll('#suricata-stats-tabs .suricata-stats-tab').forEach(b => {
+        const active = b.dataset.suriTab === tab;
+        b.classList.toggle('bg-purple-700', active);
+        b.classList.toggle('text-white', active);
+    });
+    document.querySelectorAll('#suricata-stats-view .suricata-stats-panel').forEach(panel => {
+        panel.classList.toggle('hidden', panel.dataset.suriPanel !== tab);
+    });
+}
+
+async function refreshSuricataEndpoints2() {
+    const statusEl = document.getElementById('suricata-endpoints-status2');
+    const tbody = document.getElementById('suricata-endpoints-table2');
+    const sourcesTbody = document.getElementById('suricata-top-sources-table');
+    const filterEl = document.getElementById('suricata-endpoints-search2');
+    const kTotal = document.getElementById('suricata-endpoints-kpi-total');
+    const kAlerts = document.getElementById('suricata-endpoints-kpi-alerts');
+    const kTopPort = document.getElementById('suricata-endpoints-kpi-top-port');
+    const kTopEndpoint = document.getElementById('suricata-endpoints-kpi-top-endpoint');
+
+    if (!tbody) return;
+    if (statusEl) statusEl.textContent = 'Loading...';
+    tbody.innerHTML = '';
+    if (sourcesTbody) sourcesTbody.innerHTML = '';
+
+    const slider = document.getElementById('suricata-range-slider');
+    const range = _suricataRangeKeyFromSlider(slider ? slider.value : 2);
+    const url = '/suricata/endpoint_stats?range=' + encodeURIComponent(range) + (currentSuricataSensorId ? '&sensor_id=' + currentSuricataSensorId : '');
+
+    try {
+        const data = await window.fetchApi(url);
+        const eps = data.alerts_by_endpoint || [];
+        const ports = data.alerts_by_port || [];
+        const matrix = data.endpoint_port_matrix || [];
+        const topSources = data.top_sources || [];
+
+        const q = (filterEl ? filterEl.value : '').trim().toLowerCase();
+        const epsFiltered = eps.filter(r => !q || String(r.endpoint || '').toLowerCase().includes(q));
+
+        epsFiltered.forEach(r => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td class="py-2 px-3">' + (r.endpoint || '') + '</td><td class="py-2 px-3 text-right">' + (r.alerts || 0) + '</td>';
+            tbody.appendChild(tr);
+        });
+
+        // KPIs
+        if (kTotal) kTotal.textContent = String((data.total_endpoints !== undefined) ? data.total_endpoints : (eps.length || '-'));
+        const totalAlerts = eps.reduce((acc, r) => acc + (Number(r.alerts) || 0), 0);
+        if (kAlerts) kAlerts.textContent = String(totalAlerts);
+        if (kTopPort) kTopPort.textContent = ports.length ? (String(ports[0].port) + ' (' + ports[0].alerts + ')') : '-';
+        if (kTopEndpoint) kTopEndpoint.textContent = eps.length ? (String(eps[0].endpoint) + ' (' + eps[0].alerts + ')') : '-';
+
+        // Top sources table
+        if (sourcesTbody) {
+            topSources.forEach(row => {
+                const srcs = (row.sources || []).map(s => (s.ip + ':' + s.count)).join(', ');
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td class="py-2 px-3">' + (row.endpoint || '') + '</td><td class="py-2 px-3">' + srcs + '</td>';
+                sourcesTbody.appendChild(tr);
+            });
+        }
+
+        const pieCanvas = document.getElementById('suricata-endpoints-pie');
+        const portCanvas = document.getElementById('suricata-ports-bar');
+        const stackedCanvas = document.getElementById('suricata-endpoint-ports-stacked');
+
+        const palette = [
+            'rgba(168, 85, 247, 0.55)',
+            'rgba(59, 130, 246, 0.55)',
+            'rgba(16, 185, 129, 0.55)',
+            'rgba(245, 158, 11, 0.55)',
+            'rgba(239, 68, 68, 0.55)',
+            'rgba(236, 72, 153, 0.55)',
+            'rgba(34, 197, 94, 0.55)',
+            'rgba(14, 165, 233, 0.55)'
+        ];
+
+        // Pie: top 10 endpoints + Other
+        if (pieCanvas && window.Chart) {
+            const top = eps.slice(0, 10);
+            const other = eps.slice(10).reduce((acc, r) => acc + (Number(r.alerts) || 0), 0);
+            const labels = top.map(x => x.endpoint);
+            const values = top.map(x => x.alerts);
+            const colors = top.map((_, i) => palette[i % palette.length]);
+            if (other > 0) { labels.push('Other'); values.push(other); colors.push('rgba(148, 163, 184, 0.5)'); }
+
+            const ctx = pieCanvas.getContext('2d');
+            if (window.suricataEndpointsPieChart) window.suricataEndpointsPieChart.destroy();
+            window.suricataEndpointsPieChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels, datasets: [{ data: values, backgroundColor: colors }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        // Bar: ports top 12
+        if (portCanvas && window.Chart) {
+            const topP = ports.slice(0, 12);
+            const labels = topP.map(x => String(x.port));
+            const values = topP.map(x => x.alerts);
+
+            const ctx = portCanvas.getContext('2d');
+            if (window.suricataPortsBarChart) window.suricataPortsBarChart.destroy();
+            window.suricataPortsBarChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels, datasets: [{ label: 'Alerts', data: values, backgroundColor: 'rgba(168, 85, 247, 0.6)' }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        // Stacked: top endpoints x top ports
+        if (stackedCanvas && window.Chart) {
+            const epsTop = eps.slice(0, 10).map(x => x.endpoint);
+            const portsTop = ports.slice(0, 6).map(x => x.port);
+            const byKey = {};
+            matrix.forEach(r => { byKey[String(r.endpoint) + '|' + String(r.port)] = r.alerts; });
+
+            const datasets = portsTop.map((port, idx) => ({
+                label: 'Port ' + port,
+                data: epsTop.map(ep => byKey[String(ep) + '|' + String(port)] || 0),
+                backgroundColor: palette[idx % palette.length]
+            }));
+
+            const ctx = stackedCanvas.getContext('2d');
+            if (window.suricataEndpointPortStacked) window.suricataEndpointPortStacked.destroy();
+            window.suricataEndpointPortStacked = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: epsTop, datasets },
+                options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        if (statusEl) statusEl.textContent = 'Loaded ' + epsFiltered.length + ' endpoints';
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'Failed';
+    }
+}
+
+let _suricataRawContent2 = '';
+
+async function refreshSuricataRaw2() {
+    const statusEl = document.getElementById('suricata-raw-status2');
+    const tbody = document.getElementById('suricata-raw-table2');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (statusEl) statusEl.textContent = 'Loading...';
+    const fileEl = document.getElementById('suricata-raw-file2');
+    const queryEl = document.getElementById('suricata-raw-query2');
+    const linesEl = document.getElementById('suricata-raw-lines2');
+    try {
+        const res = await window.fetchApi('/suricata/raw', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                sensor_id: currentSuricataSensorId,
+                filename: fileEl ? fileEl.value : 'suricata.log',
+                query: queryEl ? queryEl.value : '',
+                max_lines: Number(linesEl ? linesEl.value : 500)
+            })
+        });
+        _suricataRawContent2 = res.content || '';
+        const lines = _suricataRawContent2.split('\n');
+        lines.forEach((line, i) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td class="py-1 px-3 text-right termix-muted">' + (i+1) + '</td><td class="py-1 px-3 whitespace-pre-wrap">' + (line || '') + '</td>';
+            tbody.appendChild(tr);
+        });
+        if (statusEl) statusEl.textContent = (res.filename || '') + ' loaded (' + lines.length + ' lines)';
+    } catch(e) { if (statusEl) statusEl.textContent = 'Failed'; }
+}
+
+async function analyseSuricataRaw2() {
+    const btn = document.getElementById('suricata-raw-ai-btn2');
+    if (!_suricataRawContent2) { window.showToast('Load raw data first.', 'error'); return; }
+    const provider = localStorage.getItem('analysis_provider') || 'openai';
+    if (provider === 'ollama') {
+        if (!localStorage.getItem('ollama_url') || !localStorage.getItem('ollama_model')) {
+            window.showToast('Ollama not configured.', 'error'); return;
+        }
+    } else {
+        if (!localStorage.getItem('openai_api_key')) {
+            window.showToast('OpenAI API Key missing.', 'error'); return;
+        }
+    }
+    if (btn) { btn.textContent = 'Analysing...'; btn.disabled = true; }
+    const modal = document.getElementById('ai-analysis-modal');
+    const content = document.getElementById('ai-analysis-content');
+    const closeBtn = document.getElementById('close-ai-modal-btn');
+    content.innerHTML = '<p>Contacting AI assistant...</p>';
+    modal.classList.remove('hidden');
+    const fileEl = document.getElementById('suricata-raw-file2');
+    try {
+        const body = {
+            log_content: _suricataRawContent2,
+            log_name: 'Suricata ' + (fileEl ? fileEl.value : 'raw'),
+            provider: provider
+        };
+        if (provider === 'openai') body.api_key = localStorage.getItem('openai_api_key');
+        const data = await window.fetchApi('/suricata/analyse', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(body)
+        });
+        content.innerHTML = (data.analysis || '').replace(/\n/g, '<br>');
+        closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+        window.showToast('Analysis complete using ' + provider.toUpperCase());
+    } catch(e) {
+        content.innerHTML = '<p class="text-red-400"><strong>Failed:</strong><br>' + e.message + '</p>';
+    } finally {
+        if (btn) { btn.textContent = 'AI Analyse'; btn.disabled = false; }
+    }
+}
+
+(function initSuricataStatsDashboards() {
+    document.querySelectorAll('#suricata-stats-tabs .suricata-stats-tab').forEach(b => {
+        b.addEventListener('click', () => {
+            const tab = b.dataset.suriTab;
+            suricataStatsSelectTab(tab);
+            if (tab === 'endpoints') refreshSuricataEndpoints2();
+        });
+    });
+    document.getElementById('suricata-endpoints-refresh-btn2') && document.getElementById('suricata-endpoints-refresh-btn2').addEventListener('click', refreshSuricataEndpoints2);
+    document.getElementById('suricata-endpoints-search2') && document.getElementById('suricata-endpoints-search2').addEventListener('input', refreshSuricataEndpoints2);
+    document.getElementById('suricata-raw-refresh-btn2') && document.getElementById('suricata-raw-refresh-btn2').addEventListener('click', refreshSuricataRaw2);
+    document.getElementById('suricata-raw-ai-btn2') && document.getElementById('suricata-raw-ai-btn2').addEventListener('click', analyseSuricataRaw2);
+    suricataStatsSelectTab('overview');
+})();
+
+</script>
     {% include "wizard.html" %}
 </body>
 </html>
