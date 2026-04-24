@@ -84,6 +84,20 @@ This application is designed for use on a trusted, internal development network 
 * **Granular Sudo Permissions:** Minimal required permissions for enhanced security
 * **Network Isolation:** Designed for trusted internal networks only
 
+
+### 🕵️ Secret scanning (gitleaks)
+This repository is protected by a server-side `gitleaks` hook that rejects pushes if it detects secrets (or secret-like strings) anywhere in the commit history.
+
+Tips
+- Do not commit backup copies of templates or scratch files (for example `*.backup` or `templates/*_old.html`).
+- Avoid including real key material in the repo. If you need examples, use generic wording like “PEM format” rather than pasting literal key headers.
+- Run a local scan before pushing:
+  - `gitleaks detect --source . --redact`
+
+If a push is rejected
+- Run `gitleaks detect --source . --redact --verbose` to see which file/line is triggering.
+- Remove the secret from the working tree. If the finding is in history, you must rewrite history (for example using `git filter-repo`) and then force-push the branch.
+
 ### 🟣 Suricata (Remote Sensor)
 - Configure a Suricata sensor under **Settings → Suricata Data** (host/user/log directory/SSH key)
 - Test SSH + sudo access and confirm the sensor can see `eve.json`, `fast.log`, `stats.log`, `suricata.log`
