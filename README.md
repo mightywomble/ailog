@@ -6,6 +6,8 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-04-24 | v2.9.5 | Host selection workflow: select host → host info → pull logs; Groups management in Settings (CRUD + list members); Host Info UI enhancements (full-pane view, action buttons w/icons, resource/service visuals, running/stopped service lists) | ✅ Complete |
+| 2026-04-24 | v2.9.4 | SSH key management: encryption-at-rest + checksum integrity verification; Add Devices wizard stability fixes (SSE parsing, logging, Step 4→5 completion/close flow) | ✅ Complete |
 | 2026-04-06 | v2.9.3 | Wizard UX fixes (step indicators, verify failure reasons, progress counts, duplicate/skip reporting) + Remote Hosts Edit modal restyled to termix theme | ✅ Complete |
 | 2026-04-06 | v2.9.2 | Homepage: removed Top Noisy Servers + Recommendations and replaced with a large tech-themed logo panel matching the termix theme | ✅ Complete |
 | 2026-04-06 | v2.9.1 | UI polish: collapsible Hosts sidebar, cleaner toolbar (More menu), Suricata button shown only when configured, wizard restyled to match termix theme | ✅ Complete |

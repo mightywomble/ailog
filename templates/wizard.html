@@ -1,389 +1,782 @@
-<!-- Device Onboarding Wizard Modal -->
+<!-- Device Onboarding Wizard Modal - Complete Redesign -->
 <div id="wizardModal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50">
-    <div class="glass-container w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-white/10">
+    <div class="glass-container w-full max-w-3xl max-h-[95vh] overflow-hidden flex flex-col border border-white/10">
         <!-- Header -->
-        <div class="termix-panel px-6 py-4 flex justify-between items-center border-b border-white/10">
-            <h2 class="text-xl font-semibold termix-text">Add Devices Wizard</h2>
-            <button onclick="closeWizard()" class="termix-muted hover:termix-text">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                </svg>
-            </button>
+        <div class="px-6 py-4 border-b border-white/10 bg-white/5 flex justify-between items-center">
+            <div>
+                <h2 class="text-xl font-semibold termix-text">Add Devices Wizard</h2>
+                <p class="text-xs termix-muted mt-1" id="stepTitle">Step 1 of 5: Select SSH Key</p>
+            </div>
+            <button onclick="closeWizard()" class="termix-muted hover:termix-text text-2xl leading-none">&times;</button>
         </div>
 
-        <!-- Progress Steps -->
-        <div class="px-6 py-4 border-b border-white/10 bg-white/5">
-            <div class="flex justify-between items-center">
-                <div class="flex-1 text-center">
-                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-purple-700 text-white font-bold" id="step1-indicator">1</div>
-                    <p class="text-sm font-medium mt-2">Device Entry</p>
-                </div>
-                <div class="flex-grow h-1 bg-white/10 mx-2"></div>
-                <div class="flex-1 text-center">
-                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/10 text-gray-200 font-bold" id="step2-indicator">2</div>
-                    <p class="text-sm font-medium mt-2">Verify Connection</p>
-                </div>
-                <div class="flex-grow h-1 bg-white/10 mx-2"></div>
-                <div class="flex-1 text-center">
-                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/10 text-gray-200 font-bold" id="step3-indicator">3</div>
-                    <p class="text-sm font-medium mt-2">Collect Info</p>
-                </div>
-                <div class="flex-grow h-1 bg-white/10 mx-2"></div>
-                <div class="flex-1 text-center">
-                    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/10 text-gray-200 font-bold" id="step4-indicator">4</div>
-                    <p class="text-sm font-medium mt-2">Complete</p>
-                </div>
+        <!-- Progress Bar -->
+        <div class="px-6 py-3 border-b border-white/10 bg-white/5">
+            <div class="flex gap-2">
+                <div id="progress1" class="h-1 flex-1 bg-purple-700 rounded transition-all"></div>
+                <div id="progress2" class="h-1 flex-1 bg-white/10 rounded transition-all"></div>
+                <div id="progress3" class="h-1 flex-1 bg-white/10 rounded transition-all"></div>
+                <div id="progress4" class="h-1 flex-1 bg-white/10 rounded transition-all"></div>
+                <div id="progress5" class="h-1 flex-1 bg-white/10 rounded transition-all"></div>
             </div>
         </div>
 
         <!-- Content Area -->
-        <div class="px-6 py-6">
-            <!-- Step 1: Device Entry -->
-            <div id="step1" class="wizard-step">
-                <h3 class="text-xl font-semibold termix-text mb-4">Enter Device Details</h3>
+        <div class="flex-1 overflow-y-auto px-6 py-6">
+            <!-- STEP 1: SSH Key Selection -->
+            <div id="wizardStep1" class="space-y-4">
+                <h3 class="text-lg font-semibold text-white">Select or Upload SSH Key</h3>
+                <p class="text-sm termix-muted">Choose an existing key or upload a new one. This key will be used to connect to all devices.</p>
                 
                 <div class="space-y-4">
+                    <!-- Existing Keys -->
                     <div>
-                        <label class="block text-sm font-medium termix-muted mb-1">IP Addresses or Hostnames</label>
-                        <textarea id="deviceIPs" placeholder="192.168.1.10&#10;192.168.1.11&#10;server.example.com" 
-                                  class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2"
-                                  rows="4"></textarea>
-                        <p class="text-xs termix-muted mt-1">Enter one IP/hostname per line, or comma-separated</p>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium termix-muted mb-1">SSH Username(s)</label>
-                        <input type="text" id="sshUsername" placeholder="root or ubuntu or user@host for different users"
-                               class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2">
-                        <p class="text-xs termix-muted mt-1">Single username for all, or comma-separated for each IP</p>
-                    </div>
-
-                    <!-- SSH Key Selection -->
-                    <div>
-                        <label class="block text-sm font-medium termix-muted mb-3">SSH Authentication (Private Key)</label>
-                        
-                        <div class="flex gap-4 mb-4">
-                            <label class="flex items-center cursor-pointer">
-                                <input type="radio" name="keyType" value="file" class="keyTypeRadio" checked>
-                                <span class="ml-2 text-sm font-medium">Select Local File</span>
-                            </label>
-                            <label class="flex items-center cursor-pointer">
-                                <input type="radio" name="keyType" value="paste" class="keyTypeRadio">
-                                <span class="ml-2 text-sm font-medium">Paste Key Content</span>
-                            </label>
-                        </div>
-
-                        <!-- File Input -->
-                        <div id="keyFileDiv" class="mb-4">
-                            <input type="file" id="keyFile" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2">
-                            <p class="text-xs termix-muted mt-1">Select your private SSH key file (usually ~/.ssh/id_rsa or similar)</p>
-                        </div>
-
-                        <!-- Paste Input -->
-                        <div id="keyPasteDiv" class="mb-4 hidden">
-                            <textarea id="keyContent" placeholder="Paste your private key here (-----BEGIN PRIVATE KEY-----)"
-                                      class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2"
-                                      rows="6"></textarea>
-                            <p class="text-xs termix-muted mt-1">Paste your private SSH key content (include the -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY----- lines)</p>
-                        </div>
-
-                        <!-- Stored Keys Option -->
-                        <div id="storedKeysDiv" class="mt-4">
-                            <select id="storedKeySelect" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2">
-                                <option value="">-- Or select a stored key --</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Step 2: Connectivity Verification -->
-            <div id="step2" class="wizard-step hidden">
-                <h3 class="text-xl font-semibold termix-text mb-4">Verify SSH Connectivity</h3>
-                
-                <div class="mb-4">
-                    <div class="w-full bg-white/10 rounded-full h-2">
-                        <div id="progressBar" class="bg-purple-700 h-2 rounded-full" style="width: 0%"></div>
-                    </div>
-                    <p class="text-sm termix-muted mt-2"><span id="progressText">0/0</span> devices verified</p>
-                </div>
-
-                <div id="verificationResults" class="space-y-2 max-h-64 overflow-y-auto border border-white/10 rounded-lg p-4 bg-white/5">
-                    <p class="termix-muted text-sm">Testing connections...</p>
-                </div>
-            </div>
-
-            <!-- Step 3: System Information Collection -->
-            <div id="step3" class="wizard-step hidden">
-                <h3 class="text-xl font-semibold termix-text mb-4">Collecting System Information</h3>
-                
-                <div class="mb-4">
-                    <div class="w-full bg-white/10 rounded-full h-2">
-                        <div id="collectionProgressBar" class="bg-purple-700 h-2 rounded-full" style="width: 0%"></div>
-                    </div>
-                    <p class="text-sm termix-muted mt-2"><span id="collectionProgressText">0/0</span> devices scanned</p>
-                </div>
-
-                <div id="collectionLog" class="space-y-2 max-h-64 overflow-y-auto border border-white/10 rounded-lg p-4 bg-white/5 font-mono text-xs">
-                    <p class="termix-muted">Collecting system information...</p>
-                </div>
-            </div>
-
-            <!-- Step 4: Completion -->
-            <div id="step4" class="wizard-step hidden">
-                <h3 class="text-xl font-semibold termix-text mb-4">✓ Devices Added Successfully</h3>
-                
-                <div id="completionSummary" class="space-y-4">
-                    <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                        <p class="text-green-300 font-medium" id="completionMessage"></p>
-                    </div>
-
-                    <div>
-                        <h4 class="font-medium termix-muted mb-2">Added Devices:</h4>
-                        <div id="addedDevicesList" class="space-y-2">
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium termix-muted mb-2">Assign to Group (Optional)</label>
-                        <select id="groupSelect" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 $1$2">
-                            <option value="">-- No group --</option>
+                        <label class="block text-sm font-medium termix-muted mb-2">Use Existing Key</label>
+                        <select id="wizardExistingKeySelect" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100">
+                            <option value="">-- Select a key or upload new --</option>
                         </select>
+                        <div id="wizardKeyLoadStatus" class="text-xs termix-muted mt-2"></div>
+                    </div>
+
+                    <div class="relative">
+                        <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-white/10"></div></div>
+                        <div class="relative flex justify-center text-sm"><span class="px-2 bg-gray-900 text-gray-400">OR</span></div>
+                    </div>
+
+                    <!-- Upload New Key -->
+                    <div>
+                        <label class="block text-sm font-medium termix-muted mb-2">Upload New Key</label>
+                        <input type="file" id="wizardKeyFile" class="w-full text-sm text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-purple-700 file:text-white hover:file:bg-purple-600">
+                        <p class="text-xs termix-muted mt-1">Private key file (PEM format, no passphrase)</p>
+                    </div>
+
+                    <!-- Save new key -->
+                    <div id="wizardSaveKeyDiv" class="hidden space-y-3 p-4 rounded-lg bg-purple-500/10 border border-purple-500/30">
+                        <div>
+                            <label class="block text-sm font-medium termix-muted mb-2">Key Name</label>
+                            <input type="text" id="wizardNewKeyName" placeholder="e.g., homelab-key" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100">
+                        </div>
+                        <button id="wizardSaveKeyBtn" onclick="wizardSaveNewKey()" class="w-full bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                            Save SSH Key
+                        </button>
+                        <div id="wizardSaveKeyStatus" class="text-sm mt-2"></div>
+                    </div>
+                </div>
+
+                <!-- Selected Key Display -->
+                <div id="wizardSelectedKeyDisplay" class="hidden mt-6 p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                    <div class="flex items-center justify-between">
+                        <p class="text-sm font-medium text-green-300">✓ Key Selected</p>
+                        <span id="wizardIntegrityBadge" class="inline-block px-2 py-1 rounded text-xs font-semibold bg-green-500/20 text-green-300">✓ Verified</span>
+                    </div>
+                    <p id="wizardSelectedKeyName" class="text-sm text-green-200 mt-2"></p>
+                </div>
+            </div>
+
+            <!-- STEP 2: Device Details -->
+            <div id="wizardStep2" class="space-y-4 hidden">
+                <div class="p-3 rounded-lg bg-purple-500/10 border border-purple-500/30 mb-4">
+                    <p class="text-sm text-purple-200"><strong>Key:</strong> <span id="wizardStep2KeyName"></span></p>
+                    <p class="text-xs text-purple-300 mt-1">
+                        <button onclick="wizardGoBack()" class="underline hover:no-underline">← Change key</button>
+                    </p>
+                </div>
+
+                <h3 class="text-lg font-semibold text-white">Enter Device Details</h3>
+                <p class="text-sm termix-muted">Enter the IP addresses/hostnames and SSH usernames for the devices you want to add.</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium termix-muted mb-2">IP Addresses or Hostnames</label>
+                        <textarea id="wizardStep2IPs" placeholder="192.168.1.10&#10;192.168.1.11&#10;server.example.com" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 font-mono text-sm" rows="4"></textarea>
+                        <p class="text-xs termix-muted mt-1">One per line</p>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium termix-muted mb-2">Assign Tags (Optional)</label>
-                        <div id="tagCheckboxes" class="space-y-2">
-                        </div>
+                        <label class="block text-sm font-medium termix-muted mb-2">SSH Usernames</label>
+                        <input type="text" id="wizardStep2Users" placeholder="e.g., root or david,ubuntu,admin" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100">
+                        <p class="text-xs termix-muted mt-1">Comma-separated, or single username for all devices</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STEP 3: Verify Connectivity -->
+            <div id="wizardStep3" class="space-y-4 hidden">
+                <div class="p-3 rounded-lg bg-purple-500/10 border border-purple-500/30 mb-4">
+                    <p class="text-sm text-purple-200"><strong>Key:</strong> <span id="wizardStep3KeyName"></span></p>
+                </div>
+
+                <div class="flex items-center justify-between gap-3">
+                    <h3 class="text-lg font-semibold text-white">Verify SSH Connectivity</h3>
+                    <button id="wizardRetryBtn" type="button" onclick="wizardRetryVerification()" class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors text-sm flex items-center gap-2" title="Retry SSH verification">
+                        <span class="text-base">↻</span><span class="hidden sm:inline">Retry</span>
+                    </button>
+                </div>
+                <p class="text-sm termix-muted">Testing connections to your devices...</p>
+
+                <div id="wizardVerificationResults" class="space-y-2 max-h-64 overflow-y-auto border border-white/10 rounded-lg p-4 bg-white/5">
+                    <p class="text-sm termix-muted text-center py-8">Ready to test SSH connectivity.</p>
+                </div>
+            </div>
+
+            <!-- STEP 4: Collect System Info -->
+            <div id="wizardStep4" class="space-y-4 hidden">
+                <h3 class="text-lg font-semibold text-white">Collecting System Information</h3>
+                <p class="text-sm termix-muted">Gathering system details from your devices...</p>
+
+                <div id="wizardCollectionProgress" class="space-y-2">
+                    <div class="w-full bg-white/10 rounded-full h-2">
+                        <div id="wizardCollectionBar" class="bg-purple-700 h-2 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p class="text-sm termix-muted text-center"><span id="wizardCollectionText">0/0</span> devices scanned</p>
+                </div>
+
+                <div id="wizardCollectionLog" class="space-y-1 max-h-64 overflow-y-auto border border-white/10 rounded-lg p-4 bg-white/5 font-mono text-xs">
+                    <p class="termix-muted">Collecting information...</p>
+                </div>
+            </div>
+
+            <!-- STEP 5: Completion -->
+            <div id="wizardStep5" class="space-y-4 hidden">
+                <h3 class="text-lg font-semibold text-white">✓ Devices Added Successfully</h3>
+
+                <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+                    <p class="text-green-300 font-medium" id="wizardCompletionMessage"></p>
+                </div>
+
+                <div>
+                    <h4 class="font-medium termix-muted mb-3">Added Devices:</h4>
+                    <div id="wizardAddedDevicesList" class="space-y-2">
+                    </div>
+                </div>
+
+                <div class="border-t border-white/10 pt-4">
+                    <label class="block text-sm font-medium termix-muted mb-2">Assign to Group (Optional)</label>
+                    <select id="wizardGroupSelect" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100">
+                        <option value="">-- No group --</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium termix-muted mb-2">Assign Tags (Optional)</label>
+                    <div id="wizardTagCheckboxes" class="space-y-2">
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Footer -->
-        <div class="flex justify-between items-center px-6 py-4 border-t bg-white/5">
-            <button onclick="previousStep()" id="prevBtn" class="termix-btn hidden">
-                ← Previous
+        <div class="px-6 py-4 border-t border-white/10 bg-white/5 flex justify-between gap-3">
+            <button id="wizardBackBtn" onclick="wizardGoBack()" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors hidden">
+                ← Back
             </button>
-            <div></div>
-            <div class="flex gap-3">
-                <button onclick="closeWizard()" id="cancelBtn" class="termix-btn">
-                    Cancel
-                </button>
-                <button onclick="nextStep()" id="nextBtn" class="bg-purple-700 hover:bg-purple-600 text-white px-6 py-2 rounded-lg font-medium transition-colors">
-                    Next →
-                </button>
-            </div>
+            <div class="flex-1"></div>
+            <button onclick="closeWizard()" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors">
+                Cancel
+            </button>
+            <button id="wizardNextBtn" onclick="wizardNext()" class="px-4 py-2 rounded-lg bg-purple-700 hover:bg-purple-600 text-white transition-colors font-medium">
+                Next →
+            </button>
         </div>
     </div>
 </div>
 
-<style>
-    .wizard-step {
-        animation: fadeIn 0.3s ease-in-out;
-    }
-    @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-</style>
-
 <script>
-let currentWizardStep = 1;
-let wizardData = {
+// New Wizard Implementation
+let wizardCurrentStep = 1;
+let wizardState = {
+    selectedKeyId: null,
+    selectedKeyName: null,
+    keyContent: null,
     ips: [],
     usernames: [],
-    keyType: 'file',
-    keyContent: '',
-    sshKeyId: null,
     validatedHosts: [],
     collectedInfo: [],
-    addedDevices: []
+    addedDevices: [],
+    sessionId: null
 };
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 function openWizard() {
     document.getElementById('wizardModal').classList.remove('hidden');
-    currentWizardStep = 1;
-    loadStoredKeys();
-    loadGroups();
-    loadTags();
-    updateWizardUI();
+    wizardCurrentStep = 1;
+    wizardState = {
+        selectedKeyId: null,
+        selectedKeyName: null,
+        keyContent: null,
+        ips: [],
+        usernames: [],
+        validatedHosts: [],
+        collectedInfo: [],
+        addedDevices: [],
+        sessionId: null,
+        verificationStarted: false,
+        collectionStarted: false,
+        verificationComplete: false,
+        collectionComplete: false,
+        completionStarted: false,
+        completionComplete: false
+    };
+    wizardLoadKeys();
+    wizardLoadGroups();
+    wizardLoadTags();
+    wizardShowStep(1);
 }
 
 function closeWizard() {
     document.getElementById('wizardModal').classList.add('hidden');
-    currentWizardStep = 1;
-    wizardData = {
-        ips: [],
-        usernames: [],
-        keyType: 'file',
-        keyContent: '',
-        sshKeyId: null,
-        validatedHosts: [],
-        collectedInfo: [],
-        addedDevices: []
-    };
 }
 
-function updateWizardUI() {
+function wizardShowStep(step) {
     // Hide all steps
-    document.querySelectorAll('.wizard-step').forEach(step => step.classList.add('hidden'));
+    for (let i = 1; i <= 5; i++) {
+        document.getElementById(`wizardStep${i}`).classList.add('hidden');
+        document.getElementById(`progress${i}`).classList.remove('bg-purple-700');
+        document.getElementById(`progress${i}`).classList.add('bg-white/10');
+    }
     
     // Show current step
-    document.getElementById(`step${currentWizardStep}`).classList.remove('hidden');
+    document.getElementById(`wizardStep${step}`).classList.remove('hidden');
+    document.getElementById(`progress${step}`).classList.remove('bg-white/10');
+    document.getElementById(`progress${step}`).classList.add('bg-purple-700');
     
-    // Update indicators
-    for (let i = 1; i <= 4; i++) {
-        const indicator = document.getElementById(`step${i}-indicator`);
-        if (i < currentWizardStep) {
-            // completed
-            indicator.classList.remove('bg-white/10', 'text-gray-200');
-            indicator.classList.add('bg-purple-700', 'text-white');
-            indicator.textContent = '✓';
-        } else if (i === currentWizardStep) {
-            // active
-            indicator.classList.remove('bg-white/10', 'text-gray-200');
-            indicator.classList.add('bg-purple-700', 'text-white');
-            indicator.textContent = i;
-        } else {
-            // upcoming
-            indicator.classList.remove('bg-purple-700', 'text-white');
-            indicator.classList.add('bg-white/10', 'text-gray-200');
-            indicator.textContent = i;
-        }
-    }
+    // Update title
+    const titles = [
+        'Step 1 of 5: Select SSH Key',
+        'Step 2 of 5: Enter Device Details',
+        'Step 3 of 5: Verify Connectivity',
+        'Step 4 of 5: Collect System Info',
+        'Step 5 of 5: Complete'
+    ];
+    document.getElementById('stepTitle').textContent = titles[step - 1];
     
     // Update buttons
-    document.getElementById('prevBtn').classList.toggle('hidden', currentWizardStep === 1);
-    if (currentWizardStep === 4) {
-        document.getElementById('nextBtn').textContent = 'Done';
-        document.getElementById('nextBtn').classList.remove('hidden');
+    const backBtn = document.getElementById('wizardBackBtn');
+    const nextBtn = document.getElementById('wizardNextBtn');
+    
+    if (step === 1) {
+        backBtn.classList.add('hidden');
+        nextBtn.textContent = 'Next →';
+        nextBtn.disabled = !wizardState.selectedKeyId;
+    } else if (step === 5) {
+        backBtn.classList.remove('hidden');
+        nextBtn.textContent = wizardState.completionComplete ? 'Close' : 'Finish';
+        nextBtn.disabled = false;
     } else {
-        document.getElementById('nextBtn').textContent = currentWizardStep === 3 ? 'Finish →' : 'Next →';
+        backBtn.classList.remove('hidden');
+        nextBtn.textContent = 'Next →';
+    }
+    
+    // Update step 2/3 key display
+    if (step === 2 || step === 3) {
+        document.getElementById(`wizardStep${step}KeyName`).textContent = wizardState.selectedKeyName || 'Unknown';
+    }
+    // Auto-run verification/collection when entering their steps
+    if (step === 3 && !wizardState.verificationStarted) {
+        wizardState.verificationStarted = true;
+        wizardState.verificationComplete = false;
+        const resultsDiv = document.getElementById('wizardVerificationResults');
+        if (resultsDiv) { resultsDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">Starting...</p>'; }
+        nextBtn.disabled = true;
+        nextBtn.textContent = 'Running...';
+        // Start async without blocking UI render
+        setTimeout(() => wizardRunVerification(), 0);
+    }
+    if (step === 4 && !wizardState.collectionStarted) {
+        wizardState.collectionStarted = true;
+        wizardState.collectionComplete = false;
+        const log = document.getElementById('wizardCollectionLog');
+        if (log) { log.innerHTML = '<p class=\"termix-muted\">Starting collection...</p>'; }
+        nextBtn.disabled = true;
+        nextBtn.textContent = 'Running...';
+        setTimeout(() => wizardRunCollection(), 0);
     }
 }
 
-function previousStep() {
-    if (currentWizardStep > 1) {
-        currentWizardStep--;
-        updateWizardUI();
-    }
-}
+async function wizardNext() {
+    console.log('wizardNext click', { step: wizardCurrentStep, state: wizardState });
 
-async function nextStep() {
-    if (currentWizardStep === 1) {
-        if (!await validateStep1()) return;
-        await proceedToStep2();
-    } else if (currentWizardStep === 2) {
-        await proceedToStep3();
-    } else if (currentWizardStep === 3) {
-        await proceedToStep4();
-    } else if (currentWizardStep === 4) {
-        closeWizard();
-        location.reload(); // Reload to show new devices
-    }
-}
-
-async function validateStep1() {
-    const ipsInput = document.getElementById('deviceIPs').value.trim();
-    const usersInput = document.getElementById('sshUsername').value.trim();
-    
-    if (!ipsInput || !usersInput) {
-        alert('Please enter IP addresses and username');
-        return false;
-    }
-    
-    // Reset run-specific state (so Back -> edit -> Next starts fresh)
-    wizardData.validatedHosts = [];
-    wizardData.collectedInfo = [];
-    wizardData.addedDevices = [];
-    wizardData.validationFailures = {};
-
-    // Parse IPs
-    wizardData.ips = ipsInput.split('\n').map(ip => ip.trim()).filter(ip => ip.length > 0);
-    if (wizardData.ips.length === 0) {
-        alert('No valid IP addresses found');
-        return false;
-    }
-    
-    // Parse usernames
-    const userParts = usersInput.split(',').map(u => u.trim());
-    wizardData.usernames = userParts;
-    
-    // Get key
-    wizardData.keyType = document.querySelector('input[name="keyType"]:checked').value;
-    
-    if (wizardData.keyType === 'file') {
-        const keyFile = document.getElementById('keyFile').files[0];
-        const storedKeyId = document.getElementById('storedKeySelect').value;
-        
-        if (!keyFile && !storedKeyId) {
-            alert('Please select or upload an SSH key');
-            return false;
+    if (wizardCurrentStep === 1) {
+        if (!await wizardValidateStep1()) return;
+    } else if (wizardCurrentStep === 2) {
+        if (!await wizardValidateStep2()) return;
+    } else if (wizardCurrentStep === 3) {
+        if (!wizardState.verificationComplete) {
+            const resultsDiv = document.getElementById('wizardVerificationResults');
+            if (resultsDiv) {
+                resultsDiv.innerHTML += '<p class="text-xs text-amber-300 mt-2">Not ready yet: verificationComplete=false (verification still running or never marked complete).</p>';
+            }
+            return;
         }
-        
-        if (storedKeyId) {
-            wizardData.sshKeyId = parseInt(storedKeyId);
-        } else if (keyFile) {
-            // Store file content
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    wizardData.keyContent = e.target.result;
-                    resolve(true);
-                };
-                reader.readAsText(keyFile);
+    } else if (wizardCurrentStep === 4) {
+        if (!wizardState.collectionComplete) {
+            const log = document.getElementById('wizardCollectionLog');
+            if (log) {
+                log.innerHTML += '<p class="text-xs text-amber-300 mt-2">Not ready yet: collectionComplete=false (collection still running or never marked complete).</p>';
+            }
+            return;
+        }
+
+        // Auto-run completion when moving from Step 4 -> Step 5
+        wizardCurrentStep = 5;
+        wizardShowStep(wizardCurrentStep);
+        const msg = document.getElementById('wizardCompletionMessage');
+        if (msg) msg.textContent = 'Adding devices...';
+        const nextBtn = document.getElementById('wizardNextBtn');
+        if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = 'Working...'; }
+        await wizardComplete();
+        return;
+    } else if (wizardCurrentStep === 5) {
+        if (wizardState.completionComplete) {
+            closeWizard();
+            return;
+        }
+        const nextBtn = document.getElementById('wizardNextBtn');
+        if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = 'Working...'; }
+        await wizardComplete();
+        return;
+    }
+    
+    wizardCurrentStep++;
+    wizardShowStep(wizardCurrentStep);
+}
+
+function wizardGoBack() {
+    if (wizardCurrentStep > 1) {
+        wizardCurrentStep--;
+        wizardShowStep(wizardCurrentStep);
+    }
+}
+
+function wizardLoadKeys() {
+    const status = document.getElementById('wizardKeyLoadStatus');
+    if (status) status.textContent = 'Loading keys...';
+
+    fetch('/ssh-keys')
+        .then(r => {
+            if (!r.ok) throw new Error('Failed to load keys (HTTP ' + r.status + ')');
+            return r.json();
+        })
+        .then(keys => {
+            console.log('[wizard] loaded keys', keys);
+            const select = document.getElementById('wizardExistingKeySelect');
+            if (!select) throw new Error('wizardExistingKeySelect not found in DOM');
+
+            select.innerHTML = '<option value="">-- Select a key or upload new --</option>';
+
+            // Store keys with their metadata for later reference
+            wizardState.availableKeys = {};
+
+            if (!Array.isArray(keys)) {
+                throw new Error('Expected /ssh-keys to return an array');
+            }
+
+            keys.forEach(key => {
+                const opt = document.createElement('option');
+                opt.value = key.id;
+                opt.textContent = key.key_name;
+                select.appendChild(opt);
+                wizardState.availableKeys[key.id] = key;
             });
-        }
+
+            if (status) {
+                status.textContent = keys.length ? (keys.length + ' key(s) loaded') : 'No keys saved yet.';
+            }
+
+            // Avoid stacking multiple listeners if wizardLoadKeys is called repeatedly
+            select.onchange = () => {
+                const keyId = select.value;
+                if (keyId) {
+                    const keyName = select.options[select.selectedIndex].text;
+                    const keyData = wizardState.availableKeys[keyId];
+                    wizardState.selectedKeyId = parseInt(keyId);
+                    wizardState.selectedKeyName = keyName;
+                    wizardState.selectedKeyIntegrity = (keyData && keyData.integrity_status) ? keyData.integrity_status : 'unknown';
+                    wizardState.keyContent = null;
+                    wizardShowSelectedKey();
+                    document.getElementById('wizardKeyFile').value = '';
+                    document.getElementById('wizardSaveKeyDiv').classList.add('hidden');
+                    document.getElementById('wizardNextBtn').disabled = false;
+                }
+            };
+        })
+        .catch(err => {
+            console.error('[wizard] failed to load keys', err);
+            const select = document.getElementById('wizardExistingKeySelect');
+            if (select) {
+                select.innerHTML = '<option value="">-- Error loading keys --</option>';
+            }
+            if (status) {
+                status.textContent = 'Error loading keys: ' + (err.message || err);
+                status.className = 'text-xs text-red-300 mt-2';
+            }
+        });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.getElementById('wizardKeyFile');
+    if (fileInput) {
+        fileInput.addEventListener('change', async (e) => {
+            if (e.target.files.length) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    wizardState.keyContent = event.target.result;
+                    wizardState.selectedKeyId = null;
+                    document.getElementById('wizardExistingKeySelect').value = '';
+                    document.getElementById('wizardSaveKeyDiv').classList.remove('hidden');
+                    document.getElementById('wizardNewKeyName').style.display = 'block';
+                    document.getElementById('wizardSelectedKeyDisplay').classList.add('hidden');
+                    document.getElementById('wizardNextBtn').disabled = false;
+                };
+                reader.readAsText(e.target.files[0]);
+            }
+        });
+    }
+});
+
+function wizardShowSelectedKey() {
+    const display = document.getElementById('wizardSelectedKeyDisplay');
+    const nameEl = document.getElementById('wizardSelectedKeyName');
+    
+    let statusText = '';
+    const integrity = wizardState.selectedKeyIntegrity || 'unknown';
+    
+    if (integrity === 'verified') {
+        statusText = ' ✓ (verified)';
+        nameEl.className = 'text-sm text-green-200 mt-1';
+    } else if (integrity === 'corrupted') {
+        statusText = ' ⚠ (corrupted - do not use)';
+        nameEl.className = 'text-sm text-red-200 mt-1';
     } else {
-        wizardData.keyContent = document.getElementById('keyContent').value.trim();
-        if (!wizardData.keyContent) {
-            alert('Please paste SSH key content');
-            return false;
+        statusText = '';
+        nameEl.className = 'text-sm text-yellow-200 mt-1';
+    }
+    
+    nameEl.textContent = wizardState.selectedKeyName + statusText;
+    
+    // Update the integrity status badge
+    const statusBadge = document.getElementById('wizardIntegrityBadge');
+    if (statusBadge) {
+        if (integrity === 'verified') {
+            statusBadge.className = 'inline-block px-2 py-1 rounded text-xs font-semibold bg-green-500/20 text-green-300';
+            statusBadge.textContent = '✓ Verified';
+        } else if (integrity === 'corrupted') {
+            statusBadge.className = 'inline-block px-2 py-1 rounded text-xs font-semibold bg-red-500/20 text-red-300';
+            statusBadge.textContent = '⚠ Corrupted';
+        } else {
+            statusBadge.className = 'inline-block px-2 py-1 rounded text-xs font-semibold bg-yellow-500/20 text-yellow-300';
+            statusBadge.textContent = '? Unknown';
         }
+    }
+    
+    display.classList.remove('hidden');
+}
+
+async function wizardSaveNewKey() {
+    const keyName = document.getElementById('wizardNewKeyName').value.trim();
+    const statusDiv = document.getElementById('wizardSaveKeyStatus');
+    
+    if (!keyName) {
+        statusDiv.innerHTML = '<p class="text-red-300">Please enter a key name</p>';
+        return;
+    }
+    
+    if (!wizardState.keyContent) {
+        statusDiv.innerHTML = '<p class="text-red-300">No key content loaded</p>';
+        return;
+    }
+    
+    const btn = document.getElementById('wizardSaveKeyBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    statusDiv.innerHTML = '<p class="text-yellow-300">Uploading key...</p>';
+    
+    try {
+        const resp = await fetch('/ssh-keys/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                key_name: keyName, 
+                key_content: wizardState.keyContent 
+            })
+        });
+        
+        const data = await resp.json();
+        if (!resp.ok) {
+            statusDiv.innerHTML = `<p class="text-red-300">Error: ${data.error}</p>`;
+            btn.disabled = false;
+            btn.textContent = 'Save SSH Key';
+            return;
+        }
+        
+        // Key saved! Now check its integrity
+        statusDiv.innerHTML = '<p class="text-yellow-300">Verifying key integrity...</p>';
+        
+        // Refresh keys and show the saved key
+        const keysResp = await fetch('/ssh-keys');
+        const keys = await keysResp.json();
+        
+        // Find the key we just saved
+        const savedKey = keys.find(k => k.key_name === keyName);
+        if (savedKey) {
+            wizardState.selectedKeyId = savedKey.id;
+            wizardState.selectedKeyName = savedKey.key_name;
+            wizardState.selectedKeyIntegrity = savedKey.integrity_status || 'unknown';
+            wizardState.keyContent = null;
+            
+            // Show the selected key with its integrity status
+            wizardShowSelectedKey();
+            
+            // Hide the save form
+            document.getElementById('wizardSaveKeyDiv').classList.add('hidden');
+            document.getElementById('wizardNewKeyName').value = '';
+            
+            // Enable next button
+            document.getElementById('wizardNextBtn').disabled = false;
+            
+            // Show integrity status
+            if (wizardState.selectedKeyIntegrity === 'verified') {
+                statusDiv.innerHTML = '<p class="text-green-300">✓ Key saved and verified!</p>';
+            } else if (wizardState.selectedKeyIntegrity === 'corrupted') {
+                statusDiv.innerHTML = '<p class="text-red-300">⚠ Key integrity check failed - do not use</p>';
+            } else {
+                statusDiv.innerHTML = '<p class="text-yellow-300">? Key saved (integrity unknown)</p>';
+            }
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `<p class="text-red-300">Error: ${error.message}</p>`;
+        btn.disabled = false;
+        btn.textContent = 'Save SSH Key';
+    }
+}
+
+async function wizardValidateStep1() {
+    // Just check if a key is selected
+    if (!wizardState.selectedKeyId) {
+        alert('Please select or save an SSH key');
+        return false;
+    }
+    
+    // Check integrity
+    if (wizardState.selectedKeyIntegrity === 'corrupted') {
+        alert('This SSH key is corrupted and cannot be used. Please upload a different key.');
+        return false;
     }
     
     return true;
 }
 
-async function proceedToStep2() {
-    currentWizardStep = 2;
-    updateWizardUI();
+async function wizardValidateStep2() {
+    const ips = document.getElementById('wizardStep2IPs').value.trim().split('\n').map(ip => ip.trim()).filter(ip => ip);
+    const users = document.getElementById('wizardStep2Users').value.trim();
     
-    const resultsDiv = document.getElementById('verificationResults');
-    resultsDiv.innerHTML = '<p class="termix-muted text-sm">Testing connections...</p>';
+    if (!ips.length) {
+        alert('Please enter at least one IP address');
+        return false;
+    }
+    
+    if (!users) {
+        alert('Please enter SSH username(s)');
+        return false;
+    }
+    
+    wizardState.ips = ips;
+    wizardState.usernames = users.includes(',') ? users.split(',').map(u => u.trim()) : [users];
+    
+    return true;
+}
+
+
+function wizardAbortVerification() {
+    try {
+        if (wizardState.verificationAbortController) {
+            wizardState.verificationAbortController.abort();
+        }
+    } catch (e) {}
+    try {
+        if (wizardState.verificationTimeoutId) {
+            clearTimeout(wizardState.verificationTimeoutId);
+        }
+    } catch (e) {}
+    wizardState.verificationAbortController = null;
+    wizardState.verificationTimeoutId = null;
+}
+
+function wizardRetryVerification() {
+    // Allow retry after user fixes SSH issues outside the app
+    wizardAbortVerification();
+
+    wizardState.verificationComplete = false;
+    wizardState.verificationStarted = true; // we are in step 3 already
+    wizardState.validatedHosts = [];
+
+    const nextBtn = document.getElementById('wizardNextBtn');
+    if (nextBtn) {
+        nextBtn.disabled = true;
+        nextBtn.textContent = 'Running...';
+    }
+
+    const resultsDiv = document.getElementById('wizardVerificationResults');
+    if (resultsDiv) {
+        resultsDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">Retrying verification...</p>';
+    }
+
+    setTimeout(() => wizardRunVerification(), 0);
+}
+
+async function wizardRunVerification() {
+    const resultsDiv = document.getElementById('wizardVerificationResults');
+    console.log('Starting verification, resultsDiv:', resultsDiv);
+    wizardAbortVerification();
+    wizardState.validatedHosts = [];
+    wizardState.sessionId = null;
+
+    resultsDiv.innerHTML = '';
+    resultsDiv.innerHTML = '<div class="space-y-2"><p class="text-yellow-300 font-semibold">🔍 Starting SSH verification...</p><p class="text-sm termix-muted">Step 1: Creating session...</p></div>';
+    console.log('Verification UI updated');
     
     try {
-        wizardData.validatedHosts = [];
-        wizardData.validationFailures = {};
-
-        // Create wizard session
+        // Create session
         const sessionResp = await fetch('/wizard/session/create', { method: 'POST' });
         const sessionData = await sessionResp.json();
-        const sessionId = sessionData.session_id;
+        wizardState.sessionId = sessionData.session_id;
+        resultsDiv.innerHTML += '<p class="text-sm text-green-300">✓ Session created</p>';
         
+        // Add timeout for verification
+        
+        // Build payload
+        resultsDiv.innerHTML += '<p class="text-sm termix-muted">Step 2: Preparing to test ' + wizardState.ips.length + ' IP(s)...</p>';
+        resultsDiv.innerHTML += '<div class="mt-2 ml-4 space-y-1">';
+        wizardState.ips.forEach(ip => { resultsDiv.innerHTML += '<p class="text-xs text-gray-300">→ ' + ip + '</p>'; });
         const payload = {
-            ips: wizardData.ips,
-            usernames: wizardData.usernames
+            ips: wizardState.ips,
+            usernames: wizardState.usernames
         };
-        
-        if (wizardData.sshKeyId) {
-            payload.ssh_key_id = wizardData.sshKeyId;
-        } else if (wizardData.keyContent) {
-            payload.key_content = wizardData.keyContent;
+        if (wizardState.selectedKeyId) {
+            payload.ssh_key_id = wizardState.selectedKeyId;
+        } else if (wizardState.keyContent) {
+            payload.key_content = wizardState.keyContent;
         }
         
-        resultsDiv.innerHTML = '';
-        const resultElements = {};
+        // Stream validation
+        const controller = new AbortController();
+        wizardState.verificationAbortController = controller;
+        wizardState.verificationTimeoutId = setTimeout(() => controller.abort(), 30000);
+        const response = await fetch(`/wizard/session/${wizardState.sessionId}/validate-hosts-stream`, {
+            signal: controller.signal,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
         
-        
-        if (wizardData.sshKeyId) {
-            payload.ssh_key_id = wizardData.sshKeyId;
-        } else if (wizardData.keyContent) {
-            payload.key_content = wizardData.keyContent;
+        if (!response.ok) {
+            const error = await response.json();
+            resultsDiv.innerHTML += `<div class="p-3 mt-2 rounded bg-red-500/10 border border-red-500/30"><p class="text-red-300"><strong>Error:</strong> ${error.error || 'Unknown error'}</p><p class="text-xs termix-muted mt-1">Server status: ${response.status}</p></div>`;
+            return;
         }
         
-        const response = await fetch(`/wizard/session/${sessionId}/validate-hosts-stream`, {
+        resultsDiv.innerHTML += '<p class="text-sm termix-muted">Step 4: Receiving SSH test results...</p>';
+        resultsDiv.innerHTML += '<div class="mt-2 space-y-2">';
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || ''; // keep incomplete event
+            
+            for (const line of parts) {
+                if (!line.trim() || !line.startsWith('data: ')) continue;
+                
+                const jsonStr = line.substring(6);
+                let data;
+                try {
+                    data = JSON.parse(jsonStr);
+                } catch (e) {
+                    continue;
+                }
+                
+                if (data.type === 'result') {
+                    const statusIcon = data.status === 'success' ? '✓' : data.status === 'auth_error' ? '⚠' : '✗';
+                    const statusColor = data.status === 'success' ? 'text-green-300' : data.status === 'auth_error' ? 'text-amber-300' : 'text-red-300';
+                    const bgColor = statusColor === 'text-green-300' ? 'border-green-500/30 bg-green-500/10' : statusColor === 'text-amber-300' ? 'border-amber-500/30 bg-amber-500/10' : 'border-red-500/30 bg-red-500/10';
+                    
+                    const userLabel = data.user || '(unknown user)';
+                    const cmd = data.command ? escapeHtml(data.command) : '';
+                    const cmdLine = cmd ? `<p class=\"text-xs termix-muted mt-1\"><span class=\"font-mono break-all\">${cmd}</span></p>` : '';
+                    const det = data.details ? escapeHtml(data.details) : '';
+                    const detLine = det ? `<p class=\"text-xs termix-muted mt-1\">${det}</p>` : '';
+                    resultsDiv.innerHTML += `<div class=\"flex items-start justify-between gap-4 p-3 rounded border ${bgColor}\"><div class=\"min-w-0\"><p class=\"font-medium ${statusColor}\">${statusIcon} ${data.ip}</p><p class=\"text-sm termix-muted\">${userLabel}</p>${cmdLine}${detLine}</div><div class=\"text-right text-sm ${statusColor}\">${escapeHtml(data.message)}</div></div>`;
+                    
+                    if (data.status === 'success') {
+                        wizardState.validatedHosts.push({ ip: data.ip, user: data.user });
+                    }
+                }
+            }
+        }
+
+        wizardAbortVerification();
+        // Flush any remaining buffered SSE event
+        const tail = buffer.trim();
+        if (tail.startsWith('data: ')) {
+            try {
+                const data = JSON.parse(tail.substring(6));
+                if (data && data.type === 'complete') {
+                    wizardState.verificationComplete = true;
+                }
+            } catch (e) {}
+        }
+        // Fallback: if stream ended but we never saw complete, allow user to proceed
+        if (!wizardState.verificationComplete) {
+            wizardState.verificationComplete = true;
+            resultsDiv.innerHTML += '<p class="text-xs text-amber-300 mt-2">Stream ended without complete event; allowing Next.</p>';
+        }
+
+        // Verification finished: enable Next to proceed manually
+        const nextBtn = document.getElementById('wizardNextBtn');
+        if (nextBtn) {
+            nextBtn.disabled = false;
+            nextBtn.textContent = 'Next →';
+        }
+        wizardState.verificationComplete = true;
+        // Stay on Step 3 until user clicks Next
+
+    } catch (err) {
+        wizardAbortVerification();
+        wizardState.verificationStarted = false;
+        wizardState.verificationComplete = false;
+        console.error('Verification error:', err);
+        resultsDiv.innerHTML = `<div class="p-4 rounded bg-red-500/10 border border-red-500/30"><p class="text-red-300"><strong>Error:</strong> ${(err.name === 'AbortError') ? 'Verification timed out after 30s' : (err.message || 'Verification failed')}</p><p class="text-xs termix-muted mt-2">Check browser console for details</p></div>`;
+    }
+}
+
+async function wizardRunCollection() {
+    document.getElementById('wizardCollectionLog').innerHTML = '';
+    
+    try {
+        const payload = {
+            ips: wizardState.ips,
+            usernames: wizardState.usernames
+        };
+        if (wizardState.selectedKeyId) {
+            payload.ssh_key_id = wizardState.selectedKeyId;
+        } else if (wizardState.keyContent) {
+            payload.key_content = wizardState.keyContent;
+        }
+        
+        const response = await fetch(`/wizard/session/${wizardState.sessionId}/collect-info-stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -391,244 +784,90 @@ async function proceedToStep2() {
         
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n\n');
-            
-            for (const line of lines) {
-                if (!line.trim()) continue;
-                if (!line.startsWith('data: ')) continue;
-                
-                    const jsonStr = line.substring(6);
-                    let data;
-                    try {
-                        data = JSON.parse(jsonStr);
-                    } catch (e) {
-                        console.error('Step 3 JSON parse error:', e, jsonStr);
-                        continue;
-                    }
-            
-            if (data.error) {
-                resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
-                
-                return;
-            }
-            
-            if (data.type === 'start') {
-                resultsDiv.innerHTML = '';
-            } else if (data.type === 'progress') {
-                const progressBar = document.getElementById('progressBar');
-                const progressText = document.getElementById('progressText');
-                progressBar.style.width = `${((data.current) / data.total) * 100}%`;
-                progressText.textContent = `${data.current + 1}/${data.total}`;
-            } else if (data.type === 'result') {
-                const statusIcon = data.status === 'success' ? '✓' : data.status === 'auth_error' ? '⚠' : '✗';
-                const statusColor = data.status === 'success' ? 'text-green-300' : data.status === 'auth_error' ? 'text-amber-300' : 'text-red-300';
-                const msg = (data.message || '').toString();
-
-                const resultDiv = document.createElement('div');
-                resultDiv.className = 'flex items-center justify-between gap-3 p-2 rounded border border-white/10 bg-white/5';
-                resultDiv.title = msg;
-
-                const left = document.createElement('div');
-                left.className = 'min-w-0';
-                left.innerHTML = `<div class="font-medium termix-text truncate">${data.ip}</div><div class="termix-muted text-xs truncate">${msg || '&nbsp;'}</div>`;
-
-                const right = document.createElement('div');
-                right.className = 'flex items-center gap-2';
-                const icon = document.createElement('span');
-                icon.className = `text-lg ${statusColor}`;
-                icon.textContent = statusIcon;
-                right.appendChild(icon);
-
-                if (data.status !== 'success') {
-                    // clickable info icon to explain why verification failed
-                    const infoBtn = document.createElement('button');
-                    infoBtn.type = 'button';
-                    infoBtn.className = 'termix-btn';
-                    infoBtn.textContent = 'i';
-                    infoBtn.title = 'Why did this fail?';
-                    infoBtn.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        alert(msg || 'Verification failed.');
-                    });
-                    right.appendChild(infoBtn);
-
-                    wizardData.validationFailures[data.ip] = msg || 'Verification failed.';
-                }
-
-                resultDiv.appendChild(left);
-                resultDiv.appendChild(right);
-
-                resultsDiv.appendChild(resultDiv);
-                resultElements[data.ip] = resultDiv;
-
-                if (data.status === 'success') {
-                    // Use the username entered in step 1, not something derived from the IP
-                    const defaultUser = (wizardData.usernames && wizardData.usernames.length > 0) ? wizardData.usernames[0] : 'root';
-                    wizardData.validatedHosts.push({
-                        ip: data.ip,
-                        user: defaultUser
-                    });
-                }
-            } else if (data.type === 'complete') {
-                
-                document.getElementById('progressText').textContent = `${data.successful}/${data.total}`;
-                document.getElementById('progressBar').style.width = '100%';
-            } else if (data.type === 'error') {
-                resultsDiv.innerHTML = `<p class="text-red-600">Error: ${data.error}</p>`;
-                
-            }
-        }
-        
-        }
-
-    } catch (error) {
-        resultsDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
-    }
-}
-
-async function proceedToStep3() {
-    if (wizardData.validatedHosts.length === 0) {
-        alert('No valid hosts to continue with');
-        return;
-    }
-    
-    currentWizardStep = 3;
-    updateWizardUI();
-    
-    const logDiv = document.getElementById('collectionLog');
-    logDiv.innerHTML = '<p class="termix-muted">Starting system information collection...</p>';
-    
-    try {
-        const collectPayload = {
-            ips: wizardData.validatedHosts.map(h => h.ip),
-            usernames: wizardData.validatedHosts.map(h => h.user)
-        };
-        
-        if (wizardData.sshKeyId) {
-            collectPayload.ssh_key_id = wizardData.sshKeyId;
-        } else if (wizardData.keyContent) {
-            collectPayload.key_content = wizardData.keyContent;
-        }
-        
-        logDiv.innerHTML = '';
-        const ipSections = {};
-        let totalHosts = 0;
-        let completedHosts = 0;
-        
-        // Use streaming endpoint for real-time progress
-        const sessionId = Math.random().toString(36).substr(2, 9);
-        const response = await fetch(`/wizard/session/${sessionId}/collect-info-stream`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(collectPayload)
-        });
-        
-        if (!response.ok) {
-            logDiv.innerHTML = `<p class="text-red-600">Error: Server returned ${response.status}</p>`;
-            return;
-        }
-        
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
+        let totalDevices = 0;
+        let currentDevice = 0;
         let buffer = '';
+        const logDiv = document.getElementById('wizardCollectionLog');
+        if (logDiv) {
+            logDiv.innerHTML = '<p class="termix-muted">Starting collection...</p>';
+        }
         
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop(); // Keep incomplete line in buffer
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || '';
             
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const eventData = JSON.parse(line.slice(6));
-                        
-                        if (eventData.type === 'start') {
-                            totalHosts = eventData.total;
-                            document.getElementById('collectionProgressText').textContent = `0/${totalHosts}`;
-                            logDiv.innerHTML = `<p class="termix-muted">Collecting system info from ${totalHosts} hosts...</p>`;
-                        } 
-                        else if (eventData.type === 'progress') {
-                            logDiv.innerHTML = `<p class="termix-muted">Processing host ${eventData.current + 1} of ${eventData.total}: ${eventData.message}</p>`;
-                        }
-                        else if (eventData.type === 'log') {
-                            const ip = eventData.ip;
-                            if (!ipSections[ip]) {
-                                const section = document.createElement('div');
-                                section.className = 'border-b pb-2 mb-2';
-                                section.innerHTML = `<p class="font-medium text-blue-600">${ip}</p>`;
-                                logDiv.appendChild(section);
-                                ipSections[ip] = section;
-                            }
-                            
-                            const timestamp = new Date().toLocaleTimeString();
-                            const logLine = document.createElement('p');
-                            logLine.className = 'text-xs termix-muted';
-                            logLine.innerHTML = `<span class="termix-muted">${timestamp}</span> ${eventData.message}`;
-                            ipSections[ip].appendChild(logLine);
-                            logDiv.scrollTop = logDiv.scrollHeight;
-                        }
-                        else if (eventData.type === 'host_complete') {
-                            completedHosts = eventData.current;
-                            const progressPercent = (completedHosts / totalHosts) * 100;
-                            document.getElementById('collectionProgressBar').style.width = progressPercent + '%';
-                            document.getElementById('collectionProgressText').textContent = `${completedHosts}/${totalHosts}`;
-                        }
-                        else if (eventData.type === 'complete') {
-                            wizardData.collectedInfo = eventData.results || [];
-                            document.getElementById('collectionProgressBar').style.width = '100%';
-                            document.getElementById('collectionProgressText').textContent = `${eventData.total}/${eventData.total}`;
-                            
-                            const summaryLine = document.createElement('p');
-                            summaryLine.className = 'text-green-600 font-medium mt-4';
-                            summaryLine.innerHTML = `✓ Collection complete! Processed ${eventData.total} hosts successfully.`;
-                            logDiv.appendChild(summaryLine);
-                        }
-                        else if (eventData.error) {
-                            logDiv.innerHTML += `<p class="text-red-600">Error: ${eventData.error}</p>`;
-                        }
-                    } catch (e) {
-                        console.error('Error parsing event:', e);
+            for (const line of parts) {
+                if (!line.trim() || !line.startsWith('data: ')) continue;
+                
+                const jsonStr = line.substring(6);
+                let data;
+                try {
+                    data = JSON.parse(jsonStr);
+                } catch (e) {
+                    continue;
+                }
+                
+                if (data.type === 'start') {
+                    totalDevices = data.total;
+                    if (logDiv) logDiv.innerHTML = `<p class="termix-muted">Collecting from ${totalDevices} device(s)...</p>`;
+                } else if (data.type === 'progress') {
+                    currentDevice = data.current;
+                    const pct = totalDevices ? Math.round(((currentDevice) / totalDevices) * 100) : 0;
+                    document.getElementById('wizardCollectionBar').style.width = `${pct}%`;
+                    document.getElementById('wizardCollectionText').textContent = `${currentDevice}/${totalDevices}`;
+                    if (logDiv) logDiv.innerHTML += `<p class="text-xs termix-muted">→ ${escapeHtml(data.message || '')}</p>`;
+                } else if (data.type === 'log') {
+                    if (logDiv) logDiv.innerHTML += `<p class="text-xs"><span class="text-purple-300">${escapeHtml(data.ip || '')}</span> <span class="termix-muted">${escapeHtml(data.message || '')}</span></p>`;
+                } else if (data.type === 'host_complete') {
+                    const pct = totalDevices ? Math.round((data.current / totalDevices) * 100) : 0;
+                    document.getElementById('wizardCollectionBar').style.width = `${pct}%`;
+                    document.getElementById('wizardCollectionText').textContent = `${data.current}/${totalDevices}`;
+                    if (logDiv) logDiv.innerHTML += `<p class="text-xs text-green-300">✓ Finished ${escapeHtml(data.ip || '')}</p>`;
+                } else if (data.type === 'complete') {
+                    // Backend sends results
+                    wizardState.collectedInfo = data.results || [];
+                    wizardState.collectionComplete = true;
+                    const nextBtn = document.getElementById('wizardNextBtn');
+                    if (nextBtn) {
+                        nextBtn.disabled = false;
+                        nextBtn.textContent = 'Next →';
                     }
+                    if (logDiv) logDiv.innerHTML += `<p class="text-xs text-green-300 mt-2">Collection complete.</p>`;
+                } else if (data.type === 'error') {
+                    if (logDiv) logDiv.innerHTML += `<p class="text-xs text-red-300">Error: ${escapeHtml(data.error || 'Unknown error')}</p>`;
                 }
             }
         }
-        
-    } catch (error) {
-        logDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}</p>`;
+
+    } catch (err) {
+        console.error('Collection error:', err);
+        const log = document.getElementById('wizardCollectionLog');
+        if (log) {
+            log.innerHTML = `<div class="p-3 rounded bg-red-500/10 border border-red-500/30"><p class="text-red-300"><strong>Collection error:</strong> ${err.message || 'Unknown error'}</p></div>`;
+        }
     }
 }
 
-
-async function proceedToStep4() {
-    currentWizardStep = 4;
-    updateWizardUI();
-    
+async function wizardComplete() {
+    if (wizardState.completionStarted) return;
+    wizardState.completionStarted = true;
     try {
-        const devices = wizardData.collectedInfo.map((info, idx) => ({
+        const devices = wizardState.collectedInfo.map(info => ({
             ip: info.ip,
             user: info.user,
-            hostname: info.system_info.hostname || info.ip,
-            friendly_name: info.system_info.hostname || info.ip,
+            hostname: info.system_info?.hostname || info.ip,
+            friendly_name: info.system_info?.hostname || info.ip,
             system_info: info.system_info,
             services: info.services
         }));
         
-        const payload = {
-            devices: devices
-        };
-        
-        if (wizardData.sshKeyId) {
-            payload.ssh_key_id = wizardData.sshKeyId;
+        const payload = { devices };
+        if (wizardState.selectedKeyId) {
+            payload.ssh_key_id = wizardState.selectedKeyId;
         }
         
         const response = await fetch('/wizard/add-devices', {
@@ -638,96 +877,88 @@ async function proceedToStep4() {
         });
         
         const data = await response.json();
+        wizardState.addedDevices = data.devices || [];
         
-        wizardData.addedDevices = data.devices;
+        const counts = data.counts || { added: (data.devices || []).length, skipped: 0 };
+        document.getElementById('wizardCompletionMessage').textContent = `${counts.added} device(s) added successfully!${counts.skipped ? ` (${counts.skipped} skipped)` : ''}`;
         
-        const counts = data.counts || {added: (data.devices||[]).length, skipped: (data.skipped||[]).length, total: (devices||[]).length};
-        document.getElementById('completionMessage').textContent = `${counts.added} device(s) added successfully!${counts.skipped ? ' (' + counts.skipped + ' skipped)' : ''}`;
-        
-        const devicesList = document.getElementById('addedDevicesList');
+        const devicesList = document.getElementById('wizardAddedDevicesList');
         devicesList.innerHTML = '';
-        data.devices.forEach(device => {
-            const li = document.createElement('div');
-            li.className = 'glass-container border border-white/10 rounded-lg p-3 text-sm bg-white/5';
-            li.innerHTML = `<p class="font-medium termix-text">${device.hostname}</p><p class="termix-muted">${device.ip}</p>`;
-            devicesList.appendChild(li);
+        (data.devices || []).forEach(device => {
+            const div = document.createElement('div');
+            div.className = 'glass-container border border-white/10 rounded-lg p-3 text-sm bg-white/5';
+            div.innerHTML = `<p class="font-medium termix-text">${device.hostname}</p><p class="termix-muted">${device.ip}</p>`;
+            devicesList.appendChild(div);
         });
+        
+        // Load groups and tags
+        wizardLoadGroups();
+        wizardLoadTags();
 
-        const skipped = data.skipped || [];
-        if (skipped.length) {
-            const hdr = document.createElement('div');
-            hdr.className = 'mt-4';
-            hdr.innerHTML = `<h4 class="font-medium termix-muted mb-2">Skipped Devices:</h4>`;
-            devicesList.appendChild(hdr);
-
-            skipped.forEach(s => {
-                const li = document.createElement('div');
-                li.className = 'glass-container border border-amber-500/30 rounded-lg p-3 text-sm bg-amber-500/10';
-                const ip = s.ip || '(unknown)';
-                const reason = s.reason || 'skipped';
-                li.innerHTML = `<p class="font-medium termix-text">${ip}</p><p class="text-amber-200 text-xs">${reason}</p>`;
-                devicesList.appendChild(li);
-            });
+        // Refresh main host list so newly added nodes appear without a manual page refresh
+        try {
+            if (typeof window.refreshHostsSidebar === 'function') {
+                await window.refreshHostsSidebar();
+                if (typeof window.showToast === 'function') window.showToast('Hosts refreshed', 'success');
+            } else {
+                console.warn('[wizard] refreshHostsSidebar not available; falling back to page reload');
+                if (typeof window.showToast === 'function') window.showToast('Refreshing page to show new hosts...', 'info');
+                setTimeout(() => window.location.reload(), 250);
+            }
+        } catch (e) {
+            console.warn('[wizard] host refresh failed; falling back to page reload', e);
+            setTimeout(() => window.location.reload(), 250);
         }
-    } catch (error) {
-        alert(`Error adding devices: ${error.message}`);
+
+        wizardState.completionComplete = true;
+        const nextBtn = document.getElementById('wizardNextBtn');
+        if (nextBtn) {
+            nextBtn.disabled = false;
+            nextBtn.textContent = 'Close';
+        }
+    } catch (err) {
+        wizardState.completionStarted = false;
+        alert(`Completion error: ${err.message}`);
+        const nextBtn = document.getElementById('wizardNextBtn');
+        if (nextBtn) {
+            nextBtn.disabled = false;
+            nextBtn.textContent = 'Finish';
+        }
     }
 }
 
-function loadStoredKeys() {
-    fetch('/ssh-keys')
-        .then(r => r.json())
-        .then(keys => {
-            const select = document.getElementById('storedKeySelect');
-            keys.forEach(key => {
-                const option = document.createElement('option');
-                option.value = key.id;
-                option.textContent = key.key_name;
-                select.appendChild(option);
-            });
-        })
-        .catch(e => console.error('Error loading SSH keys:', e));
-}
-
-function loadGroups() {
+function wizardLoadGroups() {
     fetch('/groups')
         .then(r => r.json())
         .then(groups => {
-            const select = document.getElementById('groupSelect');
-            groups.forEach(group => {
-                const option = document.createElement('option');
-                option.value = group.id;
-                option.textContent = group.name;
-                select.appendChild(option);
-            });
-        })
-        .catch(e => console.error('Error loading groups:', e));
+            const select = document.getElementById('wizardGroupSelect');
+            if (select) {
+                select.innerHTML = '<option value="">-- No group --</option>';
+                groups.forEach(group => {
+                    const opt = document.createElement('option');
+                    opt.value = group.id;
+                    opt.textContent = group.name;
+                    select.appendChild(opt);
+                });
+            }
+        });
 }
 
-function loadTags() {
+function wizardLoadTags() {
     fetch('/tags')
         .then(r => r.json())
         .then(tags => {
-            const container = document.getElementById('tagCheckboxes');
-            tags.forEach(tag => {
-                const label = document.createElement('label');
-                label.className = 'flex items-center cursor-pointer';
-                label.innerHTML = `
-                    <input type="checkbox" value="${tag.id}" class="tagCheckbox">
-                    <span class="ml-2 text-sm" style="color: ${tag.color}">${tag.name}</span>
-                `;
-                container.appendChild(label);
-            });
-        })
-        .catch(e => console.error('Error loading tags:', e));
+            const div = document.getElementById('wizardTagCheckboxes');
+            if (div) {
+                div.innerHTML = '';
+                tags.forEach(tag => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center gap-2';
+                    label.innerHTML = `<input type="checkbox" value="${tag.id}" class="rounded border-white/20"> ${tag.name}`;
+                    div.appendChild(label);
+                });
+            }
+        });
 }
-
-// Key type radio button handling
-document.querySelectorAll('.keyTypeRadio').forEach(radio => {
-    radio.addEventListener('change', (e) => {
-        const isFile = e.target.value === 'file';
-        document.getElementById('keyFileDiv').classList.toggle('hidden', !isFile);
-        document.getElementById('keyPasteDiv').classList.toggle('hidden', isFile);
-    });
-});
 </script>
+

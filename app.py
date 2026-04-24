@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 import shutil
 from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services, execute_remote_command
+from utils.sshkey_crypto import encrypt_str, decrypt_str, is_configured as sshkey_crypto_configured, generate_master_key, SSHKeyCryptoError, compute_key_checksum, verify_key_checksum, normalize_ssh_key_text
 
 # --- INITIALIZATION ---
 app = Flask(__name__)
@@ -68,9 +69,62 @@ def _ensure_suricata_endpoint_columns():
 
 
 
+
+
+def _ensure_sshkey_encryption_columns():
+    """Lightweight SQLite migration: add encryption columns to ssh_keys and optionally encrypt legacy plaintext rows."""
+    try:
+        uri = str(app.config.get('SQLALCHEMY_DATABASE_URI') or '')
+        if not uri.startswith('sqlite'):
+            return
+    except Exception:
+        return
+
+    def _col_exists(table: str, col: str) -> bool:
+        try:
+            rows = db.session.execute(sql_text(f"PRAGMA table_info({table})")).fetchall()
+            return any(r[1] == col for r in rows)
+        except Exception:
+            return False
+
+    def _add_col(table: str, col: str, decl: str):
+        if _col_exists(table, col):
+            return
+        try:
+            db.session.execute(sql_text(f"ALTER TABLE {table} ADD COLUMN {col} {decl}"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    _add_col('ssh_keys', 'is_encrypted', 'BOOLEAN DEFAULT 0')
+    _add_col('ssh_keys', 'enc_version', 'TEXT')
+
+    # Best-effort migration of legacy plaintext -> encrypted when master key is configured
+    if not sshkey_crypto_configured():
+        return
+
+    try:
+        keys = SSHKey.query.all()
+        changed = False
+        for k in keys:
+            if getattr(k, 'is_encrypted', False):
+                continue
+            pt = (k.key_content or '').strip()
+            if not pt:
+                continue
+            k.key_content = encrypt_str(pt)
+            k.is_encrypted = True
+            k.enc_version = 'fernet-v1'
+            changed = True
+        if changed:
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 with app.app_context():
     db.create_all()
     _ensure_suricata_endpoint_columns()
+    _ensure_sshkey_encryption_columns()
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -278,12 +332,16 @@ def save_hosts(hosts):
     with open(HOSTS_FILE, 'w') as f:
         json.dump(hosts, f, indent=4)
 
-def get_ssh_prefix_args(user, ip):
-    """Constructs the SSH command prefix as a list of arguments directly from inputs."""
-    return [
+def get_ssh_prefix_args(user, ip, identity_file=None):
+    """Construct the SSH command prefix as a list of args."""
+    args = [
         "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no",
-        "-o", "BatchMode=yes", f"{user}@{ip}"
+        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes"
     ]
+    if identity_file:
+        args += ["-i", identity_file]
+    args.append(f"{user}@{ip}")
+    return args
 
 
 
@@ -457,6 +515,7 @@ def execute_command(hostname, command_str, timeout=10):
                         host_info = {
                             'user': host_obj.ssh_user or 'root',
                             'ip': host_obj.ip_address,
+                            'ssh_key_id': host_obj.ssh_key_id,
                         }
                 except Exception as e:
                     print(f"[ERROR] Failed to resolve DB host '{hostname}': {e}")
@@ -464,7 +523,8 @@ def execute_command(hostname, command_str, timeout=10):
         if not host_info:
             raise ValueError(f"Host ID '{hostname}' not found in configuration or database.")
 
-        ssh_prefix_args = get_ssh_prefix_args(host_info['user'], host_info['ip'])
+        identity_path = _materialize_ssh_key_path(host_info.get('ssh_key_id'))
+        ssh_prefix_args = get_ssh_prefix_args(host_info['user'], host_info['ip'], identity_file=identity_path)
 
     cmd_list = ssh_prefix_args + [command_str] if ssh_prefix_args else [command_str]
     # Use shell=False for remote commands for security, shell=True for local for simplicity with sudo
@@ -787,6 +847,16 @@ def get_all_host_sources():
     failed_hosts = []
     hosts = load_hosts()
     all_hostnames = [('local', 'Localhost')] + [(host_id, host_data['friendly_name']) for host_id, host_data in hosts.items()]
+    
+    # Add DB-hosted devices from wizard
+    try:
+        db_hosts = Host.query.all()
+        for h in db_hosts:
+            db_host_id = f"db-{h.id}"
+            host_name = h.friendly_name or h.hostname or h.ip_address
+            all_hostnames.append((db_host_id, host_name))
+    except Exception as e:
+        print(f"[ERROR] Failed to add DB hosts to sources list: {e}")
 
     # Use ThreadPoolExecutor with timeout for concurrent processing
     with ThreadPoolExecutor(max_workers=3) as executor:  # Reduced workers to avoid overwhelming
@@ -845,6 +915,16 @@ def get_log_table_view():
     failed_hosts = []
     hosts = load_hosts()
     all_hostnames = [('local', 'Localhost')] + [(host_id, host_data['friendly_name']) for host_id, host_data in hosts.items()]
+    
+    # Add DB-hosted devices from wizard
+    try:
+        db_hosts = Host.query.all()
+        for h in db_hosts:
+            db_host_id = f"db-{h.id}"
+            host_name = h.friendly_name or h.hostname or h.ip_address
+            all_hostnames.append((db_host_id, host_name))
+    except Exception as e:
+        print(f"[ERROR] Failed to add DB hosts to sources list: {e}")
 
     # Use ThreadPoolExecutor with timeout for concurrent processing
     with ThreadPoolExecutor(max_workers=3) as executor:
@@ -1125,6 +1205,21 @@ def fetch_sources_from_host_detailed(host_id, host_name, progress_callback, base
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
     hostname = request.args.get('host', 'local')
+    
+    # Debug: show which SSH key is being used for DB hosts
+    if hostname != 'local' and hostname.startswith('db-'):
+        try:
+            host_id = int(hostname.split('-', 1)[1])
+            host_obj = Host.query.get(host_id)
+            if host_obj:
+                ssh_key_id = host_obj.ssh_key_id
+                identity_path = _materialize_ssh_key_path(ssh_key_id)
+                print(f"[DEBUG /log] Using SSH key_id={ssh_key_id} for DB host {hostname}")
+        except Exception as e:
+            print(f"[DEBUG /log] Error resolving DB host SSH key: {e}")
+    else:
+        print(f"[DEBUG /log] Using local/config host: {hostname}")
+    
     try:
         command_str = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, filename))} 2>/dev/null | tail -n 500" if filename.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
         result = execute_command(hostname, command_str)
@@ -1161,7 +1256,8 @@ def get_hosts():
                     'ip': h.ip_address,
                     'user': h.ssh_user or 'root',
                     'description': h.description or 'Onboarded via wizard',
-                    'source': 'db'
+                    'source': 'db',
+                    'group_names': [g.name for g in (h.groups or [])]
                 }
     except Exception as e:
         print(f"[ERROR] Failed to merge DB hosts into /hosts response: {e}")
@@ -2302,6 +2398,92 @@ SURICATA_ALLOWED_FILES = ['eve.json', 'fast.log', 'stats.log', 'suricata.log']
 # Cache SSH key temp files (key_id -> path)
 _suricata_key_cache = {}
 
+# Cache SSH key temp files (ssh_key_id -> path) for general remote operations
+_ssh_key_file_cache = {}
+
+def _cleanup_ssh_key_file_cache():
+    for p in list(_ssh_key_file_cache.values()):
+        try:
+            if p and os.path.exists(p):
+                os.unlink(p)
+        except Exception:
+            pass
+
+atexit.register(_cleanup_ssh_key_file_cache)
+
+
+def _write_temp_ssh_key_file(plaintext: str) -> str:
+    """Write SSH key plaintext to a temp file in a way that avoids newline/encoding issues."""
+    normalized = normalize_ssh_key_text(plaintext or '')
+    if normalized and not normalized.endswith("\n"):
+        normalized = normalized + "\n"
+    tf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
+    tf.write(normalized.encode('utf-8'))
+    tf.flush(); tf.close()
+    os.chmod(tf.name, 0o600)
+    return tf.name
+
+
+
+
+def _sshkey_plaintext_from_model(key: SSHKey) -> str:
+    """Return decrypted plaintext for a stored SSHKey row."""
+    if not key:
+        return ''
+    if getattr(key, 'is_encrypted', False):
+        return decrypt_str(key.key_content or '')
+    return key.key_content or ''
+
+
+def _materialize_ssh_key_path(ssh_key_id: int | None) -> str | None:
+    """Return temp file path containing decrypted key; cached per key id."""
+    if not ssh_key_id:
+        return None
+    ssh_key_id = int(ssh_key_id)
+    if ssh_key_id in _ssh_key_file_cache and os.path.exists(_ssh_key_file_cache[ssh_key_id]):
+        return _ssh_key_file_cache[ssh_key_id]
+    key = SSHKey.query.get(ssh_key_id)
+    if not key:
+        print(f"[DEBUG] SSH key {ssh_key_id} not found in database")
+        return None
+    content = _sshkey_plaintext_from_model(key)
+    if not content:
+        print(f"[DEBUG] SSH key {ssh_key_id} decrypted to empty content")
+        return None
+    if not content.lstrip().startswith('BEGIN'):
+        print(f"[DEBUG] WARNING: SSH key {ssh_key_id} doesn't start with a PEM BEGIN header after decryption!")
+        print(f"[DEBUG] First 100 chars: {content[:100]!r}")
+    if not content.strip().endswith('END'):
+        print(f"[DEBUG] WARNING: SSH key {ssh_key_id} doesn't end with 'END' after decryption!")
+        print(f"[DEBUG] Last 100 chars: {content[-100:]!r}")
+    tf_name = _write_temp_ssh_key_file(content)
+    # Verify file was written correctly
+    with open(tf_name, 'r', encoding='utf-8') as f:
+        written_content = f.read()
+    if written_content != content:
+        print(f"[DEBUG] WARNING: Written key content doesn't match original!")
+        print(f"[DEBUG] Original: {len(content)} bytes, Written: {len(written_content)} bytes")
+    print(f"[DEBUG] Materialized SSH key {ssh_key_id} to {tf_name} ({len(content)} bytes)")
+    
+    # Verify we can read it back
+    try:
+        with open(tf_name, 'r') as verify_f:
+            verify_content = verify_f.read()
+        if verify_content == content:
+            print(f"[DEBUG] ✓ Key file verified: content matches")
+        else:
+            print(f"[DEBUG] ✗ Key file mismatch: {len(verify_content)} bytes read vs {len(content)} bytes written")
+        
+        # Check permissions
+        stat_info = os.stat(tf_name)
+        print(f"[DEBUG] Key file permissions: {oct(stat_info.st_mode)}")
+    except Exception as e:
+        print(f"[DEBUG] Error verifying key file: {e}")
+    
+    _ssh_key_file_cache[ssh_key_id] = tf_name
+    return tf_name
+
+
 def _suricata_cleanup_key_cache():
     for p in list(_suricata_key_cache.values()):
         try:
@@ -2325,12 +2507,12 @@ def _suricata_get_ssh_key_path(ssh_key_id: int | None) -> str | None:
         return None
 
     tf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
-    tf.write(key.key_content or '')
+    tf.write(_sshkey_plaintext_from_model(key) or '')
     tf.flush()
     tf.close()
-    os.chmod(tf.name, 0o600)
-    _suricata_key_cache[ssh_key_id] = tf.name
-    return tf.name
+    os.chmod(tf_name, 0o600)
+    _suricata_key_cache[ssh_key_id] = tf_name
+    return tf_name
 
 
 def _suricata_bucket_ts(epoch_seconds: int, bucket_size: int) -> int:
@@ -3084,20 +3266,64 @@ def suricata_raw():
 
 @app.route('/ssh-keys', methods=['GET'])
 def get_ssh_keys():
-    """Get list of stored SSH keys"""
+    """Get list of stored SSH keys with verification status"""
     try:
         keys = SSHKey.query.all()
-        return jsonify([k.to_dict() for k in keys])
+        results = []
+        for key in keys:
+            key_dict = key.to_dict()
+            
+            # Add integrity status
+            plaintext = _sshkey_plaintext_from_model(key)
+            if key.key_checksum and plaintext:
+                if verify_key_checksum(plaintext, key.key_checksum):
+                    key_dict['integrity_status'] = 'verified'
+                else:
+                    key_dict['integrity_status'] = 'corrupted'
+            else:
+                key_dict['integrity_status'] = 'unknown'
+            
+            results.append(key_dict)
+        
+        return jsonify(results)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/settings/sshkey-encryption/status', methods=['GET'])
+def sshkey_encryption_status():
+    """Return whether SSH key encryption is configured."""
+    return jsonify({'configured': bool(sshkey_crypto_configured()), 'env_var': 'AILOG_SSHKEY_MASTER_KEY'})
+
+@app.route('/settings/sshkey-encryption/generate', methods=['POST'])
+def sshkey_encryption_generate():
+    """Generate a new master key (not persisted)."""
+    try:
+        key = generate_master_key()
+        return jsonify({'master_key': key, 'env_var': 'AILOG_SSHKEY_MASTER_KEY'})
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/settings/sshkey-encryption/validate', methods=['POST'])
+def sshkey_encryption_validate():
+    """Validate that a provided master key (or env var) can encrypt/decrypt."""
+    data = request.get_json(silent=True) or {}
+    key = (data.get('master_key') or '').strip() or None
+    try:
+        test_pt = 'ailog-sshkey-test'
+        tok = encrypt_str(test_pt, explicit_key=key)
+        pt = decrypt_str(tok, explicit_key=key)
+        if pt != test_pt:
+            return jsonify({'valid': False, 'error': 'roundtrip mismatch'}), 400
+        return jsonify({'valid': True})
+    except Exception as e:
+        return jsonify({'valid': False, 'error': str(e)}), 400
 
 @app.route('/ssh-keys/upload', methods=['POST'])
 def upload_ssh_key():
     """Upload SSH key from file"""
     try:
         key_name = request.form.get('key_name')
+        print(f"[ssh-keys/upload] key_name={key_name!r}", flush=True)
         uploaded_file = request.files.get('key_file')
         
         if not key_name or not uploaded_file:
@@ -3108,11 +3334,19 @@ def upload_ssh_key():
             return jsonify({'error': 'Key with this name already exists'}), 400
         
         key_content = uploaded_file.read().decode('utf-8')
+        key_content = key_content.strip()
+        if not key_content:
+            return jsonify({'error': 'Empty key file'}), 400
+        if not sshkey_crypto_configured():
+            return jsonify({'error': 'SSH key encryption not configured (set AILOG_SSHKEY_MASTER_KEY)'}), 500
+        enc = encrypt_str(key_content)
         
         ssh_key = SSHKey(
             key_name=key_name,
             key_type='file',
-            key_content=key_content
+            is_encrypted=True,
+            enc_version='fernet-v1',
+            key_content=enc
         )
         db.session.add(ssh_key)
         db.session.commit()
@@ -3127,11 +3361,36 @@ def save_ssh_key():
     """Save SSH key from pasted content"""
     try:
         data = request.get_json()
-        key_name = data.get('key_name')
-        key_content = data.get('key_content')
+        try:
+            pass
+        except Exception:
+            pass
+        key_name = (data.get('key_name') or '').strip()
+        key_content = data.get('key_content') or ''
+        # Only strip leading/trailing whitespace, but preserve internal newlines
+        key_content = key_content.strip()
+        print(f"[ssh-keys/save] key_name={key_name!r} bytes={len(key_content)}", flush=True)
+        print(f"[ssh-keys/save] key_content repr (first 100): {repr(key_content[:100])}", flush=True)
+        print(f"[ssh-keys/save] key_content repr (last 100): {repr(key_content[-100:])}", flush=True)
         
         if not key_name or not key_content:
             return jsonify({'error': 'key_name and key_content required'}), 400
+
+        if 'BEGIN' not in key_content or 'KEY' not in key_content or 'END' not in key_content:
+            return jsonify({'error': 'Key content does not look like a private key'}), 400
+        
+        # Check if key is passphrase-protected
+        if 'ENCRYPTED' in key_content:
+            return jsonify({'error': 'SSH key is passphrase-protected. Please decrypt it first before uploading. SSH cannot use encrypted keys in batch mode.'}), 400
+        
+        if not sshkey_crypto_configured():
+            return jsonify({'error': 'SSH key encryption not configured (set AILOG_SSHKEY_MASTER_KEY)'}), 500
+        
+        # Compute checksum of plaintext before encryption
+        checksum = compute_key_checksum(key_content)
+        print(f"[ssh-keys/save] Computed checksum: {checksum}", flush=True)
+        
+        enc = encrypt_str(key_content)
         
         existing = SSHKey.query.filter_by(key_name=key_name).first()
         if existing:
@@ -3140,15 +3399,97 @@ def save_ssh_key():
         ssh_key = SSHKey(
             key_name=key_name,
             key_type='pasted',
-            key_content=key_content
+            is_encrypted=True,
+            enc_version='fernet-v1',
+            key_content=enc,
+            key_checksum=checksum
         )
         db.session.add(ssh_key)
         db.session.commit()
         
-        return jsonify({'message': 'SSH key saved', 'id': ssh_key.id}), 201
+        return jsonify({'message': 'SSH key saved', 'id': ssh_key.id, 'checksum': checksum}), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/ssh-keys/<int:key_id>', methods=['GET'])
+def get_ssh_key(key_id):
+    """Get a specific SSH key metadata"""
+    try:
+        key = SSHKey.query.get(key_id)
+        if not key:
+            return jsonify({'error': 'Key not found'}), 404
+        return jsonify(key.to_dict())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/ssh-keys/<int:key_id>', methods=['DELETE'])
+def delete_ssh_key(key_id):
+    """Delete an SSH key"""
+    try:
+        key = SSHKey.query.get(key_id)
+        if not key:
+            return jsonify({'error': 'Key not found'}), 404
+        
+        # Check if key is in use by any hosts
+        hosts_using_key = Host.query.filter_by(ssh_key_id=key_id).all()
+        if hosts_using_key:
+            host_names = ', '.join([h.friendly_name or h.hostname or h.ip_address for h in hosts_using_key])
+            return jsonify({
+                'error': f'Key is in use by hosts: {host_names}',
+                'in_use_by': [h.id for h in hosts_using_key]
+            }), 409
+        
+        db.session.delete(key)
+        db.session.commit()
+        
+        # Clean up cached decrypted key file
+        if key_id in _ssh_key_file_cache:
+            try:
+                os.unlink(_ssh_key_file_cache[key_id])
+            except:
+                pass
+            del _ssh_key_file_cache[key_id]
+        
+        return jsonify({'message': f'Key {key_id} deleted'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/ssh-keys/<int:key_id>/test-decrypt', methods=['GET'])
+def test_decrypt_ssh_key(key_id):
+    """Test decryption of an SSH key (for debugging)"""
+    try:
+        key = SSHKey.query.get(key_id)
+        if not key:
+            return jsonify({'error': 'Key not found'}), 404
+        
+        # Try to decrypt
+        plaintext = _sshkey_plaintext_from_model(key)
+        
+        # Check validity
+        checks = {
+            'has_content': len(plaintext) > 0,
+            'starts_with_begin': plaintext.lstrip().startswith('BEGIN'),
+            'ends_with_end': plaintext.strip().endswith('END'),
+            'is_valid_pem': 'BEGIN' in plaintext and 'END' in plaintext
+        }
+        
+        return jsonify({
+            'key_id': key_id,
+            'key_name': key.key_name,
+            'is_encrypted': key.is_encrypted,
+            'encrypted_bytes': len(key.key_content),
+            'decrypted_bytes': len(plaintext),
+            'validation_checks': checks,
+            'plaintext_preview': plaintext[:200] + '...' if len(plaintext) > 200 else plaintext
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/wizard/validate-hosts', methods=['POST'])
 def validate_hosts():
@@ -3168,7 +3509,7 @@ def validate_hosts():
             ssh_key = SSHKey.query.get(ssh_key_id)
             if ssh_key:
                 temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
-                temp_file.write(ssh_key.key_content)
+                temp_file.write(_sshkey_plaintext_from_model(ssh_key))
                 temp_file.close()
                 os.chmod(temp_file.name, 0o600)
                 ssh_key_path = temp_file.name
@@ -3223,7 +3564,7 @@ def collect_host_info():
             ssh_key = SSHKey.query.get(ssh_key_id)
             if ssh_key:
                 temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
-                temp_file.write(ssh_key.key_content)
+                temp_file.write(_sshkey_plaintext_from_model(ssh_key))
                 temp_file.close()
                 os.chmod(temp_file.name, 0o600)
                 ssh_key_path = temp_file.name
@@ -3649,6 +3990,80 @@ def create_group():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
+
+@app.route('/groups/<int:group_id>', methods=['PUT'])
+def update_group(group_id):
+    """Update an existing group"""
+    try:
+        group = Group.query.get(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+
+        data = request.get_json() or {}
+        name = data.get('name')
+        description = data.get('description')
+
+        if name is not None:
+            name = name.strip()
+            if not name:
+                return jsonify({'error': 'Group name required'}), 400
+            existing = Group.query.filter(Group.name == name, Group.id != group_id).first()
+            if existing:
+                return jsonify({'error': 'Group already exists'}), 400
+            group.name = name
+
+        if description is not None:
+            group.description = description
+
+        db.session.commit()
+        return jsonify(group.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/groups/<int:group_id>', methods=['DELETE'])
+def delete_group(group_id):
+    """Delete a group"""
+    try:
+        group = Group.query.get(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+
+        # Detach from hosts first (association table)
+        group.hosts = []
+        db.session.delete(group)
+        db.session.commit()
+        return jsonify({'message': 'Group deleted'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/groups/<int:group_id>/hosts', methods=['GET'])
+def get_group_hosts(group_id):
+    """List hosts assigned to a group"""
+    try:
+        group = Group.query.get(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+
+        hosts = []
+        for h in (group.hosts or []):
+            hosts.append({
+                'id': h.id,
+                'host_id': f"db-{h.id}",
+                'hostname': h.hostname,
+                'friendly_name': h.friendly_name,
+                'ip_address': h.ip_address,
+                'ssh_user': h.ssh_user,
+                'description': h.description,
+            })
+
+        return jsonify({'group': group.to_dict(), 'hosts': hosts})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 @app.route('/tags', methods=['GET'])
 def get_tags():
     """Get all tags"""
@@ -4134,17 +4549,9 @@ def validate_hosts_stream(session_id):
             if ssh_key_id:
                 ssh_key = SSHKey.query.get(ssh_key_id)
                 if ssh_key:
-                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
-                    temp_file.write(ssh_key.key_content)
-                    temp_file.close()
-                    os.chmod(temp_file.name, 0o600)
-                    ssh_key_path = temp_file.name
+                    ssh_key_path = _write_temp_ssh_key_file(_sshkey_plaintext_from_model(ssh_key))
             elif key_content:
-                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
-                temp_file.write(key_content)
-                temp_file.close()
-                os.chmod(temp_file.name, 0o600)
-                ssh_key_path = temp_file.name
+                ssh_key_path = _write_temp_ssh_key_file(key_content)
             
             results = []
             for i, ip in enumerate(ips):
@@ -4161,8 +4568,15 @@ def validate_hosts_stream(session_id):
                 
                 result = test_ssh_connection(user, ip, ssh_key_path)
                 results.append(result)
+                debug_msg = result['message']
+                if ssh_key_path:
+                    debug_msg += f" (using key at {ssh_key_path}; key_id={ssh_key_id})"
+                elif key_content:
+                    debug_msg += f" (using inline key content, {len(key_content)} bytes)"
+                else:
+                    debug_msg += " (no key provided - using default SSH identities)"
                 
-                msg = {'type': 'result', 'ip': ip, 'status': result['status'], 'message': result['message'], 'timestamp': timestamp}
+                msg = {'type': 'result', 'ip': ip, 'user': user, 'status': result['status'], 'message': debug_msg, 'command': result.get('command'), 'details': result.get('details'), 'returncode': result.get('returncode'), 'timestamp': timestamp}
                 yield "data: " + json.dumps(msg) + "\n\n"
             
             if ssh_key_path and os.path.exists(ssh_key_path):
@@ -4207,17 +4621,9 @@ def collect_info_stream(session_id):
             if ssh_key_id:
                 ssh_key = SSHKey.query.get(ssh_key_id)
                 if ssh_key:
-                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
-                    temp_file.write(ssh_key.key_content)
-                    temp_file.close()
-                    os.chmod(temp_file.name, 0o600)
-                    ssh_key_path = temp_file.name
+                    ssh_key_path = _write_temp_ssh_key_file(_sshkey_plaintext_from_model(ssh_key))
             elif key_content:
-                temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
-                temp_file.write(key_content)
-                temp_file.close()
-                os.chmod(temp_file.name, 0o600)
-                ssh_key_path = temp_file.name
+                ssh_key_path = _write_temp_ssh_key_file(key_content)
             
             results = []
             for i, ip in enumerate(ips):
@@ -4318,3 +4724,52 @@ if __name__ == '__main__':
     
     # Start Flask app
     app.run(host='0.0.0.0', port=5001, debug=False)
+
+
+@app.route('/ssh-keys/verify-integrity', methods=['GET'])
+def verify_ssh_keys_integrity():
+    """Verify integrity of all SSH keys by checking their checksums.
+    Returns status for each key: verified, corrupted, or unknown (no checksum).
+    """
+    try:
+        keys = SSHKey.query.all()
+        results = []
+        
+        for key in keys:
+            plaintext = _sshkey_plaintext_from_model(key)
+            
+            result = {
+                'key_id': key.id,
+                'key_name': key.key_name,
+                'is_encrypted': key.is_encrypted,
+                'has_checksum': bool(key.key_checksum),
+                'status': 'unknown',  # unknown, verified, corrupted
+                'decrypted_bytes': len(plaintext)
+            }
+            
+            if key.key_checksum and plaintext:
+                if verify_key_checksum(plaintext, key.key_checksum):
+                    result['status'] = 'verified'
+                else:
+                    result['status'] = 'corrupted'
+                    result['expected_checksum'] = key.key_checksum
+                    result['actual_checksum'] = compute_key_checksum(plaintext)
+            
+            results.append(result)
+        
+        # Summary
+        verified_count = sum(1 for r in results if r['status'] == 'verified')
+        corrupted_count = sum(1 for r in results if r['status'] == 'corrupted')
+        unknown_count = sum(1 for r in results if r['status'] == 'unknown')
+        
+        return jsonify({
+            'keys': results,
+            'summary': {
+                'total': len(results),
+                'verified': verified_count,
+                'corrupted': corrupted_count,
+                'unknown': unknown_count
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

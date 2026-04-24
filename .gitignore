@@ -29,3 +29,8 @@ instance/
 # Environment files
 .env
 .env.*
+
+# Local backups / scratch copies
+*.backup
+templates/*_old.html
+templates/*.backup

@@ -5,6 +5,271 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Log Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+// SSH Keys Management
+
+
+// --- GROUPS SETTINGS ---
+async function loadGroupsSettings() {
+    const list = document.getElementById('groups-list');
+    if (!list) return;
+    list.innerHTML = '<div class="text-xs termix-muted">Loading groups...</div>';
+
+    try {
+        const groups = await window.fetchApi('/groups');
+        if (!Array.isArray(groups) || !groups.length) {
+            list.innerHTML = '<div class="text-xs termix-muted">No groups yet.</div>';
+            return;
+        }
+
+        list.innerHTML = '';
+        for (const g of groups) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'p-3 rounded-lg bg-white/5 border border-white/10';
+            wrapper.innerHTML = `
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="font-medium text-white truncate">${g.name}</div>
+                        <div class="text-xs termix-muted mt-1">${(g.description || '').replace(/</g,'&lt;')}</div>
+                        <div class="text-xs termix-muted mt-2" id="group-hosts-${g.id}">Loading hosts...</div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button class="groups-edit-btn bg-white/10 hover:bg-white/20 text-white text-xs px-2 py-1 rounded" data-id="${g.id}" data-name="${g.name}" data-desc="${g.description || ''}">Edit</button>
+                        <button class="groups-del-btn bg-red-600/80 hover:bg-red-600 text-white text-xs px-2 py-1 rounded" data-id="${g.id}">Delete</button>
+                    </div>
+                </div>
+            `;
+            list.appendChild(wrapper);
+
+            // load hosts for the group
+            try {
+                const resp = await window.fetchApi(`/groups/${g.id}/hosts`);
+                const hostLine = document.getElementById(`group-hosts-${g.id}`);
+                const hosts = (resp && resp.hosts) ? resp.hosts : [];
+                if (hostLine) {
+                    hostLine.textContent = hosts.length ? `Hosts: ${hosts.map(h => h.friendly_name || h.hostname || h.ip_address).join(', ')}` : 'Hosts: (none)';
+                }
+            } catch (_) {
+                const hostLine = document.getElementById(`group-hosts-${g.id}`);
+                if (hostLine) hostLine.textContent = 'Hosts: (failed to load)';
+            }
+        }
+
+        // wire up edit/delete
+        list.querySelectorAll('.groups-del-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-id');
+                if (!confirm('Delete this group?')) return;
+                try {
+                    const res = await fetch(`/groups/${id}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Delete failed');
+                    window.showToast('Group deleted', 'success');
+                    loadGroupsSettings();
+                } catch (e) {
+                    window.showToast(e.message, 'error');
+                }
+            });
+        });
+
+        list.querySelectorAll('.groups-edit-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-id');
+                const curName = btn.getAttribute('data-name') || '';
+                const curDesc = btn.getAttribute('data-desc') || '';
+                const name = prompt('Group name:', curName);
+                if (name === null) return;
+                const desc = prompt('Description (optional):', curDesc);
+                if (desc === null) return;
+                try {
+                    const res = await fetch(`/groups/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, description: desc })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Update failed');
+                    window.showToast('Group updated', 'success');
+                    loadGroupsSettings();
+                } catch (e) {
+                    window.showToast(e.message, 'error');
+                }
+            });
+        });
+
+    } catch (e) {
+        list.innerHTML = `<div class="text-xs text-red-400">Failed to load groups: ${e.message}</div>`;
+    }
+}
+
+function wireGroupsSettingsUi() {
+    const createBtn = document.getElementById('groups-create-btn');
+    const refreshBtn = document.getElementById('groups-refresh-btn');
+    const status = document.getElementById('groups-create-status');
+
+    if (refreshBtn) refreshBtn.addEventListener('click', () => loadGroupsSettings());
+
+    if (createBtn) createBtn.addEventListener('click', async () => {
+        const nameEl = document.getElementById('groups-new-name');
+        const descEl = document.getElementById('groups-new-desc');
+        const name = (nameEl && nameEl.value || '').trim();
+        const description = (descEl && descEl.value || '').trim();
+
+        if (!name) {
+            if (status) status.textContent = 'Name is required.';
+            return;
+        }
+
+        if (status) status.textContent = 'Creating...';
+        try {
+            const res = await fetch('/groups', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, description })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Create failed');
+
+            if (nameEl) nameEl.value = '';
+            if (descEl) descEl.value = '';
+            if (status) status.textContent = '';
+            window.showToast('Group created', 'success');
+            loadGroupsSettings();
+        } catch (e) {
+            if (status) status.textContent = e.message;
+            window.showToast(e.message, 'error');
+        }
+    });
+}
+
+async function loadSshKeys() {
+    const listDiv = document.getElementById('ssh-keys-list');
+    if (!listDiv) return;
+    
+    try {
+        const response = await fetch('/ssh-keys');
+        const keys = await response.json();
+        
+        if (keys.length === 0) {
+            listDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">No SSH keys stored yet.</p>';
+            return;
+        }
+        
+        listDiv.innerHTML = keys.map(key => `
+            <div class="flex items-center justify-between p-3 rounded border border-white/10 bg-white/5 hover:bg-white/10 transition">
+                <div class="flex-1">
+                    <p class="font-medium text-white">${key.key_name}</p>
+                    <div class="flex gap-3 text-xs termix-muted mt-1">
+                        <span>Type: ${key.key_type}</span>
+                        <span>Encrypted: ${key.is_encrypted ? '✓' : '✗'}</span>
+                        <span>Created: ${new Date(key.created_at).toLocaleDateString()}</span>
+                    </div>
+                </div>
+                <button class="delete-ssh-key-btn bg-red-600 hover:bg-red-500 text-white px-3 py-1 text-xs rounded transition" data-key-id="${key.id}">Delete</button>
+            </div>
+        `).join('');
+        
+        // Add delete event listeners
+        listDiv.querySelectorAll('.delete-ssh-key-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const keyId = btn.dataset.keyId;
+                const keyName = btn.parentElement.querySelector('.font-medium').textContent;
+                
+                if (!confirm(`Delete SSH key "${keyName}"?`)) return;
+                
+                try {
+                    const delResp = await fetch(`/ssh-keys/${keyId}`, { method: 'DELETE' });
+                    const delData = await delResp.json();
+                    
+                    if (!delResp.ok) {
+                        // Check if key is in use
+                        if (delResp.status === 409) {
+                            window.showToast(`Cannot delete: ${delData.error}`, 'error');
+                        } else {
+                            window.showToast(`Error: ${delData.error}`, 'error');
+                        }
+                    } else {
+                        window.showToast(`Key "${keyName}" deleted`, 'success');
+                        loadSshKeys();
+                    }
+                } catch (err) {
+                    window.showToast(`Failed to delete key: ${err.message}`, 'error');
+                }
+            });
+        });
+    } catch (err) {
+        listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${err.message}</p>`;
+    }
+}
+
+// Setup SSH key form handlers
+document.addEventListener('DOMContentLoaded', () => {
+    const saveBtn = document.getElementById('save-new-ssh-key-btn');
+    const clearBtn = document.getElementById('clear-new-ssh-key-btn');
+    const nameInput = document.getElementById('new-key-name');
+    const contentInput = document.getElementById('new-key-content');
+    const statusDiv = document.getElementById('new-ssh-key-status');
+    
+    if (!saveBtn) return;
+    
+    const showStatus = (msg, type = 'info') => {
+        statusDiv.classList.remove('hidden', 'bg-red-500/20', 'border-red-500/30', 'text-red-300', 'bg-green-500/20', 'border-green-500/30', 'text-green-300');
+        if (type === 'error') {
+            statusDiv.classList.add('bg-red-500/20', 'border-red-500/30', 'text-red-300');
+        } else if (type === 'success') {
+            statusDiv.classList.add('bg-green-500/20', 'border-green-500/30', 'text-green-300');
+        } else {
+            statusDiv.classList.add('bg-blue-500/20', 'border-blue-500/30', 'text-blue-300');
+        }
+        statusDiv.textContent = msg;
+    };
+    
+    saveBtn.addEventListener('click', async () => {
+        const name = nameInput.value.trim();
+        const content = contentInput.value.trim();
+        
+        if (!name) {
+            showStatus('Please enter a key name', 'error');
+            return;
+        }
+        if (!content) {
+            showStatus('Please paste the key content', 'error');
+            return;
+        }
+        
+        showStatus('Saving key...', 'info');
+        
+        try {
+            const resp = await fetch('/ssh-keys/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key_name: name, key_content: content })
+            });
+            const data = await resp.json();
+            
+            if (!resp.ok) {
+                showStatus(`Error: ${data.error}`, 'error');
+            } else {
+                showStatus(`Key saved! (ID: ${data.id})`, 'success');
+                nameInput.value = '';
+                contentInput.value = '';
+                setTimeout(() => loadSshKeys(), 500);
+            }
+        } catch (err) {
+            showStatus(`Failed: ${err.message}`, 'error');
+        }
+    });
+    
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            nameInput.value = '';
+            contentInput.value = '';
+            statusDiv.classList.add('hidden');
+        });
+    }
+});
+
+</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -45,8 +310,266 @@
                 }
             }
         }
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    
+// SSH Keys Management
+async function loadSshKeys() {
+    const listDiv = document.getElementById('ssh-keys-list');
+    if (!listDiv) return;
+    
+    try {
+        const response = await fetch('/ssh-keys');
+        const keys = await response.json();
+        
+        if (keys.length === 0) {
+            listDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">No SSH keys stored yet.</p>';
+            return;
+        }
+        
+        listDiv.innerHTML = keys.map(key => `
+            <div class="flex items-center justify-between p-3 rounded border border-white/10 bg-white/5 hover:bg-white/10 transition">
+                <div class="flex-1">
+                    <p class="font-medium text-white">${key.key_name}</p>
+                    <div class="flex gap-3 text-xs termix-muted mt-1">
+                        <span>Type: ${key.key_type}</span>
+                        <span>Encrypted: ${key.is_encrypted ? '✓' : '✗'}</span>
+                        <span>Created: ${new Date(key.created_at).toLocaleDateString()}</span>
+                    </div>
+                </div>
+                <button class="delete-ssh-key-btn bg-red-600 hover:bg-red-500 text-white px-3 py-1 text-xs rounded transition" data-key-id="${key.id}">Delete</button>
+            </div>
+        `).join('');
+        
+        // Add delete event listeners
+        listDiv.querySelectorAll('.delete-ssh-key-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const keyId = btn.dataset.keyId;
+                const keyName = btn.parentElement.querySelector('.font-medium').textContent;
+                
+                if (!confirm(`Delete SSH key "${keyName}"?`)) return;
+                
+                try {
+                    const delResp = await fetch(`/ssh-keys/${keyId}`, { method: 'DELETE' });
+                    const delData = await delResp.json();
+                    
+                    if (!delResp.ok) {
+                        // Check if key is in use
+                        if (delResp.status === 409) {
+                            window.showToast(`Cannot delete: ${delData.error}`, 'error');
+                        } else {
+                            window.showToast(`Error: ${delData.error}`, 'error');
+                        }
+                    } else {
+                        window.showToast(`Key "${keyName}" deleted`, 'success');
+                        loadSshKeys();
+                    }
+                } catch (err) {
+                    window.showToast(`Failed to delete key: ${err.message}`, 'error');
+                }
+            });
+        });
+    } catch (err) {
+        listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${err.message}</p>`;
+    }
+}
+
+// Setup SSH key form handlers
+document.addEventListener('DOMContentLoaded', () => {
+    const saveBtn = document.getElementById('save-new-ssh-key-btn');
+    const clearBtn = document.getElementById('clear-new-ssh-key-btn');
+    const nameInput = document.getElementById('new-key-name');
+    const contentInput = document.getElementById('new-key-content');
+    const statusDiv = document.getElementById('new-ssh-key-status');
+    
+    if (!saveBtn) return;
+    
+    const showStatus = (msg, type = 'info') => {
+        statusDiv.classList.remove('hidden', 'bg-red-500/20', 'border-red-500/30', 'text-red-300', 'bg-green-500/20', 'border-green-500/30', 'text-green-300');
+        if (type === 'error') {
+            statusDiv.classList.add('bg-red-500/20', 'border-red-500/30', 'text-red-300');
+        } else if (type === 'success') {
+            statusDiv.classList.add('bg-green-500/20', 'border-green-500/30', 'text-green-300');
+        } else {
+            statusDiv.classList.add('bg-blue-500/20', 'border-blue-500/30', 'text-blue-300');
+        }
+        statusDiv.textContent = msg;
+    };
+    
+    saveBtn.addEventListener('click', async () => {
+        const name = nameInput.value.trim();
+        const content = contentInput.value.trim();
+        
+        if (!name) {
+            showStatus('Please enter a key name', 'error');
+            return;
+        }
+        if (!content) {
+            showStatus('Please paste the key content', 'error');
+            return;
+        }
+        
+        showStatus('Saving key...', 'info');
+        
+        try {
+            const resp = await fetch('/ssh-keys/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key_name: name, key_content: content })
+            });
+            const data = await resp.json();
+            
+            if (!resp.ok) {
+                showStatus(`Error: ${data.error}`, 'error');
+            } else {
+                showStatus(`Key saved! (ID: ${data.id})`, 'success');
+                nameInput.value = '';
+                contentInput.value = '';
+                setTimeout(() => loadSshKeys(), 500);
+            }
+        } catch (err) {
+            showStatus(`Failed: ${err.message}`, 'error');
+        }
+    });
+    
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            nameInput.value = '';
+            contentInput.value = '';
+            statusDiv.classList.add('hidden');
+        });
+    }
+});
+
+</script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js">
+// SSH Keys Management
+async function loadSshKeys() {
+    const listDiv = document.getElementById('ssh-keys-list');
+    if (!listDiv) return;
+    
+    try {
+        const response = await fetch('/ssh-keys');
+        const keys = await response.json();
+        
+        if (keys.length === 0) {
+            listDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">No SSH keys stored yet.</p>';
+            return;
+        }
+        
+        listDiv.innerHTML = keys.map(key => `
+            <div class="flex items-center justify-between p-3 rounded border border-white/10 bg-white/5 hover:bg-white/10 transition">
+                <div class="flex-1">
+                    <p class="font-medium text-white">${key.key_name}</p>
+                    <div class="flex gap-3 text-xs termix-muted mt-1">
+                        <span>Type: ${key.key_type}</span>
+                        <span>Encrypted: ${key.is_encrypted ? '✓' : '✗'}</span>
+                        <span>Created: ${new Date(key.created_at).toLocaleDateString()}</span>
+                    </div>
+                </div>
+                <button class="delete-ssh-key-btn bg-red-600 hover:bg-red-500 text-white px-3 py-1 text-xs rounded transition" data-key-id="${key.id}">Delete</button>
+            </div>
+        `).join('');
+        
+        // Add delete event listeners
+        listDiv.querySelectorAll('.delete-ssh-key-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const keyId = btn.dataset.keyId;
+                const keyName = btn.parentElement.querySelector('.font-medium').textContent;
+                
+                if (!confirm(`Delete SSH key "${keyName}"?`)) return;
+                
+                try {
+                    const delResp = await fetch(`/ssh-keys/${keyId}`, { method: 'DELETE' });
+                    const delData = await delResp.json();
+                    
+                    if (!delResp.ok) {
+                        // Check if key is in use
+                        if (delResp.status === 409) {
+                            window.showToast(`Cannot delete: ${delData.error}`, 'error');
+                        } else {
+                            window.showToast(`Error: ${delData.error}`, 'error');
+                        }
+                    } else {
+                        window.showToast(`Key "${keyName}" deleted`, 'success');
+                        loadSshKeys();
+                    }
+                } catch (err) {
+                    window.showToast(`Failed to delete key: ${err.message}`, 'error');
+                }
+            });
+        });
+    } catch (err) {
+        listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${err.message}</p>`;
+    }
+}
+
+// Setup SSH key form handlers
+document.addEventListener('DOMContentLoaded', () => {
+    const saveBtn = document.getElementById('save-new-ssh-key-btn');
+    const clearBtn = document.getElementById('clear-new-ssh-key-btn');
+    const nameInput = document.getElementById('new-key-name');
+    const contentInput = document.getElementById('new-key-content');
+    const statusDiv = document.getElementById('new-ssh-key-status');
+    
+    if (!saveBtn) return;
+    
+    const showStatus = (msg, type = 'info') => {
+        statusDiv.classList.remove('hidden', 'bg-red-500/20', 'border-red-500/30', 'text-red-300', 'bg-green-500/20', 'border-green-500/30', 'text-green-300');
+        if (type === 'error') {
+            statusDiv.classList.add('bg-red-500/20', 'border-red-500/30', 'text-red-300');
+        } else if (type === 'success') {
+            statusDiv.classList.add('bg-green-500/20', 'border-green-500/30', 'text-green-300');
+        } else {
+            statusDiv.classList.add('bg-blue-500/20', 'border-blue-500/30', 'text-blue-300');
+        }
+        statusDiv.textContent = msg;
+    };
+    
+    saveBtn.addEventListener('click', async () => {
+        const name = nameInput.value.trim();
+        const content = contentInput.value.trim();
+        
+        if (!name) {
+            showStatus('Please enter a key name', 'error');
+            return;
+        }
+        if (!content) {
+            showStatus('Please paste the key content', 'error');
+            return;
+        }
+        
+        showStatus('Saving key...', 'info');
+        
+        try {
+            const resp = await fetch('/ssh-keys/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key_name: name, key_content: content })
+            });
+            const data = await resp.json();
+            
+            if (!resp.ok) {
+                showStatus(`Error: ${data.error}`, 'error');
+            } else {
+                showStatus(`Key saved! (ID: ${data.id})`, 'success');
+                nameInput.value = '';
+                contentInput.value = '';
+                setTimeout(() => loadSshKeys(), 500);
+            }
+        } catch (err) {
+            showStatus(`Failed: ${err.message}`, 'error');
+        }
+    });
+    
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            nameInput.value = '';
+            contentInput.value = '';
+            statusDiv.classList.add('hidden');
+        });
+    }
+});
+
+</script>
 <style>
 /* Hosts sidebar collapse */
 #hosts-sidebar.collapsed { width: 4.5rem !important; padding-left: 0.5rem; padding-right: 0.5rem; }
@@ -56,8 +579,6 @@
 #hosts-sidebar.collapsed .host-card h3,
 #hosts-sidebar.collapsed .host-card p { display: none; }
 #hosts-sidebar.collapsed .host-card .connection-indicator { margin-left: 0.25rem; }
-#hosts-sidebar.collapsed .host-card .host-info-btn,
-#hosts-sidebar.collapsed .host-card .host-logs-btn { width: 2.25rem; height: 2.25rem; }
 </style>
 </head>
 <body class="termix-text font-sans antialiased min-h-screen">
@@ -265,13 +786,18 @@
                 <div class="flex items-center gap-3">
                     <button id="back-to-dashboard-btn" class="termix-btn" type="button">Back</button>
                     <div>
-                        <div class="termix-text font-semibold" id="logs-selected-host-title">Logs</div>
-                        <div class="termix-muted text-xs">Select a log to view content and optionally run AI analysis.</div>
+                        <div class="termix-text font-semibold" id="logs-selected-host-title">Select a host</div>
+                        <div class="termix-muted text-xs">Choose a host, review its info, then pull logs.</div>
                     </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="logs-action-pull" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8 8 0 104.582 9m0 0H9" /></svg><span>Pull Logs</span></button>
+                    <button id="logs-action-info" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" /></svg><span>Host Info</span></button>
+                    <button id="logs-action-monitor" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 13l3 3 7-7" /></svg><span>Monitoring</span></button>
                 </div>
             </div>
             <!-- Log Files List (Top 40%) -->
-            <div class="glass-container p-4 flex flex-col" style="height: 40%; min-height: 200px;">
+            <div id="logs-top-pane" class="glass-container p-4 flex flex-col" style="height: 40%; min-height: 200px;">
                 <div class="flex justify-between items-center mb-4">
                     <h2 id="log-table-title" class="text-lg font-semibold termix-text">Select a host to view logs</h2>
                     <div class="flex items-center space-x-2">
@@ -301,7 +827,7 @@
             </div>
             
             <!-- Log Content Area (Bottom 50%) -->
-            <div class="glass-container p-4 flex flex-col" style="height: 50%; min-height: 250px;">
+            <div id="logs-bottom-pane" class="glass-container p-4 flex flex-col" style="height: 50%; min-height: 250px;">
                 <div class="flex justify-between items-center mb-4">
                     <h2 id="log-content-title" class="text-lg font-semibold termix-text">Log Content</h2>
                     <div class="flex items-center space-x-3">
@@ -553,6 +1079,12 @@
 <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="backup-database">
                             <span class="text-sm font-medium text-gray-200">💾 Backup Database</span>
                         </button>
+                                                <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="groups">
+                            <span class="text-sm font-medium text-gray-200">🗂️ Groups</span>
+                        </button>
+<button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="ssh-keys">
+                            <span class="text-sm font-medium text-gray-200">🔑 SSH Keys</span>
+                        </button>
                     </nav>
                 </aside>
 
@@ -663,7 +1195,7 @@
                         <div>
                             <label for="discord-webhook-input" class="block text-sm font-medium termix-muted mb-1 flex items-center gap-2">Discord Webhook URL <span id="discord-webhook-status" class="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title="Discord webhook status"></span></label>
                             <div class="flex space-x-2">
-                                <input type="password" id="discord-webhook-input" class="flex-grow w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder-gray-500" placeholder="https://discord.com/api/webhooks/...">
+                                <input type="password" id="discord-webhook-input" class="flex-grow w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder-gray-500" placeholder="Discord webhook URL">
                                 <button id="toggle-discord-webhook-visibility" class="bg-white/5 hover:bg-white/10 text-white px-3 py-2 text-sm rounded-md font-medium transition-colors" type="button" title="Show/Hide">Show</button>
                                 <button id="test-discord-btn" class="button px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-wait">Test</button>
                             </div>
@@ -724,6 +1256,23 @@
                             <h4 class="font-semibold text-lg text-white">Delete Hosts</h4>
                                                     </div>
                         <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                    </section>
+
+
+                    <!-- SSH Key Encryption Section -->
+                    <section id="sshkey-encryption-section" class="settings-section space-y-4 hidden">
+                        <div>
+                            <h4 class="font-semibold text-lg text-white">SSH Key Encryption</h4>
+                            <p class="text-sm termix-muted">Stored SSH private keys are encrypted at rest. Set the master key via the <code>AILOG_SSHKEY_MASTER_KEY</code> environment variable.</p>
+                        </div>
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-2">
+                                <button id="sshkey-encryption-refresh" class="button px-4 py-2 text-sm" type="button">Refresh Status</button>
+                                <button id="sshkey-encryption-generate" class="button px-4 py-2 text-sm" type="button">Generate Master Key</button>
+                                <span id="sshkey-encryption-status" class="text-sm termix-muted"></span>
+                            </div>
+                            <pre id="sshkey-encryption-generated" class="text-xs termix-muted bg-white/5 border border-white/10 rounded-md p-3 overflow-auto" style="max-height: 140px;">(generated key will appear here)</pre>
+                        </div>
                     </section>
 
                     <!-- Suricata Data Section -->
@@ -877,6 +1426,70 @@
                         </div>
                     </section>
 
+                    <!-- SSH Keys Management Section -->
+                                        
+                    <!-- Groups Section -->
+                    <section id="groups-section" class="settings-section space-y-4 hidden">
+                        <h4 class="font-semibold text-lg text-white">Groups</h4>
+                        <p class="text-sm termix-muted">Create and manage groups, and see which hosts are assigned to each group.</p>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div class="termix-panel p-4 border border-white/10 rounded-lg">
+                                <h5 class="font-medium text-white mb-3">Create Group</h5>
+                                <div class="space-y-3">
+                                    <div>
+                                        <label class="block text-xs termix-muted mb-1">Name</label>
+                                        <input id="groups-new-name" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white" placeholder="e.g. Kubernetes" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs termix-muted mb-1">Description</label>
+                                        <input id="groups-new-desc" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white" placeholder="Optional" />
+                                    </div>
+                                    <button id="groups-create-btn" class="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">Create</button>
+                                    <p id="groups-create-status" class="text-xs termix-muted"></p>
+                                </div>
+                            </div>
+
+                            <div class="termix-panel p-4 border border-white/10 rounded-lg">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h5 class="font-medium text-white">Existing Groups</h5>
+                                    <button id="groups-refresh-btn" class="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-1.5 rounded-lg">Refresh</button>
+                                </div>
+                                <div id="groups-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                            </div>
+                        </div>
+                    </section>
+
+<section id="ssh-keys-section" class="settings-section space-y-4 hidden">
+                        <h4 class="font-semibold text-lg text-white">SSH Keys Management</h4>
+                        <p class="text-sm termix-muted">Manage encrypted SSH keys used for remote host connections. Keys are encrypted at rest.</p>
+                        
+                        <div class="border-t border-white/10 pt-4 space-y-3">
+                            <h5 class="font-medium text-white">Stored Keys</h5>
+                            <div id="ssh-keys-list" class="space-y-2 max-h-96 overflow-y-auto border border-white/10 rounded-lg p-3 bg-white/5">
+                                <p class="text-sm termix-muted text-center py-8">Loading keys...</p>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-white/10 pt-4 space-y-3">
+                            <h5 class="font-medium text-white">Add New Key</h5>
+                            <div class="space-y-3">
+                                <div>
+                                    <label for="new-key-name" class="block text-sm font-medium termix-muted mb-1">Key Name</label>
+                                    <input type="text" id="new-key-name" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder-gray-500" placeholder="e.g. homelab-key, production-key">
+                                </div>
+                                <div>
+                                    <label for="new-key-content" class="block text-sm font-medium termix-muted mb-1">Private Key Content</label>
+                                    <textarea id="new-key-content" rows="6" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-white placeholder-gray-500 font-mono text-xs" placeholder="Paste your SSH private key here (PEM format)"></textarea>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button id="save-new-ssh-key-btn" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors">Save Key</button>
+                                    <button id="clear-new-ssh-key-btn" class="bg-white/10 hover:bg-white/20 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors">Clear</button>
+                                </div>
+                                <div id="new-ssh-key-status" class="text-sm p-3 rounded-lg border border-white/10 bg-white/5 hidden"></div>
+                            </div>
+                        </div>
+                    </section>
 
                 </div>
             </div>
@@ -975,6 +1588,10 @@
         const logsView = document.getElementById('logs-view');
         const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
         const logsSelectedHostTitle = document.getElementById('logs-selected-host-title');
+        const logsActionPull = document.getElementById('logs-action-pull');
+        const logsActionInfo = document.getElementById('logs-action-info');
+        const logsActionMonitor = document.getElementById('logs-action-monitor');
+
         const dashboardSelectedHostEl = document.getElementById('dashboard-selected-host');
         const dashboardTotalHostsEl = document.getElementById('dashboard-total-hosts');
         const dashboardTotalSchedulesEl = document.getElementById('dashboard-total-schedules');
@@ -1138,6 +1755,11 @@
             if (dashboardView) dashboardView.classList.add('hidden');
             if (logsView) logsView.classList.remove('hidden');
         };
+
+
+        if (logsActionPull) logsActionPull.addEventListener('click', () => pullLogsForSelectedHost());
+        if (logsActionInfo) logsActionInfo.addEventListener('click', () => showHostInfoMain());
+        if (logsActionMonitor) logsActionMonitor.addEventListener('click', () => window.showToast('Monitoring view coming soon.', 'info'));
 
         const setStatusDot = (el, ok) => {
             if (!el) return;
@@ -1417,6 +2039,9 @@
             }
         };
         
+
+        // Expose a refresh hook for the Add Devices wizard to update the sidebar without a full page reload
+        window.refreshHostsSidebar = populateHostCards;
         const createHostCard = (hostId, hostData) => {
             const card = document.createElement('div');
             card.className = 'host-card termix-host';
@@ -1426,42 +2051,17 @@
                 <div class="flex items-center justify-between">
                     <div class="flex-1">
                         <h3 class="font-bold termix-text">${hostData.friendly_name}</h3>
-                        <p class="text-sm termix-muted">${hostData.description || 'No description'}</p>
+                        <p class="text-sm termix-muted">Group: ${(hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none'}</p>
                         <p class="text-xs termix-muted font-mono">${hostData.user}@${hostData.ip}</p>
                     </div>
                     <div class="flex items-center space-x-3">
-                        <button class="host-info-btn w-8 h-8 rounded-full bg-blue-50 hover:bg-blue-100 flex items-center justify-center text-blue-600" title="View host info" data-host-id="${hostId}">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"></path>
-                            </svg>
-                        </button>
-                        <button class="host-logs-btn w-8 h-8 rounded-full bg-white/5 hover:termix-panel flex items-center justify-center termix-muted" title="View logs" data-host-id="${hostId}">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6M5 7h14M5 5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2H5z"></path>
-                            </svg>
-                        </button>
                         <div class="connection-indicator w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
                     </div>
                 </div>
             `;
 
-            // Clicking anywhere on the card (except buttons) selects host and shows logs
-            card.addEventListener('click', (e) => {
-                if ((e.target.closest('.host-info-btn')) || (e.target.closest('.host-logs-btn'))) {
-                    return;
-                }
-                selectHost(hostId);
-            });
-
-            // Info button: show host info card
-            card.querySelector('.host-info-btn').addEventListener('click', (e) => {
-                e.stopPropagation();
-                showHostInfo(hostId, hostData);
-            });
-
-            // Logs button: select host and fetch logs
-            card.querySelector('.host-logs-btn').addEventListener('click', (e) => {
-                e.stopPropagation();
+            // Clicking the card selects a host but does NOT automatically pull logs
+            card.addEventListener('click', () => {
                 selectHost(hostId);
             });
 
@@ -1476,7 +2076,7 @@
 
             const overlay = document.createElement('div');
             overlay.id = 'host-info-overlay';
-            overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-40';
+            overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[9999]';
 
             const card = document.createElement('div');
             card.className = 'termix-panel max-w-xl w-full p-6 relative border border-white/10';
@@ -1630,9 +2230,9 @@
             // Switch into logs view
             showLogs();
             const hostName = hostId === 'local' ? 'Localhost' : (hosts[hostId]?.friendly_name || hostId);
-            if (logsSelectedHostTitle) logsSelectedHostTitle.textContent = `Logs: ${hostName}`;
+            if (logsSelectedHostTitle) logsSelectedHostTitle.textContent = `Host: ${hostName}`;
             if (dashboardSelectedHostEl) dashboardSelectedHostEl.textContent = hostName;
-            
+
             // Update card selection visuals
             hostListContainer.querySelectorAll('.host-card').forEach(card => {
                 if (card.dataset.hostId === hostId) {
@@ -1643,10 +2243,198 @@
                     card.classList.remove('termix-host-selected');
                 }
             });
-            
-            // Fetch logs for selected host
+
+            // Default view: show host info in the main panel
+            showHostInfoMain();
+        };
+
+
+        const showHostInfoMain = async () => {
+            const hostId = selectedHostId;
+            const hostName = hostId === 'local' ? 'Localhost' : (hosts[hostId]?.friendly_name || hostId);
+            const topPane = document.getElementById('logs-top-pane');
+            const bottomPane = document.getElementById('logs-bottom-pane');
+            const logTableTitle = document.getElementById('log-table-title');
+            const container = document.getElementById('log-table-container');
+            const logContent = document.getElementById('log-content-container');
+
+            // Full-pane host info mode
+            if (topPane) { topPane.style.height = 'calc(100% - 0px)'; }
+            if (bottomPane) { bottomPane.classList.add('hidden'); }
+            if (logTableTitle) logTableTitle.textContent = `Host information: ${hostName}`;
+            if (container) container.innerHTML = '<div class="text-sm termix-muted">Loading host info...</div>';
+            if (logContent) {
+                logContent.innerHTML = '<div class="text-center termix-muted mt-16"><p class="text-lg">Select a log file to view its content</p></div>';
+            }
+
+            // Localhost or config-based hosts: only basic info
+            const hostData = (hostId === 'local') ? { friendly_name: 'Localhost', ip: 'localhost', user: 'local' } : (hosts[hostId] || { ip: hostId, user: 'root' });
+            if (hostId === 'local' || !String(hostId).startsWith('db-')) {
+                const groups = (hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none';
+                if (container) {
+                    container.innerHTML = `
+                        <div class="termix-panel p-4 rounded-lg border border-white/10">
+                            <div class="termix-text font-semibold text-lg">${hostData.friendly_name || hostName}</div>
+                            <div class="text-sm termix-muted mt-1">Group: ${groups}</div>
+                            <div class="text-xs termix-muted font-mono mt-3">${hostData.user || 'root'}@${hostData.ip || hostId}</div>
+                            <div class="text-xs termix-muted mt-3">Detailed system info is available for wizard-onboarded (db-*) hosts.</div>
+                        </div>
+                    `;
+                }
+                return;
+            }
+
+            try {
+                const dbId = parseInt(String(hostId).split('-')[1], 10);
+                const resp = await fetch(`/hosts/db/${dbId}/info`);
+                const info = await resp.json();
+                if (!resp.ok || info.error) throw new Error(info.error || `Failed to load host info (${resp.status})`);
+
+                const si = info.system_info || {};
+                const svc = info.services_summary || { total: 0, running: 0, stopped: 0 };
+                const groups = (hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none';
+                const fmtBytes = (v) => {
+                    if (v === null || v === undefined) return 'N/A';
+                    const gb = v / (1024 ** 3);
+                    return `${gb.toFixed(1)} GB`;
+                };
+
+                const pct = (used, total) => {
+                    if (used === null || used === undefined) return 0;
+                    if (!total) return 0;
+                    const v = Math.round((used / total) * 100);
+                    return Math.max(0, Math.min(100, v));
+                };
+                const ramPct = pct(si.ram_used, si.ram_total);
+                const diskPct = pct(si.disk_used, si.disk_total);
+                const osLower = String(si.os_version || '').toLowerCase();
+                const osLabel = osLower.includes('ubuntu') ? 'Ubuntu' : osLower.includes('debian') ? 'Debian' : osLower.includes('arch') ? 'Arch' : osLower.includes('centos') ? 'CentOS' : osLower.includes('red hat') || osLower.includes('rhel') ? 'RHEL' : osLower.includes('fedora') ? 'Fedora' : osLower.includes('linux') ? 'Linux' : 'Unknown';
+                const osColor = osLabel === 'Ubuntu' ? 'bg-orange-500/20 text-orange-200 border-orange-500/30'
+                    : osLabel === 'Debian' ? 'bg-red-500/20 text-red-200 border-red-500/30'
+                    : osLabel === 'Arch' ? 'bg-sky-500/20 text-sky-200 border-sky-500/30'
+                    : 'bg-white/5 text-gray-200 border-white/10';
+
+                const avatarLetter = String(info.friendly_name || hostName || '?').trim().charAt(0).toUpperCase();
+
+                if (container) {
+                    container.innerHTML = `
+                        <div class="termix-panel p-4 rounded-lg border border-white/10 space-y-4">
+                            <div class="relative overflow-hidden rounded-lg border border-white/10 bg-gradient-to-br from-purple-700/20 via-white/5 to-green-600/20 p-4">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-xl font-bold termix-text">
+                                        ${avatarLetter}
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <div class="termix-text font-semibold text-lg truncate">${info.friendly_name || hostName}</div>
+                                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border ${osColor}">${osLabel}</span>
+                                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border bg-white/5 text-gray-200 border-white/10">Group: ${groups}</span>
+                                        </div>
+                                        <div class="text-xs termix-muted font-mono mt-2">${(info.ssh_user || hostData.user || 'root')}@${(info.ip_address || hostData.ip || hostId)}</div>
+                                        <div class="text-xs termix-muted mt-1">Hostname: ${si.hostname || 'N/A'} • Last update: ${si.last_update || 'N/A'}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                                <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                                    <div class="flex items-center justify-between">
+                                        <div class="text-xs font-semibold termix-muted">RAM</div>
+                                        <div class="text-xs termix-muted">${ramPct}%</div>
+                                    </div>
+                                    <div class="w-full bg-white/10 rounded-full h-2 mt-2">
+                                        <div class="bg-purple-700 h-2 rounded-full" style="width: ${ramPct}%"></div>
+                                    </div>
+                                    <div class="text-xs termix-text mt-2">${fmtBytes(si.ram_used)} used / ${fmtBytes(si.ram_total)} total</div>
+                                </div>
+
+                                <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                                    <div class="flex items-center justify-between">
+                                        <div class="text-xs font-semibold termix-muted">Disk</div>
+                                        <div class="text-xs termix-muted">${diskPct}%</div>
+                                    </div>
+                                    <div class="w-full bg-white/10 rounded-full h-2 mt-2">
+                                        <div class="bg-green-600 h-2 rounded-full" style="width: ${diskPct}%"></div>
+                                    </div>
+                                    <div class="text-xs termix-text mt-2">${fmtBytes(si.disk_used)} used / ${fmtBytes(si.disk_total)} total</div>
+                                </div>
+
+                                <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                                    <div class="text-xs font-semibold termix-muted">CPU</div>
+                                    <div class="text-xs termix-text mt-2 break-all">${si.cpu_type || 'Unknown'}</div>
+                                    <div class="text-xs termix-muted mt-1">Cores: ${si.cpu_cores || 'N/A'}</div>
+                                </div>
+                            </div>
+
+                            <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                                <div class="flex items-center justify-between">
+                                    <div class="text-xs font-semibold termix-muted">Services</div>
+                                    <div class="text-xs termix-muted">Total: ${svc.total || 0}</div>
+                                </div>
+                                <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div class="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
+                                        <div class="flex items-center justify-between">
+                                            <div class="text-xs font-semibold text-green-200">Running</div>
+                                            <div class="text-xs text-green-200">${svc.running || 0}</div>
+                                        </div>
+                                        <div class="mt-2 max-h-40 overflow-auto space-y-1">
+                                            ${(Array.isArray(info.services) ? info.services.filter(s => (s.status === 'active') || s.is_running) : []).slice(0, 200).map(s => `<div class=\"text-xs font-mono text-green-100/90\">• ${s.service_name || '(unknown)'}${s.status ? ` <span class=\"termix-muted\">(${s.status})</span>` : ''}</div>`).join('') || '<div class="text-xs termix-muted">(none)</div>'}
+                                        </div>
+                                    </div>
+                                    <div class="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
+                                        <div class="flex items-center justify-between">
+                                            <div class="text-xs font-semibold text-red-200">Stopped</div>
+                                            <div class="text-xs text-red-200">${svc.stopped || 0}</div>
+                                        </div>
+                                        <div class="mt-2 max-h-40 overflow-auto space-y-1">
+                                            ${(Array.isArray(info.services) ? info.services.filter(s => !((s.status === 'active') || s.is_running)) : []).slice(0, 200).map(s => `<div class=\"text-xs font-mono text-red-100/90\">• ${s.service_name || '(unknown)'}${s.status ? ` <span class=\"termix-muted\">(${s.status})</span>` : ''}</div>`).join('') || '<div class="text-xs termix-muted">(none)</div>'}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-2">
+                                <button id="host-info-main-rescan" class="bg-amber-500 hover:bg-amber-400 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors" type="button">Rescan</button>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                const rescanBtn = document.getElementById('host-info-main-rescan');
+                if (rescanBtn) {
+                    rescanBtn.addEventListener('click', async () => {
+                        rescanBtn.disabled = true;
+                        const old = rescanBtn.textContent;
+                        rescanBtn.textContent = 'Rescanning...';
+                        try {
+                            const r = await fetch(`/hosts/db/${dbId}/rescan`, { method: 'POST' });
+                            const data = await r.json();
+                            if (!r.ok || data.error) throw new Error(data.error || `Rescan failed (${r.status})`);
+                            if (typeof window.showToast === 'function') window.showToast('Rescan complete.', 'success');
+                            await showHostInfoMain();
+                        } catch (e) {
+                            if (typeof window.showToast === 'function') window.showToast(e.message, 'error');
+                        } finally {
+                            rescanBtn.disabled = false;
+                            rescanBtn.textContent = old;
+                        }
+                    });
+                }
+
+            } catch (e) {
+                if (container) container.innerHTML = `<div class="text-sm text-red-400">Failed to load host info: ${e.message}</div>`;
+            }
+        };
+
+        const pullLogsForSelectedHost = () => {
+            if (!selectedHostId) return;
+            const topPane = document.getElementById('logs-top-pane');
+            const bottomPane = document.getElementById('logs-bottom-pane');
+            if (topPane) topPane.style.height = '40%';
+            if (bottomPane) bottomPane.classList.remove('hidden');
             fetchSourcesForHost();
         };
+
 
         // --- CORE APP LOGIC ---
         const fetchSourcesForHost = () => {
@@ -2309,6 +3097,9 @@
             if (sectionId === 'prompts') {
                 loadAiSearchSettings();
             }
+            if (sectionId === 'groups') {
+                loadGroupsSettings();
+            }
             if (sectionId === 'suricata') {
                 loadSuricataConfigIntoForm();
                 loadSuricataPromptSettings();
@@ -2350,6 +3141,8 @@
              loadCurrentProviderConfig();
              loadSettingsFromBackend();
              loadAiSearchSettings();
+             loadSshKeys();
+             wireGroupsSettingsUi();
              // Ensure AI Provider section is shown by default
              switchSettingsSection('ai-provider');
         });
@@ -2504,6 +3297,50 @@
                 }
             });
         }
+
+
+        // SSH key encryption status
+        const sshEncStatus = document.getElementById('sshkey-encryption-status');
+        const sshEncGenOut = document.getElementById('sshkey-encryption-generated');
+        const sshEncRefreshBtn = document.getElementById('sshkey-encryption-refresh');
+        const sshEncGenBtn = document.getElementById('sshkey-encryption-generate');
+
+        async function refreshSshEncStatus() {
+            try {
+                const data = await window.fetchApi('/settings/sshkey-encryption/status');
+                if (sshEncStatus) {
+                    sshEncStatus.textContent = data.configured ? 'Configured ✅' : 'Not configured (set AILOG_SSHKEY_MASTER_KEY)';
+                    sshEncStatus.className = data.configured ? 'text-sm text-green-400' : 'text-sm text-red-400';
+                }
+            } catch (e) {
+                if (sshEncStatus) {
+                    sshEncStatus.textContent = 'Failed to load status';
+                    sshEncStatus.className = 'text-sm text-red-400';
+                }
+            }
+        }
+
+        if (sshEncRefreshBtn) sshEncRefreshBtn.addEventListener('click', refreshSshEncStatus);
+
+        if (sshEncGenBtn) {
+            sshEncGenBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await fetch('/settings/sshkey-encryption/generate', { method: 'POST' });
+                    const data = await resp.json().catch(() => ({}));
+                    if (!resp.ok || data.error) throw new Error(data.error || `Generate failed (${resp.status})`);
+                    if (sshEncGenOut) {
+                        sshEncGenOut.textContent = `export ${data.env_var}='${data.master_key}'
+# Then restart the ailog service`;
+                    }
+                    await refreshSshEncStatus();
+                } catch (e) {
+                    if (sshEncGenOut) sshEncGenOut.textContent = e.message;
+                }
+            });
+        }
+
+        // best-effort refresh once on load
+        refreshSshEncStatus();
 
         if (closeSettingsBtn) {
             closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
@@ -4572,7 +5409,154 @@ async function analyseSuricataRaw2() {
         apply(next);
     });
 })();
+
+// SSH Keys Management
+async function loadSshKeys() {
+    const listDiv = document.getElementById('ssh-keys-list');
+    if (!listDiv) return;
+    
+    try {
+        const response = await fetch('/ssh-keys');
+        const keys = await response.json();
+        
+        if (keys.length === 0) {
+            listDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">No SSH keys stored yet.</p>';
+            return;
+        }
+        
+        listDiv.innerHTML = keys.map(key => `
+            <div class="flex items-center justify-between p-3 rounded border border-white/10 bg-white/5 hover:bg-white/10 transition">
+                <div class="flex-1">
+                    <p class="font-medium text-white">${key.key_name}</p>
+                    <div class="flex gap-3 text-xs termix-muted mt-1">
+                        <span>Type: ${key.key_type}</span>
+                        <span>Encrypted: ${key.is_encrypted ? '✓' : '✗'}</span>
+                        <span>Created: ${new Date(key.created_at).toLocaleDateString()}</span>
+                    </div>
+                </div>
+                <button class="delete-ssh-key-btn bg-red-600 hover:bg-red-500 text-white px-3 py-1 text-xs rounded transition" data-key-id="${key.id}">Delete</button>
+            </div>
+        `).join('');
+        
+        // Add delete event listeners
+        listDiv.querySelectorAll('.delete-ssh-key-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const keyId = btn.dataset.keyId;
+                const keyName = btn.parentElement.querySelector('.font-medium').textContent;
+                
+                if (!confirm(`Delete SSH key "${keyName}"?`)) return;
+                
+                try {
+                    const delResp = await fetch(`/ssh-keys/${keyId}`, { method: 'DELETE' });
+                    const delData = await delResp.json();
+                    
+                    if (!delResp.ok) {
+                        // Check if key is in use
+                        if (delResp.status === 409) {
+                            window.showToast(`Cannot delete: ${delData.error}`, 'error');
+                        } else {
+                            window.showToast(`Error: ${delData.error}`, 'error');
+                        }
+                    } else {
+                        window.showToast(`Key "${keyName}" deleted`, 'success');
+                        loadSshKeys();
+                    }
+                } catch (err) {
+                    window.showToast(`Failed to delete key: ${err.message}`, 'error');
+                }
+            });
+        });
+    } catch (err) {
+        listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${err.message}</p>`;
+    }
+}
+
+// Setup SSH key form handlers
+document.addEventListener('DOMContentLoaded', () => {
+    const saveBtn = document.getElementById('save-new-ssh-key-btn');
+    const clearBtn = document.getElementById('clear-new-ssh-key-btn');
+    const nameInput = document.getElementById('new-key-name');
+    const contentInput = document.getElementById('new-key-content');
+    const statusDiv = document.getElementById('new-ssh-key-status');
+    
+    if (!saveBtn) return;
+    
+    const showStatus = (msg, type = 'info') => {
+        statusDiv.classList.remove('hidden', 'bg-red-500/20', 'border-red-500/30', 'text-red-300', 'bg-green-500/20', 'border-green-500/30', 'text-green-300');
+        if (type === 'error') {
+            statusDiv.classList.add('bg-red-500/20', 'border-red-500/30', 'text-red-300');
+        } else if (type === 'success') {
+            statusDiv.classList.add('bg-green-500/20', 'border-green-500/30', 'text-green-300');
+        } else {
+            statusDiv.classList.add('bg-blue-500/20', 'border-blue-500/30', 'text-blue-300');
+        }
+        statusDiv.textContent = msg;
+    };
+    
+    saveBtn.addEventListener('click', async () => {
+        const name = nameInput.value.trim();
+        const content = contentInput.value.trim();
+        
+        if (!name) {
+            showStatus('Please enter a key name', 'error');
+            return;
+        }
+        if (!content) {
+            showStatus('Please paste the key content', 'error');
+            return;
+        }
+        
+        showStatus('Saving key...', 'info');
+        
+        try {
+            const resp = await fetch('/ssh-keys/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key_name: name, key_content: content })
+            });
+            const data = await resp.json();
+            
+            if (!resp.ok) {
+                showStatus(`Error: ${data.error}`, 'error');
+            } else {
+                showStatus(`Key saved! (ID: ${data.id})`, 'success');
+                nameInput.value = '';
+                contentInput.value = '';
+                setTimeout(() => loadSshKeys(), 500);
+            }
+        } catch (err) {
+            showStatus(`Failed: ${err.message}`, 'error');
+        }
+    });
+    
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            nameInput.value = '';
+            contentInput.value = '';
+            statusDiv.classList.add('hidden');
+        });
+    }
+});
+
 </script>
     {% include "wizard.html" %}
+    <script>
+    // Fallback: if wizard script fails to parse, at least open the modal and log an error.
+    window.__AILOG_WIZARD_FALLBACK__ = true;
+    if (typeof window.openWizard !== 'function') {
+        window.openWizard = function () {
+            console.error('[wizard] openWizard not defined (wizard script failed to load).');
+            const modal = document.getElementById('wizardModal');
+            if (modal) modal.classList.remove('hidden');
+        };
+    }
+    if (typeof window.closeWizard !== 'function') {
+        window.closeWizard = function () {
+            const modal = document.getElementById('wizardModal');
+            if (modal) modal.classList.add('hidden');
+        };
+    }
+    </script>
+
 </body>
 </html>
