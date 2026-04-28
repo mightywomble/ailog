@@ -166,6 +166,9 @@ class SSHKey(db.Model):
     key_name = db.Column(db.String(255), nullable=False, unique=True)
     key_type = db.Column(db.String(50), nullable=False)  # 'file' or 'pasted'
     key_content = db.Column(db.Text, nullable=False)
+    key_checksum = db.Column(db.String(64), nullable=True)  # SHA256 hex checksum
+    is_encrypted = db.Column(db.Boolean, default=True)  # Whether key_content is encrypted
+    enc_version = db.Column(db.String(50), nullable=True)  # Encryption version identifier
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     def to_dict(self):

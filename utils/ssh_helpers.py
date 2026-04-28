@@ -1,6 +1,6 @@
 """SSH connection and system information helpers."""
 import logging
-from wizard_helpers import test_ssh_connection as _test_ssh, get_system_info as _get_sys_info, collect_host_info as _collect_host
+from wizard_helpers import test_ssh_connection as _test_ssh, collect_system_info as _get_sys_info
 
 logger = logging.getLogger(__name__)
 

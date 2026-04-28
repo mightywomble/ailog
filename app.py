@@ -26,10 +26,10 @@ from wizard_helpers import test_ssh_connection, collect_system_info, collect_ser
 from utils.sshkey_crypto import encrypt_str, decrypt_str, is_configured as sshkey_crypto_configured, generate_master_key, SSHKeyCryptoError, compute_key_checksum, verify_key_checksum, normalize_ssh_key_text
 
 # --- INITIALIZATION ---
-app = Flask(__name__)
+app = Flask(__name__, instance_path=None)
 
 # --- DATABASE CONFIGURATION ---
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///ailog.db')
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
@@ -529,7 +529,19 @@ def execute_command(hostname, command_str, timeout=10):
     cmd_list = ssh_prefix_args + [command_str] if ssh_prefix_args else [command_str]
     # Use shell=False for remote commands for security, shell=True for local for simplicity with sudo
     shell_mode = not bool(ssh_prefix_args)
-    return subprocess.run(cmd_list, shell=shell_mode, capture_output=True, text=True, check=True, timeout=timeout)
+    print(f"[DEBUG] Executing command: {cmd_list}")
+    try:
+        result = subprocess.run(cmd_list, shell=shell_mode, capture_output=True, text=True, check=True, timeout=timeout)
+        return result
+    except subprocess.CalledProcessError as e:
+        # Ensure we log and propagate stderr/stdout for actionable SSH failures (e.g. Permission denied).
+        stderr = (e.stderr or '').strip()
+        stdout = (e.stdout or '').strip()
+        print(f"[DEBUG] SSH command failed with return code {e.returncode}", flush=True)
+        print(f"[DEBUG] STDERR: {stderr[:2000]}", flush=True)
+        print(f"[DEBUG] STDOUT: {stdout[:2000]}", flush=True)
+        # Raise an error that includes stderr so the UI can surface the real SSH reason.
+        raise RuntimeError(f"SSH command failed (rc={e.returncode}): {stderr or '<no stderr>'}")
 
 def get_log_sources_from_host_stream(hostname='local'):
     def generate_event(data):
@@ -2427,12 +2439,41 @@ def _write_temp_ssh_key_file(plaintext: str) -> str:
 
 
 def _sshkey_plaintext_from_model(key: SSHKey) -> str:
-    """Return decrypted plaintext for a stored SSHKey row."""
+    """Return decrypted plaintext for a stored SSHKey row.
+
+    Historical note: some rows ended up being encrypted multiple times due to earlier
+    bugs/migrations. We attempt to decrypt repeatedly until the result resembles an
+    SSH private key.
+    """
     if not key:
         return ''
-    if getattr(key, 'is_encrypted', False):
-        return decrypt_str(key.key_content or '')
-    return key.key_content or ''
+
+    content = key.key_content or ''
+    if not getattr(key, 'is_encrypted', False):
+        return content
+
+    # Decrypt up to N layers. Stop once it looks like a private key.
+    max_layers = 6
+    for layer in range(1, max_layers + 1):
+        try:
+            content = decrypt_str(content)
+        except Exception as e:
+            print(f"[DEBUG] SSH key decrypt failed at layer {layer}: {e}", flush=True)
+            break
+
+        # If we got something that looks like a private key, stop.
+        if 'BEGIN' in content and 'PRIVATE KEY' in content and 'END' in content:
+            break
+
+        # If it still looks like an encoded blob (single-line token), keep going.
+        # (Fernet tokens / our stored format often look like long base64-url strings.)
+        if '\n' not in content and len(content) > 200 and re.fullmatch(r'[A-Za-z0-9_\-]+=*', content.strip()):
+            continue
+
+        # Otherwise: stop; we don't want to accidentally mangle non-token plaintext.
+        break
+
+    return content or ''
 
 
 def _materialize_ssh_key_path(ssh_key_id: int | None) -> str | None:
@@ -2446,7 +2487,9 @@ def _materialize_ssh_key_path(ssh_key_id: int | None) -> str | None:
     if not key:
         print(f"[DEBUG] SSH key {ssh_key_id} not found in database")
         return None
+    print(f"[DEBUG] SSH key {ssh_key_id} found: is_encrypted={getattr(key, 'is_encrypted', 'MISSING')}")
     content = _sshkey_plaintext_from_model(key)
+    print(f"[DEBUG] Key content length after decryption: {len(content) if content else 0} bytes")
     if not content:
         print(f"[DEBUG] SSH key {ssh_key_id} decrypted to empty content")
         return None
@@ -3741,23 +3784,12 @@ def rescan_host(host_id):
         user = host.ssh_user
         ip = host.ip_address
 
-        ssh_key_path = None
-        if host.ssh_key and host.ssh_key.key_content:
-            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
-            temp_file.write(host.ssh_key.key_content)
-            temp_file.close()
-            os.chmod(temp_file.name, 0o600)
-            ssh_key_path = temp_file.name
+        # IMPORTANT: ssh_keys.key_content is stored encrypted. Use the materializer which decrypts
+        # and writes a proper private key file.
+        ssh_key_path = _materialize_ssh_key_path(host.ssh_key_id)
 
-        try:
-            sys_info = collect_system_info(user, ip, ssh_key_path)
-            services = collect_services(user, ip, ssh_key_path)
-        finally:
-            if ssh_key_path and os.path.exists(ssh_key_path):
-                try:
-                    os.unlink(ssh_key_path)
-                except Exception:
-                    pass
+        sys_info = collect_system_info(user, ip, ssh_key_path)
+        services = collect_services(user, ip, ssh_key_path)
 
         # Update host status
         host.status = 'online'
@@ -3839,16 +3871,11 @@ def rescan_all_hosts():
         for host in hosts:
             user = host.ssh_user
             ip = host.ip_address
-            ssh_key_path = None
+            # IMPORTANT: ssh_keys.key_content is stored encrypted. Use the materializer which decrypts
+            # and writes a proper private key file.
+            ssh_key_path = _materialize_ssh_key_path(host.ssh_key_id)
 
             try:
-                if host.ssh_key and host.ssh_key.key_content:
-                    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
-                    temp_file.write(host.ssh_key.key_content)
-                    temp_file.close()
-                    os.chmod(temp_file.name, 0o600)
-                    ssh_key_path = temp_file.name
-
                 sys_info = collect_system_info(user, ip, ssh_key_path)
                 services = collect_services(user, ip, ssh_key_path)
 
@@ -3917,12 +3944,7 @@ def rescan_all_hosts():
                     'status': 'error',
                     'error': str(e)
                 })
-            finally:
-                if ssh_key_path and os.path.exists(ssh_key_path):
-                    try:
-                        os.unlink(ssh_key_path)
-                    except Exception:
-                        pass
+            # Note: _materialize_ssh_key_path manages temp files and caching; nothing to clean up here.
 
         db.session.commit()
         return jsonify({

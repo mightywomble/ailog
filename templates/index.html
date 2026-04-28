@@ -148,7 +148,18 @@ async function loadSshKeys() {
     
     try {
         const response = await fetch('/ssh-keys');
-        const keys = await response.json();
+        let keys = await response.json();
+        
+        // Handle error responses
+        if (!response.ok || (keys && keys.error)) {
+            listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${keys?.error || response.statusText}</p>`;
+            return;
+        }
+        
+        // Ensure keys is an array
+        if (!Array.isArray(keys)) {
+            keys = [];
+        }
         
         if (keys.length === 0) {
             listDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">No SSH keys stored yet.</p>';
@@ -318,7 +329,18 @@ async function loadSshKeys() {
     
     try {
         const response = await fetch('/ssh-keys');
-        const keys = await response.json();
+        let keys = await response.json();
+        
+        // Handle error responses
+        if (!response.ok || (keys && keys.error)) {
+            listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${keys?.error || response.statusText}</p>`;
+            return;
+        }
+        
+        // Ensure keys is an array
+        if (!Array.isArray(keys)) {
+            keys = [];
+        }
         
         if (keys.length === 0) {
             listDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">No SSH keys stored yet.</p>';
@@ -448,7 +470,18 @@ async function loadSshKeys() {
     
     try {
         const response = await fetch('/ssh-keys');
-        const keys = await response.json();
+        let keys = await response.json();
+        
+        // Handle error responses
+        if (!response.ok || (keys && keys.error)) {
+            listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${keys?.error || response.statusText}</p>`;
+            return;
+        }
+        
+        // Ensure keys is an array
+        if (!Array.isArray(keys)) {
+            keys = [];
+        }
         
         if (keys.length === 0) {
             listDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">No SSH keys stored yet.</p>';
@@ -5417,7 +5450,18 @@ async function loadSshKeys() {
     
     try {
         const response = await fetch('/ssh-keys');
-        const keys = await response.json();
+        let keys = await response.json();
+        
+        // Handle error responses
+        if (!response.ok || (keys && keys.error)) {
+            listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${keys?.error || response.statusText}</p>`;
+            return;
+        }
+        
+        // Ensure keys is an array
+        if (!Array.isArray(keys)) {
+            keys = [];
+        }
         
         if (keys.length === 0) {
             listDiv.innerHTML = '<p class="text-sm termix-muted text-center py-8">No SSH keys stored yet.</p>';
