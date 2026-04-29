@@ -2436,7 +2436,7 @@ document.addEventListener('DOMContentLoaded', () => {
                           </div>
                         </div>
                         <div class="flex items-center gap-2">
-                          <a class="bg-sky-600 hover:bg-sky-700 text-white text-sm px-3 py-2 rounded-lg" href="/monitoring/wizard?host_id=${dbId}">Monitoring Wizard</a>
+                          <button class="bg-sky-600 hover:bg-sky-700 text-white text-sm px-3 py-2 rounded-lg" type="button" onclick="window.openMonitoringWizard(${dbId})">Monitoring Wizard</button>
                         </div>
                       </div>
                     </div>
@@ -5946,6 +5946,50 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
     {% include "wizard.html" %}
     <script>
+    window.openMonitoringWizard = function (hostDbId) {
+        const modal = document.getElementById('monitoringWizardModal');
+        const frame = document.getElementById('monitoringWizardFrame');
+        if (!modal || !frame) return;
+        const qs = hostDbId ? `?host_id=${encodeURIComponent(hostDbId)}` : '';
+        frame.src = `/monitoring/wizard${qs}`;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    };
+
+    window.closeMonitoringWizard = function () {
+        const modal = document.getElementById('monitoringWizardModal');
+        const frame = document.getElementById('monitoringWizardFrame');
+        if (frame) frame.src = 'about:blank';
+        if (modal) {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const btn = document.getElementById('monitoringWizardClose');
+        if (btn) btn.addEventListener('click', window.closeMonitoringWizard);
+
+        // Allow escape key to close
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('monitoringWizardModal');
+                if (modal && !modal.classList.contains('hidden')) window.closeMonitoringWizard();
+            }
+        });
+
+        // Wire dashboard button/link
+        const dash = document.getElementById('dashboard-open-monitoring-wizard');
+        if (dash) {
+            dash.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.openMonitoringWizard(null);
+            });
+        }
+    });
+    </script>
+
+    <script>
     // Fallback: if wizard script fails to parse, at least open the modal and log an error.
     window.__AILOG_WIZARD_FALLBACK__ = true;
     if (typeof window.openWizard !== 'function') {
@@ -5980,5 +6024,17 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
   </div>
 </div>
+
+
+<div id="monitoringWizardModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-slate-900 border border-white/10 rounded-xl w-[95vw] max-w-6xl h-[90vh] flex flex-col">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+      <div class="font-semibold">Monitoring Wizard</div>
+      <button id="monitoringWizardClose" class="bg-white/10 hover:bg-white/20 px-3 py-1 rounded" type="button">Close</button>
+    </div>
+    <iframe id="monitoringWizardFrame" class="flex-1 w-full" src="about:blank" referrerpolicy="no-referrer"></iframe>
+  </div>
+</div>
+
 </body>
 </html>
