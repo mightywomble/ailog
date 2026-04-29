@@ -810,6 +810,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button id="dashboard-rescan" class="termix-action" type="button">Rescan All</button>
                         <button id="dashboard-add-devices" class="termix-action" type="button">Add Devices</button>
                         <button id="dashboard-export-ssh" class="termix-action" type="button">Export SSH Config</button>
+                    <a id="dashboard-open-monitoring-wizard" class="bg-sky-600 hover:bg-sky-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" href="/monitoring/wizard" type="button">Monitoring Wizard</a>
                     </div>
                 </div>
             </div>
@@ -1792,7 +1793,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (logsActionPull) logsActionPull.addEventListener('click', () => pullLogsForSelectedHost());
         if (logsActionInfo) logsActionInfo.addEventListener('click', () => showHostInfoMain());
-        if (logsActionMonitor) logsActionMonitor.addEventListener('click', () => window.showToast('Monitoring view coming soon.', 'info'));
+        if (logsActionMonitor) logsActionMonitor.addEventListener('click', () => {
+            const hid = selectedHostId;
+            const idNum = parseInt(hid, 10);
+            if (!hid || hid === 'local' || Number.isNaN(idNum)) {
+                window.showToast('Select a host (not local) to view monitoring, or use the Monitoring Wizard.', 'info');
+                return;
+            }
+            window.location.href = `/hosts/${idNum}/monitoring`;
+        });
 
         const setStatusDot = (el, ok) => {
             if (!el) return;

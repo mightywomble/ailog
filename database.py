@@ -409,3 +409,128 @@ class SuricataAlertBucket(db.Model):
     __table_args__ = (
         db.Index('idx_suricata_alert_sensor_bucket', 'sensor_id', 'bucket_ts'),
     )
+
+
+# --- Monitoring subsystem models ---
+
+
+class Monitor(db.Model):
+    __tablename__ = 'monitors'
+
+    id = db.Column(db.Integer, primary_key=True)
+    host_id = db.Column(db.Integer, db.ForeignKey('hosts.id'), nullable=False, index=True)
+
+    name = db.Column(db.String(256), nullable=False)
+    type = db.Column(db.String(32), nullable=False)  # http|tcp|ping (ping optional)
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
+
+    interval_seconds = db.Column(db.Integer, default=60, nullable=False)
+    timeout_seconds = db.Column(db.Integer, default=10, nullable=False)
+
+    config_json = db.Column(db.Text, nullable=False)  # JSON string
+    tags_json = db.Column(db.Text, nullable=True)
+
+    last_status = db.Column(db.String(16), nullable=True)  # up|down|error
+    last_checked_at = db.Column(db.DateTime, nullable=True)
+    last_response_time_ms = db.Column(db.Integer, nullable=True)
+    last_status_code = db.Column(db.Integer, nullable=True)
+    last_error_message = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    host = db.relationship('Host', backref=db.backref('monitors', lazy=True, cascade='all, delete-orphan'))
+
+    def config(self):
+        try:
+            return json.loads(self.config_json or '{}')
+        except Exception:
+            return {}
+
+    def tags(self):
+        if not self.tags_json:
+            return []
+        try:
+            return json.loads(self.tags_json)
+        except Exception:
+            return []
+
+    def to_dict(self, include_checks: bool = False, checks_limit: int = 20):
+        d = {
+            'id': self.id,
+            'host_id': self.host_id,
+            'name': self.name,
+            'type': self.type,
+            'enabled': self.enabled,
+            'interval_seconds': self.interval_seconds,
+            'timeout_seconds': self.timeout_seconds,
+            'config': self.config(),
+            'tags': self.tags(),
+            'last_status': self.last_status,
+            'last_checked_at': self.last_checked_at.isoformat() if self.last_checked_at else None,
+            'last_response_time_ms': self.last_response_time_ms,
+            'last_status_code': self.last_status_code,
+            'last_error_message': self.last_error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_checks:
+            checks = (
+                MonitorCheck.query.filter_by(monitor_id=self.id)
+                .order_by(MonitorCheck.checked_at.desc())
+                .limit(int(checks_limit))
+                .all()
+            )
+            d['checks'] = [c.to_dict() for c in checks]
+        return d
+
+
+class MonitorCheck(db.Model):
+    __tablename__ = 'monitor_checks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    monitor_id = db.Column(db.Integer, db.ForeignKey('monitors.id'), nullable=False, index=True)
+
+    checked_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    status = db.Column(db.String(16), nullable=False)  # up|down|error
+    response_time_ms = db.Column(db.Integer, nullable=False)
+    status_code = db.Column(db.Integer, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+
+    monitor = db.relationship('Monitor', backref=db.backref('checks', lazy=True, cascade='all, delete-orphan'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'monitor_id': self.monitor_id,
+            'checked_at': self.checked_at.isoformat() if self.checked_at else None,
+            'status': self.status,
+            'response_time_ms': self.response_time_ms,
+            'status_code': self.status_code,
+            'error_message': self.error_message,
+        }
+
+
+class HostDockerInventory(db.Model):
+    __tablename__ = 'host_docker_inventory'
+
+    id = db.Column(db.Integer, primary_key=True)
+    host_id = db.Column(db.Integer, db.ForeignKey('hosts.id'), nullable=False, index=True)
+    captured_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    inventory_json = db.Column(db.Text, nullable=False)
+
+    host = db.relationship('Host', backref=db.backref('docker_inventories', lazy=True, cascade='all, delete-orphan'))
+
+    def inventory(self):
+        try:
+            return json.loads(self.inventory_json or '{}')
+        except Exception:
+            return {}
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'host_id': self.host_id,
+            'captured_at': self.captured_at.isoformat() if self.captured_at else None,
+            'inventory': self.inventory(),
+        }

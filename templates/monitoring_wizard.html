@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monitoring Wizard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold">Monitoring Wizard</h1>
+        <div class="text-sm text-slate-300">Discover open ports + Docker containers over SSH and generate monitors.</div>
+      </div>
+      <a class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" href="/">Back</a>
+    </div>
+
+    <div class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-1 bg-white/5 rounded-lg p-4">
+        <h2 class="font-medium">1) Select hosts</h2>
+        <div class="mt-3 space-y-2 max-h-[420px] overflow-y-auto pr-2">
+          {% for h in hosts %}
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" class="host-cb" value="{{ h.id }}" />
+              <span>{{ h.friendly_name or h.hostname or h.ip_address }}</span>
+              <span class="text-slate-400">({{ h.ip_address }})</span>
+            </label>
+          {% endfor %}
+        </div>
+
+        <div class="mt-4">
+          <h3 class="font-medium">Scan profile</h3>
+          <select id="scan-profile" class="mt-2 w-full bg-slate-900 border border-white/10 rounded px-2 py-2 text-sm">
+            <option value="common">Common ports (fast)</option>
+            <option value="1-1024">1–1024 (filtered from listeners)</option>
+          </select>
+        </div>
+
+        <div class="mt-4">
+          <h3 class="font-medium">Defaults</h3>
+          <div class="mt-2 grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs text-slate-300">Interval (s)</label>
+              <input id="interval-seconds" type="number" value="60" class="mt-1 w-full bg-slate-900 border border-white/10 rounded px-2 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-300">Timeout (s)</label>
+              <input id="timeout-seconds" type="number" value="10" class="mt-1 w-full bg-slate-900 border border-white/10 rounded px-2 py-2 text-sm" />
+            </div>
+          </div>
+        </div>
+
+        <button id="discover-btn" class="mt-5 w-full bg-sky-600 hover:bg-sky-700 px-3 py-2 rounded">Discover</button>
+        <div id="discover-status" class="mt-3 text-sm text-slate-300"></div>
+      </div>
+
+      <div class="lg:col-span-2 bg-white/5 rounded-lg p-4">
+        <div class="flex items-center justify-between">
+          <h2 class="font-medium">2) Review suggested monitors</h2>
+          <button id="apply-btn" class="bg-green-600 hover:bg-green-700 px-3 py-2 rounded" disabled>Apply Selected</button>
+        </div>
+        <div id="results" class="mt-4 space-y-4"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+let latestDiscovery = null;
+
+function selectedHostIds() {
+  return Array.from(document.querySelectorAll('.host-cb:checked')).map(cb => parseInt(cb.value, 10));
+}
+
+function esc(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderResults(discovery) {
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '';
+
+  for (const r of discovery.results) {
+    const hostTitle = `${r.friendly_name || r.ip} (${r.ip})`;
+    const errors = (r.errors || []).map(e => `<div class="text-xs text-red-300">${esc(e.stage)}: ${esc(e.error)}</div>`).join('');
+
+    const candidates = r.candidates || [];
+    const items = candidates.map((c, idx) => {
+      const target = c.type === 'http' ? (c.config && c.config.url) : `${c.config.hostname}:${c.config.port}`;
+      return `
+        <label class="flex items-start gap-2 py-1">
+          <input type="checkbox" class="cand-cb" data-host-id="${r.host_id}" data-idx="${idx}" checked />
+          <div class="text-sm">
+            <div class="font-medium">${esc(c.name)} <span class="text-xs text-slate-400">[${esc(c.type)}]</span></div>
+            <div class="text-xs text-slate-300">${esc(target)}</div>
+          </div>
+        </label>
+      `;
+    }).join('');
+
+    resultsEl.innerHTML += `
+      <div class="border border-white/10 rounded-lg p-3 bg-slate-950/40">
+        <div class="font-medium">${esc(hostTitle)}</div>
+        ${errors ? `<div class="mt-2">${errors}</div>` : ''}
+        <div class="mt-3">${items || '<div class="text-sm text-slate-300">No candidates found.</div>'}</div>
+      </div>
+    `;
+  }
+
+  document.getElementById('apply-btn').disabled = false;
+}
+
+async function discover() {
+  const statusEl = document.getElementById('discover-status');
+  const hostIds = selectedHostIds();
+  const scanProfile = document.getElementById('scan-profile').value;
+
+  statusEl.textContent = 'Discovering...';
+  document.getElementById('apply-btn').disabled = true;
+
+  const resp = await fetch('/monitoring/wizard/discover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host_ids: hostIds, scan_profile: scanProfile })
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    statusEl.textContent = data.error || `Discover failed (${resp.status})`;
+    return;
+  }
+
+  latestDiscovery = data;
+  statusEl.textContent = `Discovery complete for ${data.results.length} host(s).`;
+  renderResults(data);
+}
+
+async function applySelected() {
+  const intervalSeconds = parseInt(document.getElementById('interval-seconds').value || '60', 10);
+  const timeoutSeconds = parseInt(document.getElementById('timeout-seconds').value || '10', 10);
+
+  const checked = Array.from(document.querySelectorAll('.cand-cb:checked'));
+  const byHost = {};
+  for (const cb of checked) {
+    const hostId = parseInt(cb.dataset.hostId, 10);
+    const idx = parseInt(cb.dataset.idx, 10);
+    const hostRes = latestDiscovery.results.find(r => r.host_id === hostId);
+    if (!hostRes) continue;
+    const cand = (hostRes.candidates || [])[idx];
+    if (!cand) continue;
+    if (!byHost[hostId]) byHost[hostId] = [];
+    byHost[hostId].push(cand);
+  }
+
+  const selections = Object.entries(byHost).map(([host_id, candidates]) => ({ host_id: parseInt(host_id, 10), candidates }));
+
+  const resp = await fetch('/monitoring/wizard/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selections, interval_seconds: intervalSeconds, timeout_seconds: timeoutSeconds })
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    alert(data.error || `Apply failed (${resp.status})`);
+    return;
+  }
+
+  alert(`Created ${data.created} monitors (${data.skipped} skipped)`);
+}
+
+document.getElementById('discover-btn').addEventListener('click', discover);
+document.getElementById('apply-btn').addEventListener('click', applySelected);
+</script>
+
+</body>
+</html>
