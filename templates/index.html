@@ -2314,11 +2314,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             container.innerHTML = `<div class="p-4 text-sm termix-muted">Loading monitoring data...</div>`;
 
-                const wireMonitoringRowActions = () => {
-                    const selCountEl = document.getElementById('mon-selected-count');
-                    const updateSelCount = () => {
-                        if (selCountEl) selCountEl.textContent = `${selectedMonitorIds.size} selected`;
-                    };
+                
 
                     document.querySelectorAll('.mon-cb').forEach(cb => {
                         cb.addEventListener('change', () => {
@@ -2472,6 +2468,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data && data.error) throw new Error(data.error);
 
                 const monitors = data.monitors || [];
+
+                const wireMonitoringRowActions = (monitors) => {
+                    const selCountEl = document.getElementById('mon-selected-count');
+                    const updateSelCount = () => {
+                        if (selCountEl) selCountEl.textContent = `${selectedMonitorIds.size} selected`;
+                    };
+
 
                 const fmtMonTs = (ts) => {
                     if (!ts) return '-';
@@ -2653,7 +2656,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   </div>
                 `;
 
-                wireMonitoringRowActions();
+                wireMonitoringRowActions(monitors);
 
             } catch (err) {
                 console.error('Error loading monitoring', err);
