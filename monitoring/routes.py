@@ -132,7 +132,7 @@ def monitoring_wizard_apply():
             mtype = c.get('type')
             name = c.get('name')
             cfg = c.get('config') or {}
-            if mtype not in ('http', 'tcp'):
+            if mtype not in ('http', 'tcp', 'docker_container'):
                 skipped += 1
                 continue
             if not name:
@@ -182,3 +182,23 @@ def host_monitoring_page(host_id: int):
     )
     return render_template('monitoring.html', host=host, monitors=monitors, docker_snapshot=docker_snapshot)
 
+
+
+@monitoring_bp.get('/api/hosts/<int:host_id>/monitoring')
+def api_host_monitoring(host_id: int):
+    host = db.session.get(Host, int(host_id))
+    if not host:
+        return jsonify({'error': 'Host not found'}), 404
+
+    monitors = Monitor.query.filter_by(host_id=host.id).order_by(Monitor.id.asc()).all()
+    docker_snapshot = (
+        HostDockerInventory.query.filter_by(host_id=host.id)
+        .order_by(HostDockerInventory.captured_at.desc())
+        .first()
+    )
+
+    return jsonify({
+        'host': host.to_dict() if hasattr(host, 'to_dict') else {'id': host.id, 'ip_address': host.ip_address, 'friendly_name': host.friendly_name},
+        'monitors': [m.to_dict(include_checks=False) for m in monitors],
+        'docker_snapshot': docker_snapshot.to_dict() if docker_snapshot else None,
+    })

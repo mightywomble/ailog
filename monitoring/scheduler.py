@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from database import Monitor, MonitorCheck, db
 
-from .runner import execute_http_check, execute_tcp_check
+from .runner import execute_docker_container_check, execute_http_check, execute_tcp_check
 
 
 def _monitor_due(m, now):

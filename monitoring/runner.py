@@ -104,3 +104,50 @@ def execute_http_check(config: Dict[str, Any], timeout_seconds: int) -> CheckRes
     except Exception as e:
         ms = int((time.time() - start) * 1000)
         return CheckResult(status='error', response_time_ms=ms, error_message=str(e))
+
+# Docker container running monitor (via SSH)
+
+def execute_docker_container_check(user: str, ip: str, ssh_key_path: str | None, container_name: str, timeout_seconds: int) -> CheckResult:
+    """Check whether a docker container is running on a remote host."""
+    start = time.time()
+    try:
+        from wizard_helpers import execute_remote_command
+
+        ok, out = execute_remote_command(
+            user,
+            ip,
+            'command -v docker >/dev/null 2>&1 && echo DOCKER_OK || echo DOCKER_MISSING',
+            ssh_key_path=ssh_key_path,
+            timeout=max(5, int(timeout_seconds)),
+        )
+        if not ok:
+            ms = int((time.time() - start) * 1000)
+            return CheckResult(status='error', response_time_ms=ms, error_message=(out or 'docker detection failed')[:500])
+        if 'DOCKER_MISSING' in (out or ''):
+            ms = int((time.time() - start) * 1000)
+            return CheckResult(status='error', response_time_ms=ms, error_message='docker not installed')
+
+        cmd = f"docker inspect -f '{{{{.State.Running}}}}' {container_name} 2>/dev/null || echo MISSING"
+        ok2, out2 = execute_remote_command(
+            user,
+            ip,
+            cmd,
+            ssh_key_path=ssh_key_path,
+            timeout=max(5, int(timeout_seconds)),
+        )
+        ms = int((time.time() - start) * 1000)
+        if not ok2:
+            return CheckResult(status='error', response_time_ms=ms, error_message=(out2 or 'docker inspect failed')[:500])
+
+        s = (out2 or '').strip().lower()
+        if 'missing' in s:
+            return CheckResult(status='down', response_time_ms=ms, error_message='container not found')
+        if s == 'true':
+            return CheckResult(status='up', response_time_ms=ms)
+        if s == 'false':
+            return CheckResult(status='down', response_time_ms=ms, error_message='container stopped')
+
+        return CheckResult(status='error', response_time_ms=ms, error_message=f'unexpected docker response: {out2!r}'[:500])
+    except Exception as e:
+        ms = int((time.time() - start) * 1000)
+        return CheckResult(status='error', response_time_ms=ms, error_message=str(e)[:500])

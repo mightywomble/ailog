@@ -13,7 +13,10 @@
         <h1 class="text-2xl font-semibold">Monitoring Wizard</h1>
         <div class="text-sm text-slate-300">Discover open ports + Docker containers over SSH and generate monitors.</div>
       </div>
-      <a class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" href="/">Back</a>
+      <div class="flex gap-2">
+        <a class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" href="/">Back</a>
+        <button id="done-btn" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Done</button>
+      </div>
     </div>
 
     <div class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -84,6 +87,12 @@ function renderResults(discovery) {
     const hostTitle = `${r.friendly_name || r.ip} (${r.ip})`;
     const errors = (r.errors || []).map(e => `<div class="text-xs text-red-300">${esc(e.stage)}: ${esc(e.error)}</div>`).join('');
 
+    const docker = r.docker || {};
+    const dockerInstalled = !!docker.docker;
+    const containers = docker.containers || [];
+    const dockerLine = dockerInstalled ? `Docker: installed (${containers.length} running)` : 'Docker: not detected';
+    const dockerDetails = dockerInstalled && containers.length ? containers.slice(0, 8).map(c => `${c.Names || ''}${c.Ports ? ' [' + c.Ports + ']' : ''}`).join('<br/>') : '';
+
     const candidates = r.candidates || [];
     const items = candidates.map((c, idx) => {
       const target = c.type === 'http' ? (c.config && c.config.url) : `${c.config.hostname}:${c.config.port}`;
@@ -101,6 +110,8 @@ function renderResults(discovery) {
     resultsEl.innerHTML += `
       <div class="border border-white/10 rounded-lg p-3 bg-slate-950/40">
         <div class="font-medium">${esc(hostTitle)}</div>
+        <div class="mt-1 text-xs text-slate-300">${dockerLine}</div>
+        ${dockerDetails ? `<div class="mt-1 text-xs text-slate-400">${dockerDetails}</div>` : ''}
         ${errors ? `<div class="mt-2">${errors}</div>` : ''}
         <div class="mt-3">${items || '<div class="text-sm text-slate-300">No candidates found.</div>'}</div>
       </div>
@@ -184,6 +195,17 @@ try {
 } catch (e) {}
 
 document.getElementById('apply-btn').addEventListener('click', applySelected);
+document.getElementById('done-btn').addEventListener('click', () => {
+  try {
+    const pre = {{ preselect_id or 'null' }};
+    if (pre) {
+      window.location.href = `/hosts/${pre}/monitoring`;
+      return;
+    }
+  } catch (e) {}
+  window.location.href = '/';
+});
+
 </script>
 
 </body>

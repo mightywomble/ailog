@@ -162,6 +162,22 @@ def generate_monitor_candidates(
 
     ports = sorted(set(ports))
 
+    # Docker container running candidates
+    container_candidates: List[Dict[str, Any]] = []
+    try:
+        if (docker_inventory or {}).get('docker'):
+            for c in (docker_inventory or {}).get('containers') or []:
+                name = (c.get('Names') or '').strip()
+                if not name:
+                    continue
+                container_candidates.append({
+                    'type': 'docker_container',
+                    'name': f'Docker {name} running',
+                    'config': {'container_name': name},
+                })
+    except Exception:
+        pass
+
     candidates: List[Dict[str, Any]] = []
     for port in ports:
         probe = http_probe_results.get(port) or {}
@@ -194,4 +210,5 @@ def generate_monitor_candidates(
                 }
             )
 
+    candidates.extend(container_candidates)
     return candidates
