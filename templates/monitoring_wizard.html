@@ -22,7 +22,7 @@
         <div class="mt-3 space-y-2 max-h-[420px] overflow-y-auto pr-2">
           {% for h in hosts %}
             <label class="flex items-center gap-2 text-sm">
-              <input type="checkbox" class="host-cb" value="{{ h.id }}" />
+              <input type="checkbox" class="host-cb" value="{{ h.id }}" {% if preselect_id and preselect_id == h.id %}checked{% endif %} />
               <span>{{ h.friendly_name or h.hostname or h.ip_address }}</span>
               <span class="text-slate-400">({{ h.ip_address }})</span>
             </label>
@@ -170,6 +170,19 @@ async function applySelected() {
 }
 
 document.getElementById('discover-btn').addEventListener('click', discover);
+
+// If the page was opened for a specific host, auto-run discovery
+try {
+  const pre = {{ preselect_id or 'null' }};
+  if (pre) {
+    // Ensure only that host is selected
+    document.querySelectorAll('.host-cb').forEach(cb => {
+      cb.checked = (parseInt(cb.value, 10) === pre);
+    });
+    discover();
+  }
+} catch (e) {}
+
 document.getElementById('apply-btn').addEventListener('click', applySelected);
 </script>
 

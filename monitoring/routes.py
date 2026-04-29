@@ -41,8 +41,12 @@ def _http_probe_ports(host_ip: str, ports: List[int]) -> Dict[int, Dict[str, Any
 @monitoring_bp.get('/monitoring/wizard')
 def monitoring_wizard():
     hosts = Host.query.order_by(Host.friendly_name.asc()).all()
-    return render_template('monitoring_wizard.html', hosts=hosts)
-
+    preselect = request.args.get('host_id')
+    try:
+        preselect_id = int(preselect) if preselect is not None else None
+    except Exception:
+        preselect_id = None
+    return render_template('monitoring_wizard.html', hosts=hosts, preselect_id=preselect_id)
 
 @monitoring_bp.post('/monitoring/wizard/discover')
 def monitoring_wizard_discover():
@@ -168,9 +172,13 @@ def host_monitoring_page(host_id: int):
         return 'Host not found', 404
 
     monitors = Monitor.query.filter_by(host_id=host.id).order_by(Monitor.id.asc()).all()
+    if not monitors:
+        return redirect(f'/monitoring/wizard?host_id={host.id}')
+
     docker_snapshot = (
         HostDockerInventory.query.filter_by(host_id=host.id)
         .order_by(HostDockerInventory.captured_at.desc())
         .first()
     )
     return render_template('monitoring.html', host=host, monitors=monitors, docker_snapshot=docker_snapshot)
+

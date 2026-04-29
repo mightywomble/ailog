@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-04-29 | v2.9.8 | Monitoring UX: Monitoring button now works with db-<id> hosts and redirects to Monitoring Wizard when host has no monitors; wizard supports preselect + auto-discover | ✅ Complete |
 | 2026-04-29 | v2.9.7 | Add modular monitoring subsystem: monitoring wizard (SSH discovery + HTTP probe), per-host monitoring pages, persisted Docker inventory snapshots | ✅ Complete |
 | 2026-04-28 | v2.9.6 | Fix SSH key persistence + encryption metadata (enc_version), improve SSH error surfacing, repair DB URL mismatch and rescan/system-info collection to use decrypted key materialization | ✅ Complete |
 | 2026-04-24 | v2.9.5 | Host selection workflow: select host → host info → pull logs; Groups management in Settings (CRUD + list members); Host Info UI enhancements (full-pane view, action buttons w/icons, resource/service visuals, running/stopped service lists) | ✅ Complete |

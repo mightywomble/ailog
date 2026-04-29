@@ -1795,11 +1795,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (logsActionInfo) logsActionInfo.addEventListener('click', () => showHostInfoMain());
         if (logsActionMonitor) logsActionMonitor.addEventListener('click', () => {
             const hid = selectedHostId;
-            const idNum = parseInt(hid, 10);
-            if (!hid || hid === 'local' || Number.isNaN(idNum)) {
-                window.showToast('Select a host (not local) to view monitoring, or use the Monitoring Wizard.', 'info');
+            if (!hid || hid === 'local') {
+                window.location.href = `/monitoring/wizard`;
                 return;
             }
+
+            // db-backed hosts are keyed like 'db-<id>'
+            let idNum = null;
+            if (String(hid).startsWith('db-')) {
+                const raw = String(hid).split('-', 2)[1];
+                const n = parseInt(raw, 10);
+                if (!Number.isNaN(n)) idNum = n;
+            } else {
+                const n = parseInt(hid, 10);
+                if (!Number.isNaN(n)) idNum = n;
+            }
+
+            if (!idNum) {
+                window.location.href = `/monitoring/wizard`;
+                return;
+            }
+
             window.location.href = `/hosts/${idNum}/monitoring`;
         });
 
