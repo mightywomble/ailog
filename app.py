@@ -21,12 +21,16 @@ import tempfile
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
 import shutil
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket, Monitor, MonitorCheck, HostDockerInventory
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services, execute_remote_command
 from utils.sshkey_crypto import encrypt_str, decrypt_str, is_configured as sshkey_crypto_configured, generate_master_key, SSHKeyCryptoError, compute_key_checksum, verify_key_checksum, normalize_ssh_key_text
 
 # --- INITIALIZATION ---
 app = Flask(__name__, instance_path=None)
+
+# Monitoring subsystem (modular bolt-on)
+from monitoring import monitoring_bp
+app.register_blueprint(monitoring_bp)
 
 # --- DATABASE CONFIGURATION ---
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog.db')
@@ -2358,9 +2362,42 @@ def perform_scheduled_analysis():
     _do_analysis_task()
 
 # --- STARTUP & SHUTDOWN ---
+
+def _run_monitors_in_appctx(fn, limit: int):
+    """Run a callable inside a Flask app context (for APScheduler jobs)."""
+    try:
+        with app.app_context():
+            return fn(limit=limit)
+    except Exception as e:
+        print(f'[WARN] Monitoring runner failed: {e}')
+        return None
+
+def _monitoring_runner_job():
+    try:
+        from monitoring.scheduler import run_due_monitors
+        with app.app_context():
+            run_due_monitors(limit=100)
+    except Exception as e:
+        print(f'[WARN] Monitoring runner failed: {e}')
+
 def startup_scheduler():
     """Start APScheduler and sync jobs from DB schedules."""
     with app.app_context():
+        # Monitoring runner job (executes due monitors)
+        try:
+            from monitoring.scheduler import run_due_monitors
+            scheduler.add_job(
+                _monitoring_runner_job,
+                trigger='interval',
+                seconds=15,
+                id='monitoring_runner',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        except Exception as e:
+            print(f'[WARN] Monitoring scheduler job not started: {e}')
+
         try:
             _ensure_default_schedule_migrated()
         except Exception as e:
