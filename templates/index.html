@@ -2653,11 +2653,12 @@ document.addEventListener('DOMContentLoaded', () => {
                   </div>
                 `;
 
+                wireMonitoringRowActions();
+
             } catch (err) {
                 console.error('Error loading monitoring', err);
                 container.innerHTML = `<div class="p-4 text-xs text-red-600">Error loading monitoring: ${err.message || err}</div>`;
 
-                wireMonitoringRowActions();
 
             }
         };
