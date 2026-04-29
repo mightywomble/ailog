@@ -7,7 +7,6 @@ from wizard_helpers import execute_remote_command
 
 COMMON_PORTS = {
     22,
-    53,
     80,
     443,
     445,
@@ -54,6 +53,29 @@ def _parse_ss_listeners(output: str) -> List[Dict[str, Any]]:
     return listeners
 
 
+def _parse_ss_udp_listeners(output: str) -> List[Dict[str, Any]]:
+    listeners: List[Dict[str, Any]] = []
+    # ss -H -lunp4 output: UNCONN 0 0 0.0.0.0:53 0.0.0.0:* users:(("pihole-FTL",pid=...,fd=...))
+    for line in (output or '').splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 4:
+            continue
+        local = parts[3]
+        m = re.match(r"^(?P<addr>[^:]+):(?P<port>\d+)$", local)
+        if not m:
+            continue
+        addr = m.group('addr')
+        port = int(m.group('port'))
+        proc = None
+        if 'users:(' in line:
+            proc = line.split('users:(', 1)[1].rstrip(')')
+        listeners.append({'bind': addr, 'port': port, 'process': proc, 'proto': 'udp'})
+    return listeners
+
+
 def _parse_netstat_listeners(output: str) -> List[Dict[str, Any]]:
     listeners: List[Dict[str, Any]] = []
     # netstat -lntp (may require sudo for process names)
@@ -75,6 +97,36 @@ def _parse_netstat_listeners(output: str) -> List[Dict[str, Any]]:
         proc = parts[-1] if parts else None
         listeners.append({'bind': local.rsplit(':', 1)[0], 'port': port, 'process': proc})
     return listeners
+
+
+def _parse_ss_udp_listeners(output: str) -> List[Dict[str, Any]]:
+    listeners: List[Dict[str, Any]] = []
+    # ss -H -lunp4 output: UNCONN 0 0 0.0.0.0:53 0.0.0.0:* users:(("pihole-FTL",pid=...,fd=...))
+    for line in (output or '').splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 4:
+            continue
+        local = parts[3]
+        m = re.match(r"^(?P<addr>[^:]+):(?P<port>\d+)$", local)
+        if not m:
+            continue
+        addr = m.group('addr')
+        port = int(m.group('port'))
+        proc = None
+        if 'users:(' in line:
+            proc = line.split('users:(', 1)[1].rstrip(')')
+        listeners.append({'bind': addr, 'port': port, 'process': proc, 'proto': 'udp'})
+    return listeners
+
+
+def collect_listening_udp_ports_v4(user: str, ip: str, ssh_key_path: Optional[str]) -> Tuple[bool, List[Dict[str, Any]], str]:
+    ok, out = execute_remote_command(user, ip, 'ss -H -lunp4', ssh_key_path=ssh_key_path, timeout=15)
+    if ok:
+        return True, _parse_ss_udp_listeners(out), ''
+    return False, [], (out or 'failed to collect UDP listeners')
 
 
 def collect_listening_ports_v4(user: str, ip: str, ssh_key_path: Optional[str]) -> Tuple[bool, List[Dict[str, Any]], str]:

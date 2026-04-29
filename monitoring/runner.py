@@ -151,3 +151,30 @@ def execute_docker_container_check(user: str, ip: str, ssh_key_path: str | None,
     except Exception as e:
         ms = int((time.time() - start) * 1000)
         return CheckResult(status='error', response_time_ms=ms, error_message=str(e)[:500])
+
+
+def execute_udp_listen_check(user: str, ip: str, ssh_key_path: str | None, port: int, timeout_seconds: int) -> CheckResult:
+    """Verify a UDP port is listening on the remote host by inspecting ss output."""
+    start = time.time()
+    try:
+        from wizard_helpers import execute_remote_command
+
+        ok, out = execute_remote_command(
+            user,
+            ip,
+            'ss -H -lunp4',
+            ssh_key_path=ssh_key_path,
+            timeout=max(5, int(timeout_seconds)),
+        )
+        ms = int((time.time() - start) * 1000)
+        if not ok:
+            return CheckResult(status='error', response_time_ms=ms, error_message=(out or 'ss udp query failed')[:500])
+
+        want = f':{int(port)}'
+        for line in (out or '').splitlines():
+            if want in line:
+                return CheckResult(status='up', response_time_ms=ms)
+        return CheckResult(status='down', response_time_ms=ms, error_message=f'UDP port {port} not listening')
+    except Exception as e:
+        ms = int((time.time() - start) * 1000)
+        return CheckResult(status='error', response_time_ms=ms, error_message=str(e)[:500])

@@ -12,6 +12,7 @@ from database import Host, Monitor, HostDockerInventory, db
 from .discovery import (
     collect_docker_inventory,
     collect_listening_ports_v4,
+    collect_listening_udp_ports_v4,
     generate_monitor_candidates,
 )
 from .sshkeys import materialize_ssh_key_path
@@ -75,6 +76,10 @@ def monitoring_wizard_discover():
         }
 
         ok_ports, listeners, err_ports = collect_listening_ports_v4(user, h.ip_address, ssh_key_path)
+        ok_udp, udp_listeners, err_udp = collect_listening_udp_ports_v4(user, h.ip_address, ssh_key_path)
+        if not ok_udp:
+            udp_listeners = []
+
         if not ok_ports:
             host_result['errors'].append({'stage': 'ports', 'error': err_ports})
             listeners = []
@@ -93,9 +98,10 @@ def monitoring_wizard_discover():
             probe_ports = probe_ports[:40]  # cap to avoid long probes
 
         http_probe = _http_probe_ports(h.ip_address, probe_ports)
-        candidates = generate_monitor_candidates(h.ip_address, listeners, docker_inv, scan_profile, http_probe)
+        candidates = generate_monitor_candidates(h.ip_address, listeners, docker_inv, scan_profile, udp_listeners, http_probe)
 
         host_result['listeners'] = listeners
+        host_result['udp_listeners'] = udp_listeners
         host_result['docker'] = docker_inv
         # Persist docker inventory snapshot (new table)
         try:
@@ -132,7 +138,7 @@ def monitoring_wizard_apply():
             mtype = c.get('type')
             name = c.get('name')
             cfg = c.get('config') or {}
-            if mtype not in ('http', 'tcp', 'docker_container'):
+            if mtype not in ('http', 'tcp', 'docker_container', 'udp_listen'):
                 skipped += 1
                 continue
             if not name:
