@@ -2306,15 +2306,190 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Fill the same main panel area used by Host Info
+            const fmtMonTs = (ts) => {
+                if (!ts) return '-';
+                try {
+                    const d = new Date(ts);
+                    if (Number.isNaN(d.getTime())) return ts;
+                    const pad = (n) => String(n).padStart(2, '0');
+                    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} - ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                } catch (_) {
+                    return ts;
+                }
+            };
+
             const logTableTitleEl = document.getElementById('log-table-title');
             if (logTableTitleEl) logTableTitleEl.textContent = `Monitoring: ${hosts[hostId]?.friendly_name || hostId}`;
+
             const container = document.getElementById('log-table-container');
             if (!container) return;
 
             container.innerHTML = `<div class="p-4 text-sm termix-muted">Loading monitoring data...</div>`;
 
-                
+            try {
+                const data = await window.fetchApi(`/api/hosts/${dbId}/monitoring`);
+                if (data && data.error) throw new Error(data.error);
+
+                const monitors = data.monitors || [];
+                const dockerSnap = data.docker_snapshot;
+
+                if (!monitors.length) {
+                    window.location.href = `/monitoring/wizard?host_id=${dbId}`;
+                    return;
+                }
+
+                const rows = monitors.map(m => {
+                    const cfg = m.config || {};
+                    let target = '-';
+                    if (m.type === 'http') target = cfg.url || '-';
+                    else if (m.type === 'tcp') target = `${cfg.hostname || ''}:${cfg.port || ''}`;
+                    else if (m.type === 'docker_container') target = cfg.container_name || '-';
+                    else if (m.type === 'udp_listen') target = `:${cfg.port || ''}/udp`;
+
+                    const status = m.last_status || 'never';
+                    const statusClass = status === 'up' ? 'text-green-400' : (status === 'down' ? 'text-amber-400' : (status === 'error' ? 'text-red-400' : 'text-slate-400'));
+                    const err = m.last_error_message ? `<div class="text-xs text-slate-400 max-w-xl truncate">${m.last_error_message}</div>` : '';
+                    const rtt = (m.last_response_time_ms !== null && m.last_response_time_ms !== undefined) ? `${m.last_response_time_ms}ms` : '-';
+
+                    const checked = selectedMonitorIds.has(m.id) ? 'checked' : '';
+
+                    const iconBtn = (title, cls, svg) => `
+                      <button class="${cls} bg-white/10 hover:bg-white/20 px-2 py-1 rounded" title="${title}" aria-label="${title}" type="button">${svg}</button>
+                    `;
+
+                    const svgPlay = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5v14l11-7z"/></svg>';
+                    const svgEdit = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 20h9"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+                    const svgTrash = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6h18"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 6V4h8v2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
+
+                    return `
+                      <tr class="border-b border-white/5" data-mid="${m.id}">
+                        <td class="py-2 pr-3"><input class="mon-cb" type="checkbox" data-mid="${m.id}" ${checked} /></td>
+                        <td class="py-2 pr-4">${m.name}</td>
+                        <td class="py-2 pr-4">${m.type}</td>
+                        <td class="py-2 pr-4">${target}</td>
+                        <td class="py-2 pr-4"><span class="${statusClass}">${status}</span>${err}</td>
+                        <td class="py-2 pr-4">${fmtMonTs(m.last_checked_at)}</td>
+                        <td class="py-2 pr-4">${rtt}</td>
+                        <td class="py-2 pr-2">
+                          <div class="flex gap-2">
+                            ${iconBtn('Test now', 'mon-test', svgPlay)}
+                            ${iconBtn('Edit', 'mon-edit', svgEdit)}
+                            ${iconBtn('Delete', 'mon-del', svgTrash)}
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                }).join('');
+
+                let dockerHtml = '';
+                if (dockerSnap && dockerSnap.inventory) {
+                    const inv = dockerSnap.inventory;
+                    const dockerInstalled = !!inv.docker;
+                    const containers = inv.containers || [];
+                    if (!dockerInstalled) {
+                        dockerHtml = `<div class="text-sm termix-muted">Docker: not detected</div>`;
+                    } else {
+                        const contRows = containers.map(c => `
+                          <tr class="border-b border-white/5">
+                            <td class="py-2 pr-4">${c.Names || ''}</td>
+                            <td class="py-2 pr-4">${c.Image || ''}</td>
+                            <td class="py-2 pr-4">${c.Status || ''}</td>
+                            <td class="py-2 pr-4 text-xs text-slate-300">${c.Ports || ''}</td>
+                          </tr>
+                        `).join('');
+                        dockerHtml = `
+                          <div class="text-sm termix-muted">Docker inventory (latest) — captured at ${dockerSnap.captured_at || ''}</div>
+                          <div class="mt-2 overflow-x-auto">
+                            <table class="min-w-full text-sm">
+                              <thead>
+                                <tr class="text-left text-slate-300 border-b border-white/10">
+                                  <th class="py-2 pr-4">Name</th>
+                                  <th class="py-2 pr-4">Image</th>
+                                  <th class="py-2 pr-4">Status</th>
+                                  <th class="py-2 pr-4">Ports</th>
+                                </tr>
+                              </thead>
+                              <tbody>${contRows || ''}</tbody>
+                            </table>
+                          </div>
+                        `;
+                    }
+                }
+
+                const avatarLetter = String(data.host?.friendly_name || hosts[hostId]?.friendly_name || hostId || '?').trim().charAt(0).toUpperCase();
+                const upCount = monitors.filter(m => m.last_status === 'up').length;
+                const downCount = monitors.filter(m => m.last_status === 'down').length;
+                const errCount = monitors.filter(m => m.last_status === 'error').length;
+
+                container.innerHTML = `
+                  <div class="p-4">
+                    <div class="bg-gradient-to-br from-purple-700/20 via-white/5 to-green-600/20 border border-white/10 rounded-xl p-4">
+                      <div class="flex items-start justify-between gap-4">
+                        <div class="flex items-center gap-4">
+                          <div class="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center font-bold">${avatarLetter}</div>
+                          <div>
+                            <div class="flex items-center gap-2">
+                              <div class="text-xl font-semibold">${data.host?.friendly_name || hosts[hostId]?.friendly_name || hostId}</div>
+                              <span class="text-xs px-2 py-1 rounded-full bg-white/10 border border-white/10">Monitoring</span>
+                            </div>
+                            <div class="text-xs text-slate-300 font-mono">${data.host?.ssh_user || hosts[hostId]?.user || ''}@${data.host?.ip_address || hosts[hostId]?.ip || ''}</div>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <a class="bg-sky-600 hover:bg-sky-700 text-white text-sm px-3 py-2 rounded-lg" href="/monitoring/wizard?host_id=${dbId}">Monitoring Wizard</a>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <div class="bg-white/5 border border-white/10 rounded-xl p-3"><div class="text-xs text-slate-300">Total</div><div class="text-2xl font-semibold">${monitors.length}</div></div>
+                      <div class="bg-white/5 border border-white/10 rounded-xl p-3"><div class="text-xs text-slate-300">Up</div><div class="text-2xl font-semibold text-green-400">${upCount}</div></div>
+                      <div class="bg-white/5 border border-white/10 rounded-xl p-3"><div class="text-xs text-slate-300">Down</div><div class="text-2xl font-semibold text-amber-400">${downCount}</div></div>
+                      <div class="bg-white/5 border border-white/10 rounded-xl p-3"><div class="text-xs text-slate-300">Error</div><div class="text-2xl font-semibold text-red-400">${errCount}</div></div>
+                    </div>
+
+                    <div class="mt-4 bg-white/5 border border-white/10 rounded-xl p-4">
+                      <div class="flex items-center justify-between">
+                        <div class="font-medium">Monitors</div>
+                        <div class="text-xs text-slate-400">Checks run in the background — refresh to update</div>
+                      </div>
+
+                      <div class="mt-3 flex items-center justify-between gap-2">
+                        <div class="text-xs text-slate-300" id="mon-selected-count">0 selected</div>
+                        <div class="flex gap-2">
+                          <button id="mon-bulk-test" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Test selected</button>
+                          <button id="mon-bulk-delete" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Delete selected</button>
+                        </div>
+                      </div>
+
+                      <div class="mt-3 overflow-x-auto">
+                        <table class="min-w-full text-sm">
+                          <thead>
+                            <tr class="text-left text-slate-300 border-b border-white/10">
+                              <th class="py-2 pr-3"></th>
+                              <th class="py-2 pr-4">Name</th>
+                              <th class="py-2 pr-4">Type</th>
+                              <th class="py-2 pr-4">Target</th>
+                              <th class="py-2 pr-4">Status</th>
+                              <th class="py-2 pr-4">Last check</th>
+                              <th class="py-2 pr-4">RTT</th>
+                              <th class="py-2 pr-2">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>${rows}</tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    ${dockerHtml ? `<div class="mt-4 bg-white/5 border border-white/10 rounded-xl p-4">${dockerHtml}</div>` : ''}
+                  </div>
+                `;
+
+                const wireMonitoringRowActions = (monitors) => {
+                    const selCountEl = document.getElementById('mon-selected-count');
+                    const updateSelCount = () => {
+                        if (selCountEl) selCountEl.textContent = `${selectedMonitorIds.size} selected`;
+                    };
 
                     document.querySelectorAll('.mon-cb').forEach(cb => {
                         cb.addEventListener('change', () => {
@@ -2460,209 +2635,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateSelCount();
                 };
 
-                
-
-
-            try {
-                const data = await window.fetchApi(`/api/hosts/${dbId}/monitoring`);
-                if (data && data.error) throw new Error(data.error);
-
-                const monitors = data.monitors || [];
-
-                const wireMonitoringRowActions = (monitors) => {
-                    const selCountEl = document.getElementById('mon-selected-count');
-                    const updateSelCount = () => {
-                        if (selCountEl) selCountEl.textContent = `${selectedMonitorIds.size} selected`;
-                    };
-
-
-                const fmtMonTs = (ts) => {
-                    if (!ts) return '-';
-                    try {
-                        const d = new Date(ts);
-                        if (Number.isNaN(d.getTime())) return ts;
-                        const pad = (n) => String(n).padStart(2, '0');
-                        const yyyy = d.getFullYear();
-                        const mm = pad(d.getMonth() + 1);
-                        const dd = pad(d.getDate());
-                        const hh = pad(d.getHours());
-                        const mi = pad(d.getMinutes());
-                        return `${yyyy}/${mm}/${dd} - ${hh}:${mi}`;
-                    } catch (e) {
-                        return ts;
-                    }
-                };
-
-                
-                const dockerSnap = data.docker_snapshot;
-
-                if (!monitors.length) {
-                    window.location.href = `/monitoring/wizard?host_id=${dbId}`;
-                    return;
-                }
-
-                const rows = monitors.map(m => {
-                    const cfg = m.config || {};
-                    let target = '-';
-                    if (m.type === 'http') target = cfg.url || '-';
-                    else if (m.type === 'tcp') target = `${cfg.hostname || ''}:${cfg.port || ''}`;
-                    else if (m.type === 'docker_container') target = cfg.container_name || '-';
-                    else if (m.type === 'udp_listen') target = `:${cfg.port || ''}/udp`;
-
-                    const status = m.last_status || 'never';
-                    const statusClass = status === 'up' ? 'text-green-400' : (status === 'down' ? 'text-amber-400' : (status === 'error' ? 'text-red-400' : 'text-slate-400'));
-                    const err = m.last_error_message ? `<div class="text-xs text-slate-400 max-w-xl truncate">${m.last_error_message}</div>` : '';
-                    const rtt = (m.last_response_time_ms !== null && m.last_response_time_ms !== undefined) ? `${m.last_response_time_ms}ms` : '-';
-
-                    const checked = selectedMonitorIds.has(m.id) ? 'checked' : '';
-
-                    const iconBtn = (title, cls, svg) => `
-                      <button class="${cls} bg-white/10 hover:bg-white/20 px-2 py-1 rounded" title="${title}" aria-label="${title}" type="button">${svg}</button>
-                    `;
-
-                
-
-
-                
-
-
-
-                    const svgPlay = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5v14l11-7z"/></svg>';
-                    const svgEdit = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2M12 7v14m8-13-8-8-8 8"/></svg>';
-                    const svgTrash = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6h18M8 6V4h8v2m-1 0v16H9V6"/></svg>';
-
-                    return `
-                      <tr class="border-b border-white/5" data-mid="${m.id}">
-                        <td class="py-2 pr-3"><input class="mon-cb" type="checkbox" data-mid="${m.id}" ${checked} /></td>
-                        <td class="py-2 pr-4">${m.name}</td>
-                        <td class="py-2 pr-4">${m.type}</td>
-                        <td class="py-2 pr-4">${target}</td>
-                        <td class="py-2 pr-4"><span class="${statusClass}">${status}</span>${err}</td>
-                        <td class="py-2 pr-4">${fmtMonTs(m.last_checked_at)}</td>
-                        <td class="py-2 pr-4">${rtt}</td>
-                        <td class="py-2 pr-2">
-                          <div class="flex gap-2">
-                            ${iconBtn('Test now', 'mon-test', svgPlay)}
-                            ${iconBtn('Edit', 'mon-edit', svgEdit)}
-                            ${iconBtn('Delete', 'mon-del', svgTrash)}
-                          </div>
-                        </td>
-                      </tr>
-                    `;
-                }).join('');
-
-                let dockerHtml = '';
-                if (dockerSnap && dockerSnap.inventory) {
-                    const inv = dockerSnap.inventory;
-                    const dockerInstalled = !!inv.docker;
-                    const containers = inv.containers || [];
-                    if (!dockerInstalled) {
-                        dockerHtml = `<div class="mt-6 text-sm termix-muted">Docker: not detected</div>`;
-                    } else {
-                        const contRows = containers.map(c => `
-                          <tr class="border-b border-white/5">
-                            <td class="py-2 pr-4">${c.Names || ''}</td>
-                            <td class="py-2 pr-4">${c.Image || ''}</td>
-                            <td class="py-2 pr-4">${c.Status || ''}</td>
-                            <td class="py-2 pr-4 text-xs text-slate-300">${c.Ports || ''}</td>
-                          </tr>
-                        `).join('');
-                        dockerHtml = `
-                          <div class="mt-8">
-                            <div class="text-sm termix-muted">Docker inventory (latest) — captured at ${dockerSnap.captured_at || ''}</div>
-                            <div class="mt-2 overflow-x-auto">
-                              <table class="min-w-full text-sm">
-                                <thead>
-                                  <tr class="text-left text-slate-300 border-b border-white/10">
-                                    <th class="py-2 pr-3"></th>
-                              <th class="py-2 pr-4">Name</th>
-                                    <th class="py-2 pr-4">Image</th>
-                                    <th class="py-2 pr-4">Status</th>
-                                    <th class="py-2 pr-4">Ports</th>
-                                  </tr>
-                                </thead>
-                                <tbody>${contRows || ''}</tbody>
-                              </table>
-                            </div>
-                          </div>
-                        `;
-                    }
-                }
-
-                const avatarLetter = String(data.host?.friendly_name || hosts[hostId]?.friendly_name || hostId || '?').trim().charAt(0).toUpperCase();
-                const upCount = monitors.filter(m => m.last_status === 'up').length;
-                const downCount = monitors.filter(m => m.last_status === 'down').length;
-                const errCount = monitors.filter(m => m.last_status === 'error').length;
-
-                container.innerHTML = `
-                  <div class="p-4">
-                    <div class="bg-gradient-to-br from-purple-700/20 via-white/5 to-green-600/20 border border-white/10 rounded-xl p-4">
-                      <div class="flex items-start justify-between gap-4">
-                        <div class="flex items-center gap-4">
-                          <div class="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center font-bold">${avatarLetter}</div>
-                          <div>
-                            <div class="flex items-center gap-2">
-                              <div class="text-xl font-semibold">${data.host?.friendly_name || hosts[hostId]?.friendly_name || hostId}</div>
-                              <span class="text-xs px-2 py-1 rounded-full bg-white/10 border border-white/10">Monitoring</span>
-                            </div>
-                            <div class="text-xs text-slate-300 font-mono">${data.host?.ssh_user || hosts[hostId]?.user || ''}@${data.host?.ip_address || hosts[hostId]?.ip || ''}</div>
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                          <a class="bg-sky-600 hover:bg-sky-700 text-white text-sm px-3 py-2 rounded-lg" href="/monitoring/wizard?host_id=${dbId}">Monitoring Wizard</a>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-                      <div class="bg-white/5 border border-white/10 rounded-xl p-3"><div class="text-xs text-slate-300">Total</div><div class="text-2xl font-semibold">${monitors.length}</div></div>
-                      <div class="bg-white/5 border border-white/10 rounded-xl p-3"><div class="text-xs text-slate-300">Up</div><div class="text-2xl font-semibold text-green-400">${upCount}</div></div>
-                      <div class="bg-white/5 border border-white/10 rounded-xl p-3"><div class="text-xs text-slate-300">Down</div><div class="text-2xl font-semibold text-amber-400">${downCount}</div></div>
-                      <div class="bg-white/5 border border-white/10 rounded-xl p-3"><div class="text-xs text-slate-300">Error</div><div class="text-2xl font-semibold text-red-400">${errCount}</div></div>
-                    </div>
-
-                    <div class="mt-4 bg-white/5 border border-white/10 rounded-xl p-4">
-                      <div class="flex items-center justify-between">
-                        <div class="font-medium">Monitors</div>
-                        <div class="text-xs text-slate-400">Checks run in the background — refresh to update</div>
-                      </div>
-                      <div class="mt-3 flex items-center justify-between gap-2">
-                      <div class="text-xs text-slate-300" id="mon-selected-count">0 selected</div>
-                      <div class="flex gap-2">
-                        <button id="mon-bulk-test" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Test selected</button>
-                        <button id="mon-bulk-delete" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Delete selected</button>
-                      </div>
-                    </div>
-                    <div class="mt-3 overflow-x-auto">
-                        <table class="min-w-full text-sm">
-                          <thead>
-                            <tr class="text-left text-slate-300 border-b border-white/10">
-                              <th class="py-2 pr-3"></th>
-                              <th class="py-2 pr-4">Name</th>
-                              <th class="py-2 pr-4">Type</th>
-                              <th class="py-2 pr-4">Target</th>
-                              <th class="py-2 pr-4">Status</th>
-                              <th class="py-2 pr-4">Last check</th>
-                              <th class="py-2 pr-4">RTT</th>
-                              <th class="py-2 pr-2">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody>${rows}</tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    ${dockerHtml ? `<div class="mt-4 bg-white/5 border border-white/10 rounded-xl p-4">${dockerHtml}</div>` : ''}
-                  </div>
-                `;
-
                 wireMonitoringRowActions(monitors);
 
             } catch (err) {
                 console.error('Error loading monitoring', err);
                 container.innerHTML = `<div class="p-4 text-xs text-red-600">Error loading monitoring: ${err.message || err}</div>`;
-
-
             }
         };
 
