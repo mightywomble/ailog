@@ -2314,37 +2314,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             container.innerHTML = `<div class="p-4 text-sm termix-muted">Loading monitoring data...</div>`;
 
-            try {
-                const data = await window.fetchApi(`/api/hosts/${dbId}/monitoring`);
-                if (data && data.error) throw new Error(data.error);
-
-                const monitors = data.monitors || [];
-                const dockerSnap = data.docker_snapshot;
-
-                if (!monitors.length) {
-                    window.location.href = `/monitoring/wizard?host_id=${dbId}`;
-                    return;
-                }
-
-                const rows = monitors.map(m => {
-                    const cfg = m.config || {};
-                    let target = '-';
-                    if (m.type === 'http') target = cfg.url || '-';
-                    else if (m.type === 'tcp') target = `${cfg.hostname || ''}:${cfg.port || ''}`;
-                    else if (m.type === 'docker_container') target = cfg.container_name || '-';
-                    else if (m.type === 'udp_listen') target = `:${cfg.port || ''}/udp`;
-
-                    const status = m.last_status || 'never';
-                    const statusClass = status === 'up' ? 'text-green-400' : (status === 'down' ? 'text-amber-400' : (status === 'error' ? 'text-red-400' : 'text-slate-400'));
-                    const err = m.last_error_message ? `<div class="text-xs text-slate-400 max-w-xl truncate">${m.last_error_message}</div>` : '';
-                    const rtt = (m.last_response_time_ms !== null && m.last_response_time_ms !== undefined) ? `${m.last_response_time_ms}ms` : '-';
-
-                    const checked = selectedMonitorIds.has(m.id) ? 'checked' : '';
-
-                    const iconBtn = (title, cls, svg) => `
-                      <button class="${cls} bg-white/10 hover:bg-white/20 px-2 py-1 rounded" title="${title}" type="button">${svg}</button>
-                    `;
-
                 const wireMonitoringRowActions = () => {
                     const selCountEl = document.getElementById('mon-selected-count');
                     const updateSelCount = () => {
@@ -2352,7 +2321,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     };
 
                     document.querySelectorAll('.mon-cb').forEach(cb => {
-                        cb.addEventListener('change', (e) => {
+                        cb.addEventListener('change', () => {
                             const mid = parseInt(cb.dataset.mid, 10);
                             if (cb.checked) selectedMonitorIds.add(mid);
                             else selectedMonitorIds.delete(mid);
@@ -2448,7 +2417,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         btnTest.onclick = async () => {
                             if (status) status.textContent = 'Testing...';
                             await window.fetchApi(`/api/monitors/${m.id}/test`, { method: 'POST' });
-                            if (status) status.textContent = 'Test completed. Refreshing...';
                             await showHostMonitoringMain();
                             close();
                         };
@@ -2470,7 +2438,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify(payload)
                             });
-                            if (status) status.textContent = 'Saved.';
                             await showHostMonitoringMain();
                             close();
                         };
@@ -2497,7 +2464,64 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateSelCount();
                 };
 
-                wireMonitoringRowActions();
+                
+
+
+            try {
+                const data = await window.fetchApi(`/api/hosts/${dbId}/monitoring`);
+                if (data && data.error) throw new Error(data.error);
+
+                const monitors = data.monitors || [];
+
+                const fmtMonTs = (ts) => {
+                    if (!ts) return '-';
+                    try {
+                        const d = new Date(ts);
+                        if (Number.isNaN(d.getTime())) return ts;
+                        const pad = (n) => String(n).padStart(2, '0');
+                        const yyyy = d.getFullYear();
+                        const mm = pad(d.getMonth() + 1);
+                        const dd = pad(d.getDate());
+                        const hh = pad(d.getHours());
+                        const mi = pad(d.getMinutes());
+                        return `${yyyy}/${mm}/${dd} - ${hh}:${mi}`;
+                    } catch (e) {
+                        return ts;
+                    }
+                };
+
+                
+                const dockerSnap = data.docker_snapshot;
+
+                if (!monitors.length) {
+                    window.location.href = `/monitoring/wizard?host_id=${dbId}`;
+                    return;
+                }
+
+                const rows = monitors.map(m => {
+                    const cfg = m.config || {};
+                    let target = '-';
+                    if (m.type === 'http') target = cfg.url || '-';
+                    else if (m.type === 'tcp') target = `${cfg.hostname || ''}:${cfg.port || ''}`;
+                    else if (m.type === 'docker_container') target = cfg.container_name || '-';
+                    else if (m.type === 'udp_listen') target = `:${cfg.port || ''}/udp`;
+
+                    const status = m.last_status || 'never';
+                    const statusClass = status === 'up' ? 'text-green-400' : (status === 'down' ? 'text-amber-400' : (status === 'error' ? 'text-red-400' : 'text-slate-400'));
+                    const err = m.last_error_message ? `<div class="text-xs text-slate-400 max-w-xl truncate">${m.last_error_message}</div>` : '';
+                    const rtt = (m.last_response_time_ms !== null && m.last_response_time_ms !== undefined) ? `${m.last_response_time_ms}ms` : '-';
+
+                    const checked = selectedMonitorIds.has(m.id) ? 'checked' : '';
+
+                    const iconBtn = (title, cls, svg) => `
+                      <button class="${cls} bg-white/10 hover:bg-white/20 px-2 py-1 rounded" title="${title}" aria-label="${title}" type="button">${svg}</button>
+                    `;
+
+                
+
+
+                
+
 
 
                     const svgPlay = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5v14l11-7z"/></svg>';
@@ -2511,7 +2535,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td class="py-2 pr-4">${m.type}</td>
                         <td class="py-2 pr-4">${target}</td>
                         <td class="py-2 pr-4"><span class="${statusClass}">${status}</span>${err}</td>
-                        <td class="py-2 pr-4">${m.last_checked_at || '-'}</td>
+                        <td class="py-2 pr-4">${fmtMonTs(m.last_checked_at)}</td>
                         <td class="py-2 pr-4">${rtt}</td>
                         <td class="py-2 pr-2">
                           <div class="flex gap-2">
@@ -2632,6 +2656,9 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 console.error('Error loading monitoring', err);
                 container.innerHTML = `<div class="p-4 text-xs text-red-600">Error loading monitoring: ${err.message || err}</div>`;
+
+                wireMonitoringRowActions();
+
             }
         };
 
