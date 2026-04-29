@@ -2305,7 +2305,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Fill the same main panel area used by Host Info
-            if (logTableTitle) logTableTitle.textContent = `Monitoring: ${hosts[hostId]?.friendly_name || hostId}`;
+            const logTableTitleEl = document.getElementById('log-table-title');
+            if (logTableTitleEl) logTableTitleEl.textContent = `Monitoring: ${hosts[hostId]?.friendly_name || hostId}`;
             const container = document.getElementById('log-table-container');
             if (!container) return;
 
