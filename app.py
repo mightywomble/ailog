@@ -2362,6 +2362,16 @@ def perform_scheduled_analysis():
     _do_analysis_task()
 
 # --- STARTUP & SHUTDOWN ---
+
+def _run_monitors_in_appctx(fn, limit: int):
+    """Run a callable inside a Flask app context (for APScheduler jobs)."""
+    try:
+        with app.app_context():
+            return fn(limit=limit)
+    except Exception as e:
+        print(f'[WARN] Monitoring runner failed: {e}')
+        return None
+
 def startup_scheduler():
     """Start APScheduler and sync jobs from DB schedules."""
     with app.app_context():
@@ -2369,7 +2379,7 @@ def startup_scheduler():
         try:
             from monitoring.scheduler import run_due_monitors
             scheduler.add_job(
-                lambda: run_due_monitors(limit=100),
+                lambda: (_run_monitors_in_appctx(run_due_monitors, 100)),
                 trigger='interval',
                 seconds=15,
                 id='monitoring_runner',
