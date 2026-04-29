@@ -2285,6 +2285,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         
 
+        let selectedMonitorIds = new Set();
+
         const showHostMonitoringMain = async () => {
             const hostId = selectedHostId;
             if (!hostId || hostId === 'local') {
@@ -2330,19 +2332,194 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (m.type === 'http') target = cfg.url || '-';
                     else if (m.type === 'tcp') target = `${cfg.hostname || ''}:${cfg.port || ''}`;
                     else if (m.type === 'docker_container') target = cfg.container_name || '-';
+                    else if (m.type === 'udp_listen') target = `:${cfg.port || ''}/udp`;
 
                     const status = m.last_status || 'never';
                     const statusClass = status === 'up' ? 'text-green-400' : (status === 'down' ? 'text-amber-400' : (status === 'error' ? 'text-red-400' : 'text-slate-400'));
                     const err = m.last_error_message ? `<div class="text-xs text-slate-400 max-w-xl truncate">${m.last_error_message}</div>` : '';
                     const rtt = (m.last_response_time_ms !== null && m.last_response_time_ms !== undefined) ? `${m.last_response_time_ms}ms` : '-';
+
+                    const checked = selectedMonitorIds.has(m.id) ? 'checked' : '';
+
+                    const iconBtn = (title, cls, svg) => `
+                      <button class="${cls} bg-white/10 hover:bg-white/20 px-2 py-1 rounded" title="${title}" type="button">${svg}</button>
+                    `;
+
+                const wireMonitoringRowActions = () => {
+                    const selCountEl = document.getElementById('mon-selected-count');
+                    const updateSelCount = () => {
+                        if (selCountEl) selCountEl.textContent = `${selectedMonitorIds.size} selected`;
+                    };
+
+                    document.querySelectorAll('.mon-cb').forEach(cb => {
+                        cb.addEventListener('change', (e) => {
+                            const mid = parseInt(cb.dataset.mid, 10);
+                            if (cb.checked) selectedMonitorIds.add(mid);
+                            else selectedMonitorIds.delete(mid);
+                            updateSelCount();
+                        });
+                    });
+
+                    const callBulk = async (action) => {
+                        const ids = Array.from(selectedMonitorIds);
+                        if (!ids.length) return;
+                        await window.fetchApi('/api/monitors/bulk', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action, ids })
+                        });
+                        await showHostMonitoringMain();
+                    };
+
+                    const bulkTest = document.getElementById('mon-bulk-test');
+                    const bulkDel = document.getElementById('mon-bulk-delete');
+                    if (bulkTest) bulkTest.addEventListener('click', () => callBulk('test'));
+                    if (bulkDel) bulkDel.addEventListener('click', () => callBulk('delete'));
+
+                    const openEdit = (m) => {
+                        const modal = document.getElementById('monitor-edit-modal');
+                        const body = document.getElementById('monitor-edit-body');
+                        const status = document.getElementById('monitor-edit-status');
+                        const btnClose = document.getElementById('monitor-edit-close');
+                        const btnSave = document.getElementById('monitor-edit-save');
+                        const btnTest = document.getElementById('monitor-edit-test');
+
+                        if (!modal || !body || !btnClose || !btnSave || !btnTest) return;
+
+                        const cfg = m.config || {};
+                        const accepted = Array.isArray(cfg.acceptedStatusCodes) ? cfg.acceptedStatusCodes.join(',') : (cfg.acceptedStatusCodes || '200');
+
+                        body.innerHTML = `
+                          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <label class="text-xs text-slate-300">Name</label>
+                              <input id="edit-name" class="mt-1 w-full bg-slate-950 border border-white/10 rounded px-2 py-2 text-sm" value="${m.name || ''}" />
+                            </div>
+                            <div>
+                              <label class="text-xs text-slate-300">Enabled</label>
+                              <select id="edit-enabled" class="mt-1 w-full bg-slate-950 border border-white/10 rounded px-2 py-2 text-sm">
+                                <option value="true" ${m.enabled ? 'selected' : ''}>true</option>
+                                <option value="false" ${!m.enabled ? 'selected' : ''}>false</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label class="text-xs text-slate-300">Interval (s)</label>
+                              <input id="edit-interval" type="number" class="mt-1 w-full bg-slate-950 border border-white/10 rounded px-2 py-2 text-sm" value="${m.interval_seconds || 60}" />
+                            </div>
+                            <div>
+                              <label class="text-xs text-slate-300">Timeout (s)</label>
+                              <input id="edit-timeout" type="number" class="mt-1 w-full bg-slate-950 border border-white/10 rounded px-2 py-2 text-sm" value="${m.timeout_seconds || 10}" />
+                            </div>
+                          </div>
+
+                          ${m.type === 'http' ? `
+                          <div class="mt-4">
+                            <label class="text-xs text-slate-300">Accepted status codes (comma separated)</label>
+                            <div class="mt-1 flex gap-2">
+                              <input id="edit-accepted" class="flex-1 bg-slate-950 border border-white/10 rounded px-2 py-2 text-sm" value="${accepted}" />
+                              ${m.last_status_code ? `<button id="edit-add-last" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded text-sm" type="button">Add ${m.last_status_code}</button>` : ''}
+                            </div>
+                            <div class="mt-1 text-xs text-slate-400">Last status code: ${m.last_status_code || '-'} ${m.last_error_message ? `— ${m.last_error_message}` : ''}</div>
+                          </div>
+                          ` : ''}
+                        `;
+
+                        const close = () => {
+                            modal.classList.add('hidden');
+                            modal.classList.remove('flex');
+                        };
+                        btnClose.onclick = close;
+
+                        modal.classList.remove('hidden');
+                        modal.classList.add('flex');
+                        if (status) status.textContent = '';
+
+                        const addLast = document.getElementById('edit-add-last');
+                        if (addLast) {
+                            addLast.addEventListener('click', () => {
+                                const inp = document.getElementById('edit-accepted');
+                                if (!inp) return;
+                                const set = new Set(String(inp.value||'').split(',').map(x => x.trim()).filter(Boolean));
+                                set.add(String(m.last_status_code));
+                                inp.value = Array.from(set).join(',');
+                            });
+                        }
+
+                        btnTest.onclick = async () => {
+                            if (status) status.textContent = 'Testing...';
+                            await window.fetchApi(`/api/monitors/${m.id}/test`, { method: 'POST' });
+                            if (status) status.textContent = 'Test completed. Refreshing...';
+                            await showHostMonitoringMain();
+                            close();
+                        };
+
+                        btnSave.onclick = async () => {
+                            if (status) status.textContent = 'Saving...';
+                            const payload = {
+                                name: document.getElementById('edit-name')?.value,
+                                enabled: document.getElementById('edit-enabled')?.value === 'true',
+                                interval_seconds: parseInt(document.getElementById('edit-interval')?.value || '60', 10),
+                                timeout_seconds: parseInt(document.getElementById('edit-timeout')?.value || '10', 10),
+                                config: cfg,
+                            };
+                            if (m.type === 'http') {
+                                payload.config = { ...cfg, acceptedStatusCodes: document.getElementById('edit-accepted')?.value || accepted };
+                            }
+                            await window.fetchApi(`/api/monitors/${m.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload)
+                            });
+                            if (status) status.textContent = 'Saved.';
+                            await showHostMonitoringMain();
+                            close();
+                        };
+                    };
+
+                    document.querySelectorAll('tr[data-mid]').forEach(tr => {
+                        const mid = parseInt(tr.dataset.mid, 10);
+                        const m = monitors.find(x => x.id === mid);
+                        if (!m) return;
+
+                        tr.querySelectorAll('button.mon-test').forEach(btn => btn.addEventListener('click', async () => {
+                            await window.fetchApi(`/api/monitors/${mid}/test`, { method: 'POST' });
+                            await showHostMonitoringMain();
+                        }));
+                        tr.querySelectorAll('button.mon-edit').forEach(btn => btn.addEventListener('click', () => openEdit(m)));
+                        tr.querySelectorAll('button.mon-del').forEach(btn => btn.addEventListener('click', async () => {
+                            if (!confirm('Delete this monitor?')) return;
+                            await window.fetchApi(`/api/monitors/${mid}`, { method: 'DELETE' });
+                            selectedMonitorIds.delete(mid);
+                            await showHostMonitoringMain();
+                        }));
+                    });
+
+                    updateSelCount();
+                };
+
+                wireMonitoringRowActions();
+
+
+                    const svgPlay = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5v14l11-7z"/></svg>';
+                    const svgEdit = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2M12 7v14m8-13-8-8-8 8"/></svg>';
+                    const svgTrash = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6h18M8 6V4h8v2m-1 0v16H9V6"/></svg>';
+
                     return `
-                      <tr class="border-b border-white/5">
+                      <tr class="border-b border-white/5" data-mid="${m.id}">
+                        <td class="py-2 pr-3"><input class="mon-cb" type="checkbox" data-mid="${m.id}" ${checked} /></td>
                         <td class="py-2 pr-4">${m.name}</td>
                         <td class="py-2 pr-4">${m.type}</td>
                         <td class="py-2 pr-4">${target}</td>
                         <td class="py-2 pr-4"><span class="${statusClass}">${status}</span>${err}</td>
                         <td class="py-2 pr-4">${m.last_checked_at || '-'}</td>
                         <td class="py-2 pr-4">${rtt}</td>
+                        <td class="py-2 pr-2">
+                          <div class="flex gap-2">
+                            ${iconBtn('Test now', 'mon-test', svgPlay)}
+                            ${iconBtn('Edit', 'mon-edit', svgEdit)}
+                            ${iconBtn('Delete', 'mon-del', svgTrash)}
+                          </div>
+                        </td>
                       </tr>
                     `;
                 }).join('');
@@ -2370,7 +2547,8 @@ document.addEventListener('DOMContentLoaded', () => {
                               <table class="min-w-full text-sm">
                                 <thead>
                                   <tr class="text-left text-slate-300 border-b border-white/10">
-                                    <th class="py-2 pr-4">Name</th>
+                                    <th class="py-2 pr-3"></th>
+                              <th class="py-2 pr-4">Name</th>
                                     <th class="py-2 pr-4">Image</th>
                                     <th class="py-2 pr-4">Status</th>
                                     <th class="py-2 pr-4">Ports</th>
@@ -2421,16 +2599,25 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="font-medium">Monitors</div>
                         <div class="text-xs text-slate-400">Checks run in the background — refresh to update</div>
                       </div>
-                      <div class="mt-3 overflow-x-auto">
+                      <div class="mt-3 flex items-center justify-between gap-2">
+                      <div class="text-xs text-slate-300" id="mon-selected-count">0 selected</div>
+                      <div class="flex gap-2">
+                        <button id="mon-bulk-test" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Test selected</button>
+                        <button id="mon-bulk-delete" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Delete selected</button>
+                      </div>
+                    </div>
+                    <div class="mt-3 overflow-x-auto">
                         <table class="min-w-full text-sm">
                           <thead>
                             <tr class="text-left text-slate-300 border-b border-white/10">
+                              <th class="py-2 pr-3"></th>
                               <th class="py-2 pr-4">Name</th>
                               <th class="py-2 pr-4">Type</th>
                               <th class="py-2 pr-4">Target</th>
                               <th class="py-2 pr-4">Status</th>
                               <th class="py-2 pr-4">Last check</th>
                               <th class="py-2 pr-4">RTT</th>
+                              <th class="py-2 pr-2">Actions</th>
                             </tr>
                           </thead>
                           <tbody>${rows}</tbody>
@@ -5768,5 +5955,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     </script>
 
+
+<div id="monitor-edit-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-slate-900 border border-white/10 rounded-xl w-full max-w-2xl p-4">
+    <div class="flex items-center justify-between">
+      <div class="font-semibold">Edit Monitor</div>
+      <button id="monitor-edit-close" class="bg-white/10 hover:bg-white/20 px-3 py-1 rounded" type="button">Close</button>
+    </div>
+    <div id="monitor-edit-body" class="mt-4"></div>
+    <div class="mt-4 flex items-center justify-between">
+      <div class="text-xs text-slate-400" id="monitor-edit-status"></div>
+      <div class="flex gap-2">
+        <button id="monitor-edit-test" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Test now</button>
+        <button id="monitor-edit-save" class="bg-sky-600 hover:bg-sky-700 px-3 py-2 rounded" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

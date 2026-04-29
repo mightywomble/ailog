@@ -208,3 +208,167 @@ def api_host_monitoring(host_id: int):
         'monitors': [m.to_dict(include_checks=False) for m in monitors],
         'docker_snapshot': docker_snapshot.to_dict() if docker_snapshot else None,
     })
+
+
+def _execute_monitor_now(m: Monitor):
+    """Execute a monitor immediately and persist a MonitorCheck + update monitor last_* fields."""
+    from datetime import datetime
+    from monitoring.scheduler import db as _db
+    from database import MonitorCheck
+
+    try:
+        timeout = int(m.timeout_seconds or 10)
+    except Exception:
+        timeout = 10
+
+    try:
+        if m.type == 'tcp':
+            from monitoring.runner import execute_tcp_check
+            cfg = m.config()
+            result = execute_tcp_check(cfg.get('hostname') or m.host.ip_address, int(cfg.get('port')), timeout)
+        elif m.type == 'http':
+            from monitoring.runner import execute_http_check
+            result = execute_http_check(m.config(), timeout)
+        elif m.type == 'docker_container':
+            from monitoring.runner import execute_docker_container_check
+            from monitoring.sshkeys import materialize_ssh_key_path
+            cfg = m.config()
+            user = (m.host.ssh_user or 'root')
+            key_path = materialize_ssh_key_path(m.host.ssh_key_id)
+            result = execute_docker_container_check(user, m.host.ip_address, key_path, cfg.get('container_name') or '', timeout)
+        elif m.type == 'udp_listen':
+            from monitoring.runner import execute_udp_listen_check
+            from monitoring.sshkeys import materialize_ssh_key_path
+            cfg = m.config()
+            user = (m.host.ssh_user or 'root')
+            key_path = materialize_ssh_key_path(m.host.ssh_key_id)
+            result = execute_udp_listen_check(user, m.host.ip_address, key_path, int(cfg.get('port') or 0), timeout)
+        else:
+            raise ValueError(f'Unsupported monitor type: {m.type}')
+
+        chk = MonitorCheck(
+            monitor_id=m.id,
+            checked_at=datetime.utcnow(),
+            status=result.status,
+            response_time_ms=int(result.response_time_ms),
+            status_code=getattr(result, 'status_code', None),
+            error_message=getattr(result, 'error_message', None),
+        )
+        _db.session.add(chk)
+        m.last_status = chk.status
+        m.last_checked_at = chk.checked_at
+        m.last_response_time_ms = chk.response_time_ms
+        m.last_status_code = chk.status_code
+        m.last_error_message = chk.error_message
+        _db.session.commit()
+        return {'ok': True, 'monitor': m.to_dict(include_checks=False), 'check': chk.to_dict()}
+    except Exception as e:
+        try:
+            _db.session.rollback()
+        except Exception:
+            pass
+        return {'ok': False, 'error': str(e)[:500]}
+
+
+@monitoring_bp.post('/api/monitors/<int:monitor_id>/test')
+def api_monitor_test(monitor_id: int):
+    m = db.session.get(Monitor, int(monitor_id))
+    if not m:
+        return jsonify({'error': 'Monitor not found'}), 404
+    res = _execute_monitor_now(m)
+    if not res.get('ok'):
+        return jsonify(res), 500
+    return jsonify(res)
+
+
+@monitoring_bp.patch('/api/monitors/<int:monitor_id>')
+def api_monitor_patch(monitor_id: int):
+    m = db.session.get(Monitor, int(monitor_id))
+    if not m:
+        return jsonify({'error': 'Monitor not found'}), 404
+
+    data = request.get_json(force=True) or {}
+
+    if 'name' in data:
+        m.name = str(data.get('name') or '').strip() or m.name
+    if 'enabled' in data:
+        m.enabled = bool(data.get('enabled'))
+    if 'interval_seconds' in data:
+        try:
+            m.interval_seconds = int(data.get('interval_seconds'))
+        except Exception:
+            pass
+    if 'timeout_seconds' in data:
+        try:
+            m.timeout_seconds = int(data.get('timeout_seconds'))
+        except Exception:
+            pass
+
+    if 'config' in data:
+        cfg = data.get('config') or {}
+        # For http monitors, normalize acceptedStatusCodes
+        if m.type == 'http' and isinstance(cfg, dict) and 'acceptedStatusCodes' in cfg:
+            codes = cfg.get('acceptedStatusCodes')
+            if isinstance(codes, str):
+                # allow "200,403"
+                parts = [c.strip() for c in codes.split(',') if c.strip()]
+                codes = [int(x) for x in parts if x.isdigit()]
+            if isinstance(codes, list):
+                norm = []
+                for c in codes:
+                    try:
+                        norm.append(int(c))
+                    except Exception:
+                        pass
+                cfg['acceptedStatusCodes'] = sorted(set(norm))
+        m.config_json = json.dumps(cfg, sort_keys=True)
+
+    db.session.commit()
+    return jsonify({'ok': True, 'monitor': m.to_dict(include_checks=False)})
+
+
+@monitoring_bp.delete('/api/monitors/<int:monitor_id>')
+def api_monitor_delete(monitor_id: int):
+    m = db.session.get(Monitor, int(monitor_id))
+    if not m:
+        return jsonify({'error': 'Monitor not found'}), 404
+    db.session.delete(m)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@monitoring_bp.post('/api/monitors/bulk')
+def api_monitors_bulk():
+    data = request.get_json(force=True) or {}
+    action = (data.get('action') or '').strip()
+    ids = data.get('ids') or []
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        return jsonify({'error': 'Invalid ids'}), 400
+
+    if not ids:
+        return jsonify({'error': 'No ids provided'}), 400
+
+    if action == 'test':
+        results = []
+        for mid in ids:
+            m = db.session.get(Monitor, int(mid))
+            if not m:
+                results.append({'id': mid, 'ok': False, 'error': 'not found'})
+                continue
+            results.append({'id': mid, **_execute_monitor_now(m)})
+        return jsonify({'ok': True, 'results': results})
+
+    if action == 'delete':
+        deleted = 0
+        for mid in ids:
+            m = db.session.get(Monitor, int(mid))
+            if not m:
+                continue
+            db.session.delete(m)
+            deleted += 1
+        db.session.commit()
+        return jsonify({'ok': True, 'deleted': deleted})
+
+    return jsonify({'error': 'Unsupported action'}), 400
