@@ -1,0 +1,36 @@
+# .gitignore
+
+# Ignore the scheduler configuration file which contains secrets
+scheduler_config.json
+
+# Ignore Python virtual environment
+venv/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+hosts.json
+
+# Local database artifacts
+instance/*.db
+instance/*.db-journal
+instance/*.db-wal
+
+# Local runtime / database artifacts
+instance/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment files
+.env
+.env.*
+
+# Local backups / scratch copies
+*.backup
+templates/*_old.html
+templates/*.backup
