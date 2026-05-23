@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-05-23 | v2.9.11 | SSH key encryption toggle + status; container adds cryptography + openssh-client; Helm adds Tailscale egress sidecar for tailnet SSH | ✅ Complete |
 | 2026-04-29 | v2.9.10 | Monitoring: stop creating TCP/53 monitors; add UDP listen monitor (e.g. DNS/Pi-hole on 53/udp) via SSH ss checks | ✅ Complete |
 | 2026-04-29 | v2.9.9 | Monitoring UX: wizard has Done button and clearer Docker visibility; adds Docker container running monitors; monitoring renders inline in main host panel | ✅ Complete |
 | 2026-04-29 | v2.9.8 | Monitoring UX: Monitoring button now works with db-<id> hosts and redirects to Monitoring Wizard when host has no monitors; wizard supports preselect + auto-discover | ✅ Complete |
@@ -89,6 +90,9 @@ This application is designed for use on a trusted, internal development network 
 * **Granular Sudo Permissions:** Minimal required permissions for enhanced security
 * **Network Isolation:** Designed for trusted internal networks only
 
+### 🔌 Tailscale egress for SSH (Kubernetes deployments)
+If your target hosts are only reachable over Tailscale, the AILog pod needs tailnet routing to connect to `100.x` addresses. The Helm chart now supports an optional Tailscale **egress sidecar** (tun mode) that provides outbound tailnet/subnet access from the pod. See the Helm chart README for configuration details.
+
 
 ### 🕵️ Secret scanning (gitleaks)
 This repository is protected by a server-side `gitleaks` hook that rejects pushes if it detects secrets (or secret-like strings) anywhere in the commit history.
@@ -167,6 +171,7 @@ requests==2.31.0
 APScheduler==3.10.4
 SQLAlchemy==2.0.23
 Flask-SQLAlchemy==3.1.1
+cryptography==42.0.8
 # Note: openai==1.3.7 requires httpx<0.28 (pinned in the deployed venv)
 ```
 

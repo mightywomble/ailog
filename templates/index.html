@@ -1297,7 +1297,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <section id="sshkey-encryption-section" class="settings-section space-y-4 hidden">
                         <div>
                             <h4 class="font-semibold text-lg text-white">SSH Key Encryption</h4>
-                            <p class="text-sm termix-muted">Stored SSH private keys are encrypted at rest. Set the master key via the <code>AILOG_SSHKEY_MASTER_KEY</code> environment variable.</p>
+                            <p class="text-sm termix-muted">Toggle encryption for stored SSH private keys. When enabled, set the master key via <code>AILOG_SSHKEY_MASTER_KEY</code>.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="inline-flex items-center gap-2 text-sm text-gray-200">
+                                <input id="sshkey-encryption-toggle" type="checkbox" class="h-4 w-4 rounded bg-white/10 border-gray-500 text-indigo-600 focus:ring-indigo-500">
+                                Enable encryption at rest
+                            </label>
+                            <span id="sshkey-encryption-toggle-status" class="text-xs termix-muted"></span>
                         </div>
                         <div class="space-y-2">
                             <div class="flex items-center gap-2">
@@ -3698,12 +3705,27 @@ const showHostInfoMain = async () => {
         const sshEncGenOut = document.getElementById('sshkey-encryption-generated');
         const sshEncRefreshBtn = document.getElementById('sshkey-encryption-refresh');
         const sshEncGenBtn = document.getElementById('sshkey-encryption-generate');
+        const sshEncToggle = document.getElementById('sshkey-encryption-toggle');
+        const sshEncToggleStatus = document.getElementById('sshkey-encryption-toggle-status');
 
         async function refreshSshEncStatus() {
             try {
                 const data = await window.fetchApi('/settings/sshkey-encryption/status');
+                if (sshEncToggle) sshEncToggle.checked = !!data.enabled;
+                if (sshEncToggleStatus) {
+                    if (!data.enabled) {
+                        sshEncToggleStatus.textContent = 'Disabled (keys stored unencrypted)';
+                        sshEncToggleStatus.className = 'text-xs text-yellow-300';
+                    } else if (data.ready) {
+                        sshEncToggleStatus.textContent = 'Enabled ✅ (master key set)';
+                        sshEncToggleStatus.className = 'text-xs text-green-400';
+                    } else {
+                        sshEncToggleStatus.textContent = 'Enabled, but not configured (set AILOG_SSHKEY_MASTER_KEY)';
+                        sshEncToggleStatus.className = 'text-xs text-red-400';
+                    }
+                }
                 if (sshEncStatus) {
-                    sshEncStatus.textContent = data.configured ? 'Configured ✅' : 'Not configured (set AILOG_SSHKEY_MASTER_KEY)';
+                    sshEncStatus.textContent = data.configured ? 'Master key configured ✅' : 'Master key not configured';
                     sshEncStatus.className = data.configured ? 'text-sm text-green-400' : 'text-sm text-red-400';
                 }
             } catch (e) {
@@ -3711,10 +3733,29 @@ const showHostInfoMain = async () => {
                     sshEncStatus.textContent = 'Failed to load status';
                     sshEncStatus.className = 'text-sm text-red-400';
                 }
+                if (sshEncToggleStatus) {
+                    sshEncToggleStatus.textContent = 'Failed to load toggle';
+                    sshEncToggleStatus.className = 'text-xs text-red-400';
+                }
             }
         }
 
         if (sshEncRefreshBtn) sshEncRefreshBtn.addEventListener('click', refreshSshEncStatus);
+        if (sshEncToggle) {
+            sshEncToggle.addEventListener('change', async () => {
+                try {
+                    await window.fetchApi('/settings/sshkey-encryption/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled: !!sshEncToggle.checked })
+                    });
+                    await refreshSshEncStatus();
+                } catch (e) {
+                    window.showToast(e.message || 'Failed to update encryption toggle', 'error');
+                    await refreshSshEncStatus();
+                }
+            });
+        }
 
         if (sshEncGenBtn) {
             sshEncGenBtn.addEventListener('click', async () => {

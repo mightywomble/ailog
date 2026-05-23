@@ -27,5 +27,8 @@ APScheduler==3.10.4
 SQLAlchemy==2.0.23
 Flask-SQLAlchemy==3.1.1
 
+# SSH key encryption
+cryptography==42.0.8
+
 # Optional: PostgreSQL support (uncomment if needed)
 # psycopg2-binary==2.9.9

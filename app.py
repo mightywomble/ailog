@@ -75,6 +75,18 @@ def _ensure_suricata_endpoint_columns():
 
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    val = str(raw).strip().lower()
+    if val in ('1', 'true', 'yes', 'on'):
+        return True
+    if val in ('0', 'false', 'no', 'off'):
+        return False
+    return default
+
+
 def _ensure_sshkey_encryption_columns():
     """Lightweight SQLite migration: add encryption columns to ssh_keys and optionally encrypt legacy plaintext rows."""
     try:
@@ -103,8 +115,20 @@ def _ensure_sshkey_encryption_columns():
     _add_col('ssh_keys', 'is_encrypted', 'BOOLEAN DEFAULT 0')
     _add_col('ssh_keys', 'enc_version', 'TEXT')
 
-    # Best-effort migration of legacy plaintext -> encrypted when master key is configured
-    if not sshkey_crypto_configured():
+    def _encryption_enabled() -> bool:
+        try:
+            row = AppSetting.query.get('sshkey.encryption_enabled')
+            if row and row.value_json is not None:
+                try:
+                    return bool(json.loads(row.value_json))
+                except Exception:
+                    return bool(row.value_json)
+        except Exception:
+            pass
+        return _env_bool('AILOG_SSHKEY_ENCRYPTION_ENABLED', True)
+
+    # Best-effort migration of legacy plaintext -> encrypted when master key is configured and encryption is enabled
+    if not (sshkey_crypto_configured() and _encryption_enabled()):
         return
 
     try:
@@ -270,6 +294,23 @@ def _setting_get(key, default=None):
         return _do()
     with app.app_context():
         return _do()
+
+
+def _sshkey_encryption_enabled() -> bool:
+    try:
+        row = AppSetting.query.get('sshkey.encryption_enabled')
+        if row and row.value_json is not None:
+            try:
+                return bool(json.loads(row.value_json))
+            except Exception:
+                return bool(row.value_json)
+    except Exception:
+        pass
+    return _env_bool('AILOG_SSHKEY_ENCRYPTION_ENABLED', True)
+
+
+def _sshkey_encryption_ready() -> bool:
+    return _sshkey_encryption_enabled() and sshkey_crypto_configured()
 
 
 def _setting_set(key, value):
@@ -3372,7 +3413,28 @@ def get_ssh_keys():
 @app.route('/settings/sshkey-encryption/status', methods=['GET'])
 def sshkey_encryption_status():
     """Return whether SSH key encryption is configured."""
-    return jsonify({'configured': bool(sshkey_crypto_configured()), 'env_var': 'AILOG_SSHKEY_MASTER_KEY'})
+    return jsonify({
+        'enabled': _sshkey_encryption_enabled(),
+        'configured': bool(sshkey_crypto_configured()),
+        'ready': _sshkey_encryption_ready(),
+        'env_var': 'AILOG_SSHKEY_MASTER_KEY'
+    })
+
+@app.route('/settings/sshkey-encryption/config', methods=['GET', 'POST'])
+def sshkey_encryption_config():
+    """Get/set SSH key encryption toggle."""
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if 'enabled' not in data:
+            return jsonify({'error': 'enabled is required'}), 400
+        _setting_set('sshkey.encryption_enabled', bool(data.get('enabled')))
+
+    return jsonify({
+        'enabled': _sshkey_encryption_enabled(),
+        'configured': bool(sshkey_crypto_configured()),
+        'ready': _sshkey_encryption_ready(),
+        'env_var': 'AILOG_SSHKEY_MASTER_KEY'
+    })
 
 @app.route('/settings/sshkey-encryption/generate', methods=['POST'])
 def sshkey_encryption_generate():
@@ -3417,15 +3479,22 @@ def upload_ssh_key():
         key_content = key_content.strip()
         if not key_content:
             return jsonify({'error': 'Empty key file'}), 400
-        if not sshkey_crypto_configured():
+        if _sshkey_encryption_enabled() and not sshkey_crypto_configured():
             return jsonify({'error': 'SSH key encryption not configured (set AILOG_SSHKEY_MASTER_KEY)'}), 500
-        enc = encrypt_str(key_content)
+        if _sshkey_encryption_enabled():
+            enc = encrypt_str(key_content)
+            is_encrypted = True
+            enc_version = 'fernet-v1'
+        else:
+            enc = key_content
+            is_encrypted = False
+            enc_version = None
         
         ssh_key = SSHKey(
             key_name=key_name,
             key_type='file',
-            is_encrypted=True,
-            enc_version='fernet-v1',
+            is_encrypted=is_encrypted,
+            enc_version=enc_version,
             key_content=enc
         )
         db.session.add(ssh_key)
@@ -3463,14 +3532,21 @@ def save_ssh_key():
         if 'ENCRYPTED' in key_content:
             return jsonify({'error': 'SSH key is passphrase-protected. Please decrypt it first before uploading. SSH cannot use encrypted keys in batch mode.'}), 400
         
-        if not sshkey_crypto_configured():
+        if _sshkey_encryption_enabled() and not sshkey_crypto_configured():
             return jsonify({'error': 'SSH key encryption not configured (set AILOG_SSHKEY_MASTER_KEY)'}), 500
         
         # Compute checksum of plaintext before encryption
         checksum = compute_key_checksum(key_content)
         print(f"[ssh-keys/save] Computed checksum: {checksum}", flush=True)
         
-        enc = encrypt_str(key_content)
+        if _sshkey_encryption_enabled():
+            enc = encrypt_str(key_content)
+            is_encrypted = True
+            enc_version = 'fernet-v1'
+        else:
+            enc = key_content
+            is_encrypted = False
+            enc_version = None
         
         existing = SSHKey.query.filter_by(key_name=key_name).first()
         if existing:
@@ -3479,8 +3555,8 @@ def save_ssh_key():
         ssh_key = SSHKey(
             key_name=key_name,
             key_type='pasted',
-            is_encrypted=True,
-            enc_version='fernet-v1',
+            is_encrypted=is_encrypted,
+            enc_version=enc_version,
             key_content=enc,
             key_checksum=checksum
         )
