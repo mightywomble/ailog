@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ailog.fullname" . }}
+  labels:
+{{ include "ailog.labels" . | indent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+{{ include "ailog.selectorLabels" . | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "ailog.labels" . | indent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "ailog.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: DATABASE_URL
+              value: {{ .Values.env.databaseUrl | quote }}
+            - name: AILOG_SSHKEY_ENCRYPTION_ENABLED
+              value: {{ .Values.env.sshkeyEncryptionEnabled | quote }}
+            {{- if .Values.env.sshkeyMasterKey }}
+            - name: AILOG_SSHKEY_MASTER_KEY
+              value: {{ .Values.env.sshkeyMasterKey | quote }}
+            {{- end }}
+            {{- with .Values.env.extra }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          livenessProbe:
+{{ toYaml .Values.livenessProbe | indent 12 }}
+          readinessProbe:
+{{ toYaml .Values.readinessProbe | indent 12 }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: ailog-data
+              mountPath: {{ .Values.persistence.mountPath | quote }}
+          {{- end }}
+
+        {{- if .Values.tailscale.egress.enabled }}
+        - name: tailscale-egress
+          image: "{{ .Values.tailscale.egress.image.repository }}:{{ .Values.tailscale.egress.image.tag }}"
+          imagePullPolicy: {{ .Values.tailscale.egress.image.pullPolicy }}
+          env:
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tailscale.egress.authSecretName | quote }}
+                  key: {{ .Values.tailscale.egress.authSecretKey | quote }}
+
+            # tailscale/tailscale image auto-detects Kubernetes and persists state to a secret named by TS_KUBE_SECRET.
+            - name: TS_KUBE_SECRET
+              value: tailscale
+
+            - name: TS_STATE_DIR
+              value: /var/lib/tailscale
+
+            {{- if eq .Values.tailscale.egress.mode "tun" }}
+            - name: TS_USERSPACE
+              value: "false"
+            {{- else }}
+            - name: TS_USERSPACE
+              value: "true"
+            - name: TS_SOCKS5_SERVER
+              value: {{ .Values.tailscale.egress.socks5Server | quote }}
+            {{- end }}
+
+            # Explicitly set non-default flags and include --reset so changes to these values
+            # don't cause tailscale up to fail on subsequent pod restarts.
+            - name: TS_EXTRA_ARGS
+              value: {{ printf "--reset --accept-dns=false%s" (ternary " --accept-routes=true" "" .Values.tailscale.egress.acceptRoutes) | quote }}
+
+          volumeMounts:
+            - name: tailscale-state
+              mountPath: /var/lib/tailscale
+
+            {{- if eq .Values.tailscale.egress.mode "tun" }}
+            - name: dev-net-tun
+              mountPath: /dev/net/tun
+            {{- end }}
+
+          {{- if eq .Values.tailscale.egress.mode "tun" }}
+          securityContext:
+            privileged: true
+          {{- else }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+          {{- end }}
+
+          resources:
+{{ toYaml .Values.tailscale.egress.resources | indent 12 }}
+        {{- end }}
+      volumes:
+        {{- if .Values.persistence.enabled }}
+        - name: ailog-data
+          persistentVolumeClaim:
+            claimName: {{ include "ailog.fullname" . }}
+        {{- end }}
+
+        {{- if .Values.tailscale.egress.enabled }}
+        - name: tailscale-state
+          emptyDir: {}
+        {{- end }}
+
+        {{- if and .Values.tailscale.egress.enabled (eq .Values.tailscale.egress.mode "tun") }}
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}

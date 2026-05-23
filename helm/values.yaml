@@ -1,0 +1,92 @@
+replicaCount: 1
+
+image:
+  repository: mightywomble/ailog
+  tag: latest
+  pullPolicy: Always
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 5001
+
+env:
+  databaseUrl: sqlite:////var/lib/ailog/ailog.db
+  sshkeyEncryptionEnabled: false
+  sshkeyMasterKey: ""
+  extra: []
+
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 5Gi
+  storageClass: longhorn
+  mountPath: /var/lib/ailog
+
+tailscale:
+  enabled: true
+  hostname: ailog
+  proxyClass: dns-none-no-safehomelan
+  proxyGroup: ""
+  tags: []
+
+  # Optional: add a Tailscale sidecar for outbound (egress) connectivity from the AILog pod.
+  # This is separate from the tailscale LoadBalancer Service (ingress).
+  egress:
+    enabled: true
+
+    # Auth key secret used to join the tailnet.
+    authSecretName: tailscale-auth
+    authSecretKey: authkey
+
+    # Sidecar image.
+    image:
+      repository: tailscale/tailscale
+      tag: v1.96.5
+      pullPolicy: IfNotPresent
+
+    # Mode: "userspace" (no /dev/net/tun; use SOCKS/HTTP proxy) or "tun" (kernel-mode routing).
+    mode: tun
+
+    # If true, tailscaled will accept advertised routes from the tailnet.
+    acceptRoutes: false
+
+    # If mode=userspace, expose a local SOCKS5 proxy on this address.
+    socks5Server: "127.0.0.1:1055"
+
+    resources:
+      requests:
+        cpu: 5m
+        memory: 32Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+podAnnotations: {}
+podLabels: {}
+
+resources: {}
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

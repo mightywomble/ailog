@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-05-23 | v2.9.12 | Added in-repo Helm chart copy and Kubernetes/Helm deployment docs | ✅ Complete |
 | 2026-05-23 | v2.9.11 | SSH key encryption toggle + status; container adds cryptography + openssh-client; Helm adds Tailscale egress sidecar for tailnet SSH | ✅ Complete |
 | 2026-04-29 | v2.9.10 | Monitoring: stop creating TCP/53 monitors; add UDP listen monitor (e.g. DNS/Pi-hole on 53/udp) via SSH ss checks | ✅ Complete |
 | 2026-04-29 | v2.9.9 | Monitoring UX: wizard has Done button and clearer Docker visibility; adds Docker container running monitors; monitoring renders inline in main host panel | ✅ Complete |
@@ -134,6 +135,45 @@ If a push is rejected
 * SSH key-based authentication configured for remote host access
 * OpenAI API key for AI analysis features (optional but recommended)
 * Discord webhook URL for notifications (optional)
+
+### Kubernetes + Helm deployment
+
+#### Kubeconfig
+Ensure your kubeconfig points at the target cluster before deploying:
+
+```bash
+export KUBECONFIG=~/.kube/config
+kubectl config current-context
+```
+
+#### Helm chart location
+The working chart is included in this repo at `helm/`.
+
+#### Deploy/upgrade
+```bash
+helm upgrade --install ailog ./helm -n ailog
+```
+
+#### Values files
+The chart uses `values.yaml` for defaults. You can override settings by:
+- Editing `helm/values.yaml`, or
+- Passing `-f` with your own values file, or
+- Using `--set` flags for one-off changes.
+
+Common overrides:
+- `image.repository`, `image.tag`, `image.pullPolicy`
+- `env.databaseUrl`
+- `tailscale.enabled` (ingress)
+- `tailscale.egress.enabled` / `tailscale.egress.mode` (egress sidecar)
+
+Example:
+```bash
+helm upgrade --install ailog ./helm -n ailog \
+  --set tailscale.enabled=true \
+  --set tailscale.egress.enabled=true \
+  --set tailscale.egress.mode=tun \
+  --set tailscale.egress.acceptRoutes=false
+```
 
 #### Step 1: Install System Dependencies
 
