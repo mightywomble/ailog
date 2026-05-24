@@ -6,8 +6,8 @@
     <title>AI Log Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.css">
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.js" defer></script>
     <script>
 // SSH Keys Management
 
@@ -866,27 +866,31 @@ document.addEventListener('DOMContentLoaded', () => {
             
             <!-- Log Content Area (Bottom 50%) -->
             <div id="logs-bottom-pane" class="glass-container p-4 flex flex-col" style="height: 50%; min-height: 250px;">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 id="log-content-title" class="text-lg font-semibold termix-text">Log Content</h2>
-                    <div class="flex items-center space-x-3">
-                        <span id="truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
-                        <button id="ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
+                <!-- Log Content Panel -->
+                <div id="logs-content-panel" class="w-full h-full flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 id="log-content-title" class="text-lg font-semibold termix-text">Log Content</h2>
+                        <div class="flex items-center space-x-3">
+                            <span id="truncation-warning" class="hidden text-xs text-yellow-600 font-semibold">Log will be truncated for analysis</span>
+                            <button id="ai-analyse-btn" class="hidden button text-sm px-4 py-2">AI Analyse</button>
+                        </div>
+                    </div>
+                    <div id="log-content-container" class="flex-1 overflow-auto termix-panel p-4 rounded-lg border">
+                        <div class="text-center termix-muted mt-16">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-4 termix-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <p class="text-lg">Select a log file to view its content</p>
+                        </div>
                     </div>
                 </div>
-                <div id="log-content-container" class="flex-1 overflow-auto termix-panel p-4 rounded-lg border">
-                    <div class="text-center termix-muted mt-16">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-4 termix-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        <p class="text-lg">Select a log file to view its content</p>
-                    </div>
-                </div>
-                <div id="ssh-terminal-container" class="hidden flex-1 overflow-hidden termix-panel p-2 rounded-lg border">
-                    <div class="flex items-center justify-between px-2 py-1">
-                        <div class="text-xs termix-muted">SSH Terminal</div>
+                <!-- SSH Terminal Panel -->
+                <div id="ssh-terminal-container" class="hidden w-full h-full flex flex-col termix-panel rounded-lg border">
+                    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                        <div class="text-lg font-semibold termix-text">SSH Terminal</div>
                         <div id="ssh-terminal-status" class="text-xs termix-muted">Disconnected</div>
                     </div>
-                    <div id="ssh-terminal-body" class="w-full h-full" style="min-height: 200px;"></div>
+                    <div id="ssh-terminal-body" class="flex-1 overflow-hidden w-full p-3" style="min-height: 200px;"></div>
                 </div>
             </div>
         </div>
@@ -1835,10 +1839,16 @@ document.addEventListener('DOMContentLoaded', () => {
             sshTerminalStatus.className = `text-xs ${tone === 'error' ? 'text-red-400' : tone === 'ok' ? 'text-green-400' : 'termix-muted'}`;
         };
 
-        const ensureSshTerminal = () => {
+        const ensureSshTerminal = async () => {
             if (!sshTerminalBody) return false;
+            // Wait for xterm.js to load
+            let retries = 0;
+            while ((!window.Terminal || !window.FitAddon) && retries < 50) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                retries++;
+            }
             if (!window.Terminal || !window.FitAddon) {
-                showToast('SSH terminal dependencies not loaded.', 'error');
+                showToast('SSH terminal dependencies failed to load.', 'error');
                 return false;
             }
             if (!sshTerm) {
@@ -1924,21 +1934,22 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         };
 
-        const openSshTerminal = () => {
+        const openSshTerminal = async () => {
             if (!selectedHostId || selectedHostId === 'local') {
                 showToast('Select a remote host for SSH.', 'error');
                 return;
             }
             const bottomPane = document.getElementById('logs-bottom-pane');
-            const logContentContainer = document.getElementById('log-content-container');
-            const logContentTitle = document.getElementById('log-content-title');
+            const logsContentPanel = document.getElementById('logs-content-panel');
+            const sshTerminalStatus = document.getElementById('ssh-terminal-status');
 
+            // Show bottom pane and hide log content panel, show SSH terminal
             if (bottomPane) bottomPane.classList.remove('hidden');
-            if (logContentContainer) logContentContainer.classList.add('hidden');
+            if (logsContentPanel) logsContentPanel.classList.add('hidden');
             if (sshTerminalContainer) sshTerminalContainer.classList.remove('hidden');
-            if (logContentTitle) logContentTitle.textContent = 'SSH Terminal';
 
-            if (!ensureSshTerminal()) return;
+            // Ensure dependencies are loaded
+            if (!(await ensureSshTerminal())) return;
 
             sshTerm.clear();
             resizeSshTerminal();
@@ -2794,6 +2805,7 @@ const showHostInfoMain = async () => {
             const hostName = hostId === 'local' ? 'Localhost' : (hosts[hostId]?.friendly_name || hostId);
             const topPane = document.getElementById('logs-top-pane');
             const bottomPane = document.getElementById('logs-bottom-pane');
+            const logsContentPanel = document.getElementById('logs-content-panel');
             const logTableTitle = document.getElementById('log-table-title');
             const container = document.getElementById('log-table-container');
             const logContent = document.getElementById('log-content-container');
@@ -2802,6 +2814,7 @@ const showHostInfoMain = async () => {
             if (topPane) { topPane.style.height = 'calc(100% - 0px)'; }
             if (bottomPane) { bottomPane.classList.add('hidden'); }
             if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
+            if (logsContentPanel) logsContentPanel.classList.remove('hidden');
             if (logTableTitle) logTableTitle.textContent = `Host information: ${hostName}`;
             if (container) container.innerHTML = '<div class="text-sm termix-muted">Loading host info...</div>';
             if (logContent) {
