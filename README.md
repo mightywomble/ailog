@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-05-24 | v2.9.13 | Termix-style SSH terminal (WebSocket + Paramiko) in Logs view | ✅ Complete |
 | 2026-05-23 | v2.9.12 | Added in-repo Helm chart copy and Kubernetes/Helm deployment docs | ✅ Complete |
 | 2026-05-23 | v2.9.11 | SSH key encryption toggle + status; container adds cryptography + openssh-client; Helm adds Tailscale egress sidecar for tailnet SSH | ✅ Complete |
 | 2026-04-29 | v2.9.10 | Monitoring: stop creating TCP/53 monitors; add UDP listen monitor (e.g. DNS/Pi-hole on 53/udp) via SSH ss checks | ✅ Complete |
@@ -52,6 +53,7 @@ This application is designed for use on a trusted, internal development network 
 * **SSH Connection Testing:** Built-in validation ensures proper SSH key setup and sudo permissions before adding hosts
 * **Dynamic Host Switching:** Seamlessly switch between configured servers with real-time log loading
 * **Connection Status Monitoring:** Visual indicators show host connectivity status
+* **SSH Terminal:** Click the green **SSH** button to open an interactive terminal to the selected host
 
 ### 🔍 **Advanced Search Capabilities**
 * **Global Search:** Search across all logs from all configured hosts simultaneously
@@ -152,6 +154,13 @@ The working chart is included in this repo at `helm/`.
 #### Deploy/upgrade
 ```bash
 helm upgrade --install ailog ./helm -n ailog
+```
+
+#### Deploy to a dev namespace
+To run a separate dev instance, use a unique namespace and Tailscale hostname:
+```bash
+helm upgrade --install ailog-dev ./helm -n ailog-dev --create-namespace \
+  --set tailscale.hostname=ailog-dev
 ```
 
 #### Values files

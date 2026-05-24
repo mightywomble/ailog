@@ -1,5 +1,8 @@
 import subprocess
+import io
 from flask import Flask, render_template, jsonify, request, Response, stream_with_context, has_app_context
+from flask_sock import Sock
+import paramiko
 import shlex
 import os
 import datetime
@@ -27,6 +30,7 @@ from utils.sshkey_crypto import encrypt_str, decrypt_str, is_configured as sshke
 
 # --- INITIALIZATION ---
 app = Flask(__name__, instance_path=None)
+sock = Sock(app)
 
 # Monitoring subsystem (modular bolt-on)
 from monitoring import monitoring_bp
@@ -2603,6 +2607,187 @@ def _materialize_ssh_key_path(ssh_key_id: int | None) -> str | None:
     
     _ssh_key_file_cache[ssh_key_id] = tf_name
     return tf_name
+
+
+def _get_default_ssh_key_id() -> int | None:
+    try:
+        key = SSHKey.query.order_by(SSHKey.created_at.desc()).first()
+        return key.id if key else None
+    except Exception:
+        return None
+
+
+def _resolve_ssh_host_config(host_id: str) -> dict:
+    if host_id == 'local':
+        raise ValueError('Localhost is not supported for SSH terminal.')
+
+    hosts = load_hosts() or {}
+    host_info = hosts.get(host_id)
+
+    if not host_info and host_id.startswith('db-'):
+        try:
+            host_id_num = int(host_id.split('-', 1)[1])
+            host_obj = Host.query.get(host_id_num)
+            if host_obj:
+                host_info = {
+                    'user': host_obj.ssh_user or 'root',
+                    'ip': host_obj.ip_address,
+                    'ssh_key_id': host_obj.ssh_key_id,
+                }
+        except Exception as e:
+            raise ValueError(f'Failed to resolve DB host: {e}')
+
+    if not host_info:
+        raise ValueError(f'Host ID "{host_id}" not found.')
+
+    ssh_key_id = host_info.get('ssh_key_id') or _get_default_ssh_key_id()
+    return {
+        'host_id': host_id,
+        'user': host_info.get('user') or 'root',
+        'ip': host_info.get('ip'),
+        'ssh_key_id': ssh_key_id,
+    }
+
+
+def _paramiko_pkey_from_text(key_text: str) -> paramiko.PKey:
+    last_err = None
+    for cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.DSSKey):
+        try:
+            return cls.from_private_key(io.StringIO(key_text))
+        except Exception as e:
+            last_err = e
+            continue
+    raise ValueError(f'Unsupported or invalid SSH key: {last_err}')
+
+
+@sock.route('/ssh/websocket')
+def ssh_terminal_socket(ws):
+    ssh_client = None
+    ssh_channel = None
+    stop_event = threading.Event()
+    send_lock = threading.Lock()
+
+    def safe_send(payload):
+        with send_lock:
+            ws.send(json.dumps(payload))
+
+    def cleanup(reason: str | None = None):
+        stop_event.set()
+        if ssh_channel is not None:
+            try:
+                ssh_channel.close()
+            except Exception:
+                pass
+        if ssh_client is not None:
+            try:
+                ssh_client.close()
+            except Exception:
+                pass
+        if reason:
+            try:
+                safe_send({'type': 'disconnected', 'data': {'message': reason}})
+            except Exception:
+                pass
+
+    def reader_loop():
+        try:
+            while not stop_event.is_set() and ssh_channel is not None:
+                if ssh_channel.recv_ready():
+                    data = ssh_channel.recv(4096)
+                    if not data:
+                        break
+                    safe_send({'type': 'data', 'data': data.decode('utf-8', errors='replace')})
+                else:
+                    time.sleep(0.01)
+        except Exception as e:
+            safe_send({'type': 'error', 'data': {'message': f'SSH read error: {e}'}})
+        finally:
+            cleanup('SSH session closed.')
+
+    try:
+        while True:
+            raw = ws.receive()
+            if raw is None:
+                break
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                safe_send({'type': 'error', 'data': {'message': 'Invalid message format.'}})
+                continue
+
+            mtype = msg.get('type')
+            data = msg.get('data') or {}
+
+            if mtype == 'connectToHost':
+                if ssh_client:
+                    cleanup('Reconnecting...')
+
+                try:
+                    host_id = data.get('hostId')
+                    cols = int(data.get('cols') or 120)
+                    rows = int(data.get('rows') or 30)
+                    host_cfg = _resolve_ssh_host_config(str(host_id))
+                    key_id = host_cfg.get('ssh_key_id')
+                    if not key_id:
+                        raise ValueError('No SSH key configured for this host.')
+
+                    key_text = _sshkey_plaintext_from_model(SSHKey.query.get(int(key_id)))
+                    if not key_text:
+                        raise ValueError('SSH key could not be loaded.')
+
+                    pkey = _paramiko_pkey_from_text(key_text)
+                    ssh_client = paramiko.SSHClient()
+                    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh_client.connect(
+                        hostname=host_cfg['ip'],
+                        username=host_cfg['user'],
+                        pkey=pkey,
+                        look_for_keys=False,
+                        allow_agent=False,
+                        timeout=10
+                    )
+                    ssh_channel = ssh_client.invoke_shell(
+                        term='xterm-256color',
+                        width=cols,
+                        height=rows
+                    )
+
+                    stop_event.clear()
+                    threading.Thread(target=reader_loop, daemon=True).start()
+                    safe_send({'type': 'connected', 'data': {'message': 'SSH connected'}})
+                except Exception as e:
+                    cleanup()
+                    safe_send({'type': 'error', 'data': {'message': f'Connection failed: {e}'}})
+
+            elif mtype == 'input':
+                if ssh_channel is None:
+                    safe_send({'type': 'error', 'data': {'message': 'SSH session not connected.'}})
+                    continue
+                try:
+                    ssh_channel.send(data if isinstance(data, str) else str(data))
+                except Exception as e:
+                    safe_send({'type': 'error', 'data': {'message': f'Input failed: {e}'}})
+
+            elif mtype == 'resize':
+                if ssh_channel is None:
+                    continue
+                try:
+                    cols = int(data.get('cols') or 120)
+                    rows = int(data.get('rows') or 30)
+                    ssh_channel.resize_pty(width=cols, height=rows)
+                    safe_send({'type': 'resized', 'data': {'cols': cols, 'rows': rows}})
+                except Exception:
+                    pass
+
+            elif mtype == 'ping':
+                safe_send({'type': 'pong'})
+
+            elif mtype == 'disconnect':
+                cleanup('Disconnected.')
+                break
+
+    finally:
+        cleanup()
 
 
 def _suricata_cleanup_key_cache():

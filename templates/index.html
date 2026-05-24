@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Log Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.css">
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.js"></script>
     <script>
 // SSH Keys Management
 
@@ -825,6 +828,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button id="logs-action-ssh" class="bg-green-600 hover:bg-green-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h8M4 12h5M4 16h8M16 8h4M18 6v4M14 20h6a2 2 0 002-2V6a2 2 0 00-2-2h-6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><span>SSH</span></button>
                     <button id="logs-action-pull" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8 8 0 104.582 9m0 0H9" /></svg><span>Pull Logs</span></button>
                     <button id="logs-action-info" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" /></svg><span>Host Info</span></button>
                     <button id="logs-action-monitor" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 13l3 3 7-7" /></svg><span>Monitoring</span></button>
@@ -876,6 +880,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         </svg>
                         <p class="text-lg">Select a log file to view its content</p>
                     </div>
+                </div>
+                <div id="ssh-terminal-container" class="hidden flex-1 overflow-hidden termix-panel p-2 rounded-lg border">
+                    <div class="flex items-center justify-between px-2 py-1">
+                        <div class="text-xs termix-muted">SSH Terminal</div>
+                        <div id="ssh-terminal-status" class="text-xs termix-muted">Disconnected</div>
+                    </div>
+                    <div id="ssh-terminal-body" class="w-full h-full" style="min-height: 200px;"></div>
                 </div>
             </div>
         </div>
@@ -1632,6 +1643,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const logsActionPull = document.getElementById('logs-action-pull');
         const logsActionInfo = document.getElementById('logs-action-info');
         const logsActionMonitor = document.getElementById('logs-action-monitor');
+        const logsActionSsh = document.getElementById('logs-action-ssh');
+        const sshTerminalContainer = document.getElementById('ssh-terminal-container');
+        const sshTerminalBody = document.getElementById('ssh-terminal-body');
+        const sshTerminalStatus = document.getElementById('ssh-terminal-status');
 
         const dashboardSelectedHostEl = document.getElementById('dashboard-selected-host');
         const dashboardTotalHostsEl = document.getElementById('dashboard-total-hosts');
@@ -1801,11 +1816,135 @@ document.addEventListener('DOMContentLoaded', () => {
         if (logsActionPull) logsActionPull.addEventListener('click', () => pullLogsForSelectedHost());
         if (logsActionInfo) logsActionInfo.addEventListener('click', () => showHostInfoMain());
         if (logsActionMonitor) logsActionMonitor.addEventListener('click', () => showHostMonitoringMain());
+        if (logsActionSsh) logsActionSsh.addEventListener('click', () => openSshTerminal());
 
         const setStatusDot = (el, ok) => {
             if (!el) return;
             el.classList.remove('bg-green-500', 'bg-red-500');
             el.classList.add(ok ? 'bg-green-500' : 'bg-red-500');
+        };
+
+        let sshTerm = null;
+        let sshFit = null;
+        let sshSocket = null;
+        let sshConnectedHost = null;
+
+        const setSshStatus = (text, tone = 'muted') => {
+            if (!sshTerminalStatus) return;
+            sshTerminalStatus.textContent = text;
+            sshTerminalStatus.className = `text-xs ${tone === 'error' ? 'text-red-400' : tone === 'ok' ? 'text-green-400' : 'termix-muted'}`;
+        };
+
+        const ensureSshTerminal = () => {
+            if (!sshTerminalBody) return false;
+            if (!window.Terminal || !window.FitAddon) {
+                showToast('SSH terminal dependencies not loaded.', 'error');
+                return false;
+            }
+            if (!sshTerm) {
+                sshTerm = new Terminal({
+                    cursorBlink: true,
+                    fontFamily: '"JetBrains Mono", monospace',
+                    fontSize: 12,
+                    theme: { background: '#0b0f17' }
+                });
+                sshFit = new FitAddon.FitAddon();
+                sshTerm.loadAddon(sshFit);
+                sshTerm.open(sshTerminalBody);
+                sshFit.fit();
+                sshTerm.onData((data) => {
+                    if (sshSocket && sshSocket.readyState === WebSocket.OPEN) {
+                        sshSocket.send(JSON.stringify({ type: 'input', data }));
+                    }
+                });
+                window.addEventListener('resize', () => {
+                    setTimeout(() => resizeSshTerminal(), 50);
+                });
+            }
+            return true;
+        };
+
+        const resizeSshTerminal = () => {
+            if (!sshTerm || !sshFit) return;
+            sshFit.fit();
+            if (sshSocket && sshSocket.readyState === WebSocket.OPEN) {
+                sshSocket.send(JSON.stringify({
+                    type: 'resize',
+                    data: { cols: sshTerm.cols, rows: sshTerm.rows }
+                }));
+            }
+        };
+
+        const closeSshSocket = () => {
+            if (sshSocket) {
+                try { sshSocket.close(); } catch (_) {}
+                sshSocket = null;
+            }
+        };
+
+        const connectSshSocket = (hostId) => {
+            if (!sshTerm) return;
+            const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsUrl = `${wsProto}://${window.location.host}/ssh/websocket`;
+            setSshStatus('Connecting...', 'muted');
+            closeSshSocket();
+
+            sshSocket = new WebSocket(wsUrl);
+            sshSocket.onopen = () => {
+                sshConnectedHost = hostId;
+                setSshStatus('Connected', 'ok');
+                sshSocket.send(JSON.stringify({
+                    type: 'connectToHost',
+                    data: { hostId, cols: sshTerm.cols, rows: sshTerm.rows }
+                }));
+            };
+            sshSocket.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'data' && msg.data) {
+                        sshTerm.write(msg.data);
+                    } else if (msg.type === 'connected') {
+                        sshTerm.write('\r\n');
+                    } else if (msg.type === 'error') {
+                        setSshStatus('Error', 'error');
+                        sshTerm.write(`\r\n[error] ${msg.data?.message || 'Unknown error'}\r\n`);
+                    } else if (msg.type === 'disconnected') {
+                        setSshStatus('Disconnected', 'muted');
+                        sshTerm.write(`\r\n[disconnected] ${msg.data?.message || ''}\r\n`);
+                    }
+                } catch (_) {
+                    sshTerm.write(event.data);
+                }
+            };
+            sshSocket.onclose = () => {
+                setSshStatus('Disconnected', 'muted');
+            };
+            sshSocket.onerror = () => {
+                setSshStatus('Connection error', 'error');
+            };
+        };
+
+        const openSshTerminal = () => {
+            if (!selectedHostId || selectedHostId === 'local') {
+                showToast('Select a remote host for SSH.', 'error');
+                return;
+            }
+            const bottomPane = document.getElementById('logs-bottom-pane');
+            const logContentContainer = document.getElementById('log-content-container');
+            const logContentTitle = document.getElementById('log-content-title');
+
+            if (bottomPane) bottomPane.classList.remove('hidden');
+            if (logContentContainer) logContentContainer.classList.add('hidden');
+            if (sshTerminalContainer) sshTerminalContainer.classList.remove('hidden');
+            if (logContentTitle) logContentTitle.textContent = 'SSH Terminal';
+
+            if (!ensureSshTerminal()) return;
+
+            sshTerm.clear();
+            resizeSshTerminal();
+            if (sshConnectedHost !== selectedHostId) {
+                connectSshSocket(selectedHostId);
+            }
         };
 
 
@@ -2662,6 +2801,7 @@ const showHostInfoMain = async () => {
             // Full-pane host info mode
             if (topPane) { topPane.style.height = 'calc(100% - 0px)'; }
             if (bottomPane) { bottomPane.classList.add('hidden'); }
+            if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
             if (logTableTitle) logTableTitle.textContent = `Host information: ${hostName}`;
             if (container) container.innerHTML = '<div class="text-sm termix-muted">Loading host info...</div>';
             if (logContent) {
@@ -2833,6 +2973,8 @@ const showHostInfoMain = async () => {
             const bottomPane = document.getElementById('logs-bottom-pane');
             if (topPane) topPane.style.height = '40%';
             if (bottomPane) bottomPane.classList.remove('hidden');
+            if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
+            if (logContent) logContent.classList.remove('hidden');
             fetchSourcesForHost();
         };
 
@@ -3925,6 +4067,8 @@ const showHostInfoMain = async () => {
             // Update the log content area elements
             const logContentTitle = document.getElementById('log-content-title');
             const logContentContainer = document.getElementById('log-content-container');
+            if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
+            if (logContentContainer) logContentContainer.classList.remove('hidden');
             
             logContentTitle.textContent = `Loading: ${currentLogName}...`;
             logContentContainer.innerHTML = '<div class="text-center termix-muted mt-16">Fetching log data...</div>';

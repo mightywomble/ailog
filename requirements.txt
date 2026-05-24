@@ -30,5 +30,9 @@ Flask-SQLAlchemy==3.1.1
 # SSH key encryption
 cryptography==42.0.8
 
+# SSH terminal (WebSocket + SSH)
+flask-sock==0.7.0
+paramiko==3.4.1
+
 # Optional: PostgreSQL support (uncomment if needed)
 # psycopg2-binary==2.9.9
