@@ -4754,27 +4754,23 @@ const showHostInfoMain = async () => {
         });
 
 aiAnalyseBtn.addEventListener('click', async () => {
-            const provider = localStorage.getItem('analysis_provider') || 'openai';
-            
             if (!currentLogContent) {
                 window.showToast('No log content to analyse.', 'error');
                 return;
             }
             
-            // Validate provider config
-            if (provider === 'ollama') {
-                const ollamaUrl = localStorage.getItem('ollama_url');
-                const ollamaModel = localStorage.getItem('ollama_model');
-                if (!ollamaUrl || !ollamaModel) {
-                    window.showToast('Ollama is not configured. Please set it up in Settings.', 'error');
+            // Get provider configuration from backend
+            let provider;
+            try {
+                const aiConfig = await window.fetchApi('/ai/config');
+                provider = aiConfig.provider;
+                if (!provider) {
+                    window.showToast('No AI provider configured. Please set one up in Settings.', 'error');
                     return;
                 }
-            } else {
-                const apiKey = localStorage.getItem('openai_api_key');
-                if (!apiKey) {
-                    window.showToast('OpenAI API Key is missing. Please set it in Settings.', 'error');
-                    return;
-                }
+            } catch (err) {
+                window.showToast('Failed to load AI provider configuration: ' + err.message, 'error');
+                return;
             }
 
             aiAnalyseBtn.textContent = 'Analysing...';
