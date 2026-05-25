@@ -6,8 +6,20 @@
     <title>AI Log Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.css">
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.js"></script>
+    <script>
+// Wrap all initialization to ensure xterm.js has loaded
+window.__appReady = false;
+window.__waitForXterm = async () => {
+    let retries = 0;
+    while ((!window.Terminal || !window.FitAddon) && retries < 50) {
+        await new Promise(r => setTimeout(r, 100));
+        retries++;
+    }
+    return !!(window.Terminal && window.FitAddon);
+};
+    </script>
     <script>
 // SSH Keys Management
 
@@ -836,7 +848,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <!-- Log Files List (Top 40%) -->
             <div id="logs-top-pane" class="glass-container p-4 flex flex-col" style="height: 40%; min-height: 200px;">
-                <div class="flex justify-between items-center mb-4">
+                <div id="logs-top-header" class="flex justify-between items-center mb-4">
                     <h2 id="log-table-title" class="text-lg font-semibold termix-text">Select a host to view logs</h2>
                     <div class="flex items-center space-x-2">
                         <label class="flex items-center text-sm termix-muted">
@@ -862,6 +874,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         <p class="text-lg">Click on a host to see available logs</p>
                     </div>
                 </div>
+
+                <!-- SSH Terminal Panel (replaces Host Info / log list area) -->
+                <div id="ssh-terminal-container" class="hidden w-full flex-1 flex flex-col termix-panel rounded-lg border" style="min-height: 200px;">
+                    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                        <div class="text-lg font-semibold termix-text">SSH Terminal</div>
+                        <div id="ssh-terminal-status" class="text-xs termix-muted">Disconnected</div>
+                    </div>
+                    <div id="ssh-terminal-body" class="flex-1 overflow-hidden w-full p-3" style="min-height: 200px;"></div>
+                </div>
             </div>
             
             <!-- Log Content Area (Bottom 50%) -->
@@ -883,14 +904,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             <p class="text-lg">Select a log file to view its content</p>
                         </div>
                     </div>
-                </div>
-                <!-- SSH Terminal Panel -->
-                <div id="ssh-terminal-container" class="hidden w-full h-full flex flex-col termix-panel rounded-lg border">
-                    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                        <div class="text-lg font-semibold termix-text">SSH Terminal</div>
-                        <div id="ssh-terminal-status" class="text-xs termix-muted">Disconnected</div>
-                    </div>
-                    <div id="ssh-terminal-body" class="flex-1 overflow-hidden w-full p-3" style="min-height: 200px;"></div>
                 </div>
             </div>
         </div>
@@ -1939,14 +1952,34 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Select a remote host for SSH.', 'error');
                 return;
             }
-            const bottomPane = document.getElementById('logs-bottom-pane');
-            const logsContentPanel = document.getElementById('logs-content-panel');
-            const sshTerminalStatus = document.getElementById('ssh-terminal-status');
 
-            // Show bottom pane and hide log content panel, show SSH terminal
-            if (bottomPane) bottomPane.classList.remove('hidden');
-            if (logsContentPanel) logsContentPanel.classList.add('hidden');
-            if (sshTerminalContainer) sshTerminalContainer.classList.remove('hidden');
+            const topPane = document.getElementById('logs-top-pane');
+            const bottomPane = document.getElementById('logs-bottom-pane');
+            const topHeader = document.getElementById('logs-top-header');
+            const logTableContainer = document.getElementById('log-table-container');
+
+            // Hide the log panes and show SSH terminal to fill the entire space
+            if (topPane) {
+                topPane.classList.add('hidden');
+                topPane.style.height = '40%';
+            }
+            if (bottomPane) {
+                bottomPane.classList.add('hidden');
+                bottomPane.style.height = '50%';
+            }
+
+            if (topHeader) topHeader.classList.add('hidden');
+            if (logTableContainer) logTableContainer.classList.add('hidden');
+            if (sshTerminalContainer) {
+                sshTerminalContainer.classList.remove('hidden');
+                // Position SSH terminal as an absolute/fixed overlay that takes full space
+                sshTerminalContainer.style.position = 'fixed';
+                sshTerminalContainer.style.top = '150px';  // Account for header height
+                sshTerminalContainer.style.left = '360px'; // Account for sidebar width
+                sshTerminalContainer.style.right = '16px';
+                sshTerminalContainer.style.bottom = '16px';
+                sshTerminalContainer.style.zIndex = '40';
+            }
 
             // Ensure dependencies are loaded
             if (!(await ensureSshTerminal())) return;
@@ -2807,12 +2840,24 @@ const showHostInfoMain = async () => {
             const bottomPane = document.getElementById('logs-bottom-pane');
             const logsContentPanel = document.getElementById('logs-content-panel');
             const logTableTitle = document.getElementById('log-table-title');
+            const topHeader = document.getElementById('logs-top-header');
             const container = document.getElementById('log-table-container');
+            const logTableContainer = document.getElementById('log-table-container');
             const logContent = document.getElementById('log-content-container');
 
             // Full-pane host info mode
-            if (topPane) { topPane.style.height = 'calc(100% - 0px)'; }
-            if (bottomPane) { bottomPane.classList.add('hidden'); }
+            if (topPane) {
+                topPane.classList.remove('hidden');
+                topPane.style.height = 'calc(100% - 0px)';
+            }
+            if (bottomPane) {
+                bottomPane.classList.add('hidden');
+                bottomPane.style.height = '50%';
+            }
+            if (topHeader) topHeader.classList.remove('hidden');
+            if (logTableContainer) logTableContainer.classList.remove('hidden');
+            if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
+            if (logsContentPanel) logsContentPanel.classList.remove('hidden');
             if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
             if (logsContentPanel) logsContentPanel.classList.remove('hidden');
             if (logTableTitle) logTableTitle.textContent = `Host information: ${hostName}`;
@@ -2984,10 +3029,24 @@ const showHostInfoMain = async () => {
             if (!selectedHostId) return;
             const topPane = document.getElementById('logs-top-pane');
             const bottomPane = document.getElementById('logs-bottom-pane');
-            if (topPane) topPane.style.height = '40%';
-            if (bottomPane) bottomPane.classList.remove('hidden');
+            const topHeader = document.getElementById('logs-top-header');
+            const logTableContainer = document.getElementById('log-table-container');
+
+            // Normal split-pane logs mode
+            if (topPane) {
+                topPane.classList.remove('hidden');
+                topPane.style.height = '40%';
+            }
+            if (bottomPane) {
+                bottomPane.classList.remove('hidden');
+                bottomPane.style.height = '50%';
+            }
+
+            if (topHeader) topHeader.classList.remove('hidden');
+            if (logTableContainer) logTableContainer.classList.remove('hidden');
             if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
-            if (logContent) logContent.classList.remove('hidden');
+            if (logsContentPanel) logsContentPanel.classList.remove('hidden');
+
             fetchSourcesForHost();
         };
 
