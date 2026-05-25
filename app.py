@@ -1677,13 +1677,18 @@ def openrouter_config():
         api_key = data.get('api_key', '').strip()
         model = data.get('model', '').strip()
         
-        if not api_key or not model:
-            return jsonify({'error': 'Both API key and model are required.'}), 400
+        # API key is always required; model is optional (can be set after key validation)
+        if not api_key:
+            return jsonify({'error': 'API key is required.'}), 400
         
         config = load_config()
         config['openrouter_api_key'] = api_key
-        config['openrouter_model'] = model
-        config['analysis_provider'] = 'openrouter'  # Set as default provider
+        
+        # Only set model and provider if both are provided
+        if model:
+            config['openrouter_model'] = model
+            config['analysis_provider'] = 'openrouter'  # Set as default provider
+        
         save_config(config)
         return jsonify({'message': 'OpenRouter configuration saved.'})
     else:  # GET
