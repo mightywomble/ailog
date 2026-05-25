@@ -831,19 +831,21 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         </div>
         <div id="logs-view" class="hidden flex-1 flex flex-col gap-4 termix-view" style="height: 100%;">
-            <div class="termix-panel p-4 flex items-center justify-between" style="position: relative; z-index: 40;">
-                <div class="flex items-center gap-3">
-                    <button id="back-to-dashboard-btn" class="termix-btn" type="button">Back</button>
-                    <div>
-                        <div class="termix-text font-semibold" id="logs-selected-host-title">Select a host</div>
-                        <div class="termix-muted text-xs">Choose a host, review its info, then pull logs.</div>
+            <div class="termix-panel p-4" style="position: relative; z-index: 40;">
+                <div class="flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <button id="back-to-dashboard-btn" class="termix-btn" type="button">Back</button>
+                        <div class="min-w-0">
+                            <div class="termix-text font-semibold truncate" id="logs-selected-host-title">Select a host</div>
+                            <div class="termix-muted text-xs">Choose a host, review its info, then pull logs.</div>
+                        </div>
                     </div>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button id="logs-action-ssh" class="bg-green-600 hover:bg-green-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h8M4 12h5M4 16h8M16 8h4M18 6v4M14 20h6a2 2 0 002-2V6a2 2 0 00-2-2h-6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><span>SSH</span></button>
-                    <button id="logs-action-pull" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8 8 0 104.582 9m0 0H9" /></svg><span>Pull Logs</span></button>
-                    <button id="logs-action-info" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" /></svg><span>Host Info</span></button>
-                    <button id="logs-action-monitor" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 13l3 3 7-7" /></svg><span>Monitoring</span></button>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button id="logs-action-ssh" class="bg-green-600 hover:bg-green-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h8M4 12h5M4 16h8M16 8h4M18 6v4M14 20h6a2 2 0 002-2V6a2 2 0 00-2-2h-6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><span>SSH</span></button>
+                        <button id="logs-action-pull" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8 8 0 104.582 9m0 0H9" /></svg><span>Pull Logs</span></button>
+                        <button id="logs-action-info" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" /></svg><span>Host Info</span></button>
+                        <button id="logs-action-monitor" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 13l3 3 7-7" /></svg><span>Monitoring</span></button>
+                    </div>
                 </div>
             </div>
             <!-- Log Files List (Top 40%) -->
@@ -904,6 +906,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             <p class="text-lg">Select a log file to view its content</p>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- SSH tabs footer (sticks to bottom of the main panel) -->
+            <div id="ssh-tabs-footer" class="hidden sticky bottom-0 z-40">
+                <div class="termix-panel p-3 border border-white/10 rounded-lg">
+                    <div id="ssh-tabs-bar" class="hidden"></div>
                 </div>
             </div>
         </div>
@@ -1797,6 +1806,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let currentLogType = null;
         let currentHostId = null;
 
+        // Main-panel mode guard: prevents async Host Info loads from overwriting Pull Logs / SSH views.
+        let logsMainMode = 'info'; // 'info' | 'pull' | 'ssh' | 'monitor'
+        let logsMainViewToken = 0;
+
         // Search elements
         const searchInput = document.getElementById('search-input');
         const searchBtn = document.getElementById('search-btn');
@@ -1845,12 +1858,148 @@ document.addEventListener('DOMContentLoaded', () => {
         let sshFit = null;
         let sshSocket = null;
         let sshConnectedHost = null;
-        let sshSessionActive = false;  // Track if SSH session is currently active
+
+        // SSH session state
+        let sshSessionActive = false;           // Socket/session currently connected
+        let sshSessionEnded = false;            // Session ended intentionally (via `exit`)
+        let sshExpectingExit = false;           // User typed `exit` and we expect disconnect
+        let sshInputLineBuffer = '';            // Track typed command line to detect `exit` reliably
+
+        const sshTabsBar = document.getElementById('ssh-tabs-bar');
+
+        // SSH-only "tabs" for open SSH sessions. (We still only render one terminal view.)
+        let sshTabs = []; // [{ hostId, hostName }]
+
+        const sshTabsFooter = document.getElementById('ssh-tabs-footer');
+
+        const renderSshTabs = () => {
+            if (!sshTabsBar) return;
+
+            if (!sshTabs.length) {
+                sshTabsBar.classList.add('hidden');
+                sshTabsBar.innerHTML = '';
+                if (sshTabsFooter) sshTabsFooter.classList.add('hidden');
+                return;
+            }
+
+            if (sshTabsFooter) sshTabsFooter.classList.remove('hidden');
+            sshTabsBar.classList.remove('hidden');
+            sshTabsBar.className = 'flex flex-wrap items-center gap-2';
+
+            const pills = sshTabs.map(t => {
+                const isActive = (sshConnectedHost === t.hostId) && (sshSocket && sshSocket.readyState === WebSocket.OPEN);
+                const activeCls = isActive ? 'bg-green-600 text-white' : 'bg-white/10 text-gray-200 hover:bg-white/20';
+                return `
+                    <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 ${activeCls}" data-ssh-tab="${t.hostId}">
+                        <button class="text-xs font-medium" data-ssh-tab-open="${t.hostId}" type="button">SSH: ${t.hostName}</button>
+                        <button class="text-xs px-2 py-0.5 rounded-full bg-black/20 hover:bg-black/30" data-ssh-tab-close="${t.hostId}" type="button" title="Close SSH session">×</button>
+                    </div>
+                `;
+            }).join('');
+
+            sshTabsBar.innerHTML = pills;
+
+            sshTabsBar.querySelectorAll('button[data-ssh-tab-open]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const hostId = btn.getAttribute('data-ssh-tab-open');
+                    if (!hostId) return;
+                    // Switch selected host and open SSH
+                    selectHost(hostId);
+                    await openSshTerminal();
+                });
+            });
+
+            sshTabsBar.querySelectorAll('button[data-ssh-tab-close]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const hostId = btn.getAttribute('data-ssh-tab-close');
+                    if (!hostId) return;
+                    closeSshSessionForHost(hostId);
+                });
+            });
+        };
+
+        const upsertSshTab = (hostId) => {
+            if (!hostId || hostId === 'local') return;
+            const hostName = hosts?.[hostId]?.friendly_name || hostId;
+            const existing = sshTabs.find(t => t.hostId === hostId);
+            if (existing) {
+                existing.hostName = hostName;
+            } else {
+                sshTabs.push({ hostId, hostName });
+            }
+            renderSshTabs();
+        };
+
+        const handleSshUiClose = (hostId) => {
+            // User explicitly closed the session via the X button.
+            // Best-effort tell backend to disconnect cleanly.
+            try {
+                if (sshSocket && sshSocket.readyState === WebSocket.OPEN) {
+                    sshSocket.send(JSON.stringify({ type: 'disconnect' }));
+                }
+            } catch (_) {}
+
+            // Reset local session state so next SSH click starts a fresh session.
+            sshSessionActive = false;
+            sshSessionEnded = true;
+            sshExpectingExit = false;
+            sshInputLineBuffer = '';
+
+            sshConnectedHost = null;
+
+            try {
+                if (sshSocket) sshSocket.close();
+            } catch (_) {}
+            sshSocket = null;
+
+            // Hide the SSH view and return to host info.
+            // (Do this after state reset to avoid accidental resume.)
+            setTimeout(() => showHostInfoMain(), 50);
+        };
+
+        const closeSshSessionForHost = (hostId) => {
+            // If this is the currently connected session, close it.
+            if (sshConnectedHost === hostId) {
+                handleSshUiClose(hostId);
+            }
+
+            // Remove the tab regardless.
+            sshTabs = sshTabs.filter(t => t.hostId !== hostId);
+            renderSshTabs();
+        };
 
         const setSshStatus = (text, tone = 'muted') => {
             if (!sshTerminalStatus) return;
             sshTerminalStatus.textContent = text;
             sshTerminalStatus.className = `text-xs ${tone === 'error' ? 'text-red-400' : tone === 'ok' ? 'text-green-400' : 'termix-muted'}`;
+        };
+
+        const handleSshExitEnded = () => {
+            // Mark session as intentionally ended (exit), close ws, and return to host info.
+            sshSessionActive = false;
+            sshSessionEnded = true;
+            sshExpectingExit = false;
+            sshInputLineBuffer = '';
+
+            const endedHost = sshConnectedHost;
+
+            // Ensure we don't try to "resume" a dead session
+            sshConnectedHost = null;
+
+            // Close websocket so next SSH click starts a fresh session
+            try {
+                if (sshSocket && sshSocket.readyState === WebSocket.OPEN) sshSocket.close();
+            } catch (_) {}
+            sshSocket = null;
+
+            // Remove the tab if it was explicitly ended
+            if (endedHost) {
+                sshTabs = sshTabs.filter(t => t.hostId !== endedHost);
+                renderSshTabs();
+            }
+
+            // Navigate away from the SSH terminal view
+            setTimeout(() => showHostInfoMain(), 50);
         };
 
         const ensureSshTerminal = async () => {
@@ -1877,6 +2026,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 sshTerm.open(sshTerminalBody);
                 sshFit.fit();
                 sshTerm.onData((data) => {
+                    // Track input locally so we can distinguish an intentional `exit` from other disconnects.
+                    // xterm delivers keystrokes; we reconstruct the current line until Enter.
+                    for (const ch of data) {
+                        if (ch === '\r' || ch === '\n') {
+                            const line = sshInputLineBuffer.trim();
+                            if (line === 'exit') {
+                                sshExpectingExit = true;
+                            }
+                            sshInputLineBuffer = '';
+                        } else if (ch === '\u007f') {
+                            // backspace
+                            sshInputLineBuffer = sshInputLineBuffer.slice(0, -1);
+                        } else if (ch >= ' ' && ch !== '\u001b') {
+                            // printable (ignore ESC sequences)
+                            sshInputLineBuffer += ch;
+                        }
+                    }
+
                     if (sshSocket && sshSocket.readyState === WebSocket.OPEN) {
                         sshSocket.send(JSON.stringify({ type: 'input', data }));
                     }
@@ -1916,6 +2083,12 @@ document.addEventListener('DOMContentLoaded', () => {
             sshSocket = new WebSocket(wsUrl);
             sshSocket.onopen = () => {
                 sshConnectedHost = hostId;
+                sshSessionActive = true;
+                sshSessionEnded = false;
+                sshExpectingExit = false;
+                sshInputLineBuffer = '';
+
+                upsertSshTab(hostId);
                 setSshStatus('Connected', 'ok');
                 sshSocket.send(JSON.stringify({
                     type: 'connectToHost',
@@ -1927,25 +2100,47 @@ document.addEventListener('DOMContentLoaded', () => {
                     const msg = JSON.parse(event.data);
                     if (msg.type === 'data' && msg.data) {
                         sshTerm.write(msg.data);
-                        // Detect if user typed 'exit' and got shell exit response
-                        // When shell exits, it sends either connection closed or shell prompt indicating exit
-                        if (msg.data.includes('exit') || msg.data.includes('Connection closed')) {
-                            // Check if the disconnected message follows (session ended)
-                            sshSessionActive = false;
+
+                        // Many shells print "logout" when exiting; if the user typed `exit`, treat this as session end.
+                        if (sshExpectingExit && /\blogout\b/i.test(msg.data)) {
+                            handleSshExitEnded();
+                            return;
                         }
                     } else if (msg.type === 'connected') {
                         sshTerm.write('\r\n');
                         sshSessionActive = true;
+                        sshSessionEnded = false;
+                        sshExpectingExit = false;
                     } else if (msg.type === 'error') {
                         setSshStatus('Error', 'error');
-                        sshTerm.write(`\r\n[error] ${msg.data?.message || 'Unknown error'}\r\n`);
+                        const errMsg = msg.data?.message || 'Unknown error';
+                        sshTerm.write(`\r\n[error] ${errMsg}\r\n`);
+
+                        // If we were expecting an exit, and the backend now says the channel/socket is closed,
+                        // treat it as a successful end-of-session and reset UI state.
+                        if (sshExpectingExit && /socket is closed/i.test(errMsg)) {
+                            handleSshExitEnded();
+                            return;
+                        }
+
                         sshSessionActive = false;
+                        sshSessionEnded = false;
+                        sshExpectingExit = false;
                     } else if (msg.type === 'disconnected') {
                         setSshStatus('Disconnected', 'muted');
                         sshTerm.write(`\r\n[disconnected] ${msg.data?.message || ''}\r\n`);
+
+                        const endedByExit = !!sshExpectingExit;
                         sshSessionActive = false;
-                        // User typed exit - return to host info view
-                        setTimeout(() => showHostInfoMain(), 500);
+                        sshSessionEnded = endedByExit;
+                        sshExpectingExit = false;
+                        sshInputLineBuffer = '';
+
+                        // Only auto-navigate when the user intentionally ended the session via `exit`.
+                        if (endedByExit) {
+                            handleSshExitEnded();
+                            return;
+                        }
                     }
                 } catch (_) {
                     sshTerm.write(event.data);
@@ -1953,11 +2148,21 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             sshSocket.onclose = () => {
                 setSshStatus('Disconnected', 'muted');
+
+                // If the socket closes without an explicit 'disconnected' message,
+                // treat it as ended-by-exit only if we were expecting exit.
+                const endedByExit = !!sshExpectingExit;
+                sshSessionEnded = endedByExit;
+                sshExpectingExit = false;
+                sshSessionActive = false;
+                sshInputLineBuffer = '';
+
                 // Reset socket reference so a new connection can be made
                 sshSocket = null;
-                sshSessionActive = false;
-                // Only return to host info if session was active (user exited intentionally)
-                // If they clicked away, session stays suppressed until SSH is clicked again
+
+                if (endedByExit) {
+                    handleSshExitEnded();
+                }
             };
             sshSocket.onerror = (error) => {
                 setSshStatus('Connection error', 'error');
@@ -1967,6 +2172,9 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const openSshTerminal = async () => {
+            const viewToken = ++logsMainViewToken;
+            logsMainMode = 'ssh';
+
             if (!selectedHostId || selectedHostId === 'local') {
                 showToast('Select a remote host for SSH.', 'error');
                 return;
@@ -1991,23 +2199,39 @@ document.addEventListener('DOMContentLoaded', () => {
             if (logTableContainer) logTableContainer.classList.add('hidden');
             if (sshTerminalContainer) {
                 sshTerminalContainer.classList.remove('hidden');
-                // Position SSH terminal as an absolute/fixed overlay that takes full space
-                sshTerminalContainer.style.position = 'fixed';
-                sshTerminalContainer.style.top = '200px';  // Account for header + toolbar height
-                sshTerminalContainer.style.left = '360px'; // Account for sidebar width
-                sshTerminalContainer.style.right = '16px';
-                sshTerminalContainer.style.bottom = '16px';
-                sshTerminalContainer.style.zIndex = '30';  // Below toolbar (z-index 40)
+                // Keep sizing consistent with the rest of the logs view (no fixed positioning/overlays)
+                sshTerminalContainer.style.position = '';
+                sshTerminalContainer.style.top = '';
+                sshTerminalContainer.style.left = '';
+                sshTerminalContainer.style.right = '';
+                sshTerminalContainer.style.bottom = '';
+                sshTerminalContainer.style.zIndex = '';
             }
 
             // Ensure dependencies are loaded
             if (!(await ensureSshTerminal())) return;
 
-            sshTerm.clear();
-            resizeSshTerminal();
-            if (sshConnectedHost !== selectedHostId) {
-                connectSshSocket(selectedHostId);
+            // If we still have a live socket for this host AND the session hasn't been ended via `exit`,
+            // just resume the existing session.
+            if (!sshSessionEnded && sshSocket && sshSocket.readyState === WebSocket.OPEN && sshConnectedHost === selectedHostId) {
+                setSshStatus('Connected', 'ok');
+                sshSessionActive = true;
+                resizeSshTerminal();
+                return;
             }
+
+            // If the socket is not open, drop it so we can reconnect cleanly.
+            if (sshSocket && sshSocket.readyState !== WebSocket.OPEN) {
+                sshSocket = null;
+            }
+
+            // Start a fresh session when the previous one ended via `exit`, or if switching hosts.
+            if (sshSessionEnded || sshConnectedHost !== selectedHostId) {
+                sshTerm.clear();
+            }
+
+            resizeSshTerminal();
+            connectSshSocket(selectedHostId);
         };
 
 
@@ -2498,6 +2722,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const showHostMonitoringMain = async () => {
             const hostId = selectedHostId;
+            const viewToken = ++logsMainViewToken;
+            logsMainMode = 'monitor';
+
             if (!hostId || hostId === 'local') {
                 window.location.href = '/monitoring/wizard';
                 return;
@@ -2527,17 +2754,62 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             };
 
-            const logTableTitleEl = document.getElementById('log-table-title');
-            if (logTableTitleEl) logTableTitleEl.textContent = `Monitoring: ${hosts[hostId]?.friendly_name || hostId}`;
+            // Popup-style monitoring modal (similar UX to the Add Devices wizard)
+            const ensureMonitoringModal = () => {
+                let overlay = document.getElementById('monitoring-modal-overlay');
+                if (overlay) return overlay;
 
-            const container = document.getElementById('log-table-container');
-            if (!container) return;
+                overlay = document.createElement('div');
+                overlay.id = 'monitoring-modal-overlay';
+                overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[9999]';
 
-            container.innerHTML = `<div class="p-4 text-sm termix-muted">Loading monitoring data...</div>`;
+                overlay.innerHTML = `
+                    <div class="termix-panel w-full max-w-6xl h-[85vh] p-0 border border-white/10 rounded-xl overflow-hidden flex flex-col">
+                        <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="termix-text text-lg font-semibold truncate" id="monitoring-modal-title">Monitoring</div>
+                                <div class="text-xs termix-muted truncate" id="monitoring-modal-subtitle">Loading...</div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button id="monitoring-modal-refresh" class="bg-white/10 hover:bg-white/20 text-white text-sm px-3 py-2 rounded-lg" type="button">Refresh</button>
+                                <button id="monitoring-modal-close" class="bg-white/10 hover:bg-white/20 text-white text-sm px-3 py-2 rounded-lg" type="button">Close</button>
+                            </div>
+                        </div>
+                        <div class="flex-1 overflow-auto" id="monitoring-modal-body">
+                            <div class="p-6 text-sm termix-muted">Loading monitoring data...</div>
+                        </div>
+                    </div>
+                `;
+
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) overlay.remove();
+                });
+
+                document.body.appendChild(overlay);
+                return overlay;
+            };
+
+            const overlay = ensureMonitoringModal();
+            const body = overlay.querySelector('#monitoring-modal-body');
+            const titleEl = overlay.querySelector('#monitoring-modal-title');
+            const subtitleEl = overlay.querySelector('#monitoring-modal-subtitle');
+            const closeBtn = overlay.querySelector('#monitoring-modal-close');
+            const refreshBtn = overlay.querySelector('#monitoring-modal-refresh');
+
+            if (closeBtn) closeBtn.onclick = () => overlay.remove();
+            if (refreshBtn) refreshBtn.onclick = () => showHostMonitoringMain();
+
+            const hostName = hosts[hostId]?.friendly_name || hostId;
+            if (titleEl) titleEl.textContent = `Monitoring: ${hostName}`;
+            if (subtitleEl) subtitleEl.textContent = 'Fetching monitors...';
+            if (body) body.innerHTML = `<div class="p-6 text-sm termix-muted">Loading monitoring data...</div>`;
 
             try {
                 const data = await window.fetchApi(`/api/hosts/${dbId}/monitoring`);
                 if (data && data.error) throw new Error(data.error);
+
+                // If user navigated away while loading, avoid clobbering other views.
+                if (viewToken !== logsMainViewToken || logsMainMode !== 'monitor') return;
 
                 const monitors = data.monitors || [];
                 const dockerSnap = data.docker_snapshot;
@@ -2630,8 +2902,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const downCount = monitors.filter(m => m.last_status === 'down').length;
                 const errCount = monitors.filter(m => m.last_status === 'error').length;
 
-                container.innerHTML = `
-                  <div class="p-4">
+                if (subtitleEl) subtitleEl.textContent = `${monitors.length} monitor(s)`;
+
+                body.innerHTML = `
+                  <div class="p-6">
                     <div class="bg-gradient-to-br from-purple-700/20 via-white/5 to-green-600/20 border border-white/10 rounded-xl p-4">
                       <div class="flex items-start justify-between gap-4">
                         <div class="flex items-center gap-4">
@@ -2664,10 +2938,10 @@ document.addEventListener('DOMContentLoaded', () => {
                       </div>
 
                       <div class="mt-3 flex items-center justify-between gap-2">
-                        <div class="text-xs text-slate-300" id="mon-selected-count">0 selected</div>
+                        <div class="text-xs text-slate-300" data-mon-selected-count>0 selected</div>
                         <div class="flex gap-2">
-                          <button id="mon-bulk-test" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Test selected</button>
-                          <button id="mon-bulk-delete" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Delete selected</button>
+                          <button data-mon-bulk-test class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Test selected</button>
+                          <button data-mon-bulk-delete class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Delete selected</button>
                         </div>
                       </div>
 
@@ -2694,13 +2968,13 @@ document.addEventListener('DOMContentLoaded', () => {
                   </div>
                 `;
 
-                const wireMonitoringRowActions = (monitors) => {
-                    const selCountEl = document.getElementById('mon-selected-count');
+                const wireMonitoringRowActions = (rootEl, monitors) => {
+                    const selCountEl = rootEl.querySelector('[data-mon-selected-count]');
                     const updateSelCount = () => {
                         if (selCountEl) selCountEl.textContent = `${selectedMonitorIds.size} selected`;
                     };
 
-                    document.querySelectorAll('.mon-cb').forEach(cb => {
+                    rootEl.querySelectorAll('.mon-cb').forEach(cb => {
                         cb.addEventListener('change', () => {
                             const mid = parseInt(cb.dataset.mid, 10);
                             if (cb.checked) selectedMonitorIds.add(mid);
@@ -2720,8 +2994,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         await showHostMonitoringMain();
                     };
 
-                    const bulkTest = document.getElementById('mon-bulk-test');
-                    const bulkDel = document.getElementById('mon-bulk-delete');
+                    const bulkTest = rootEl.querySelector('[data-mon-bulk-test]');
+                    const bulkDel = rootEl.querySelector('[data-mon-bulk-delete]');
                     if (bulkTest) bulkTest.addEventListener('click', () => callBulk('test'));
                     if (bulkDel) bulkDel.addEventListener('click', () => callBulk('delete'));
 
@@ -2823,7 +3097,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         };
                     };
 
-                    document.querySelectorAll('tr[data-mid]').forEach(tr => {
+                    rootEl.querySelectorAll('tr[data-mid]').forEach(tr => {
                         const mid = parseInt(tr.dataset.mid, 10);
                         const m = monitors.find(x => x.id === mid);
                         if (!m) return;
@@ -2844,17 +3118,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateSelCount();
                 };
 
-                wireMonitoringRowActions(monitors);
+                wireMonitoringRowActions(body, monitors);
 
             } catch (err) {
                 console.error('Error loading monitoring', err);
-                container.innerHTML = `<div class="p-4 text-xs text-red-600">Error loading monitoring: ${err.message || err}</div>`;
+                if (subtitleEl) subtitleEl.textContent = 'Error';
+                if (body) body.innerHTML = `<div class="p-6 text-sm text-red-400">Error loading monitoring: ${err.message || err}</div>`;
             }
         };
 
 const showHostInfoMain = async () => {
             const hostId = selectedHostId;
             const hostName = hostId === 'local' ? 'Localhost' : (hosts[hostId]?.friendly_name || hostId);
+
+            const viewToken = ++logsMainViewToken;
+            logsMainMode = 'info';
             const topPane = document.getElementById('logs-top-pane');
             const bottomPane = document.getElementById('logs-bottom-pane');
             const logsContentPanel = document.getElementById('logs-content-panel');
@@ -2875,15 +3153,25 @@ const showHostInfoMain = async () => {
             }
             if (topHeader) topHeader.classList.remove('hidden');
             if (logTableContainer) logTableContainer.classList.remove('hidden');
-            if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
-            if (logsContentPanel) logsContentPanel.classList.remove('hidden');
-            if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
+            if (sshTerminalContainer) {
+                sshTerminalContainer.classList.add('hidden');
+                // Clear any SSH overlay styling so panes remain consistent sizes
+                sshTerminalContainer.style.position = '';
+                sshTerminalContainer.style.top = '';
+                sshTerminalContainer.style.left = '';
+                sshTerminalContainer.style.right = '';
+                sshTerminalContainer.style.bottom = '';
+                sshTerminalContainer.style.zIndex = '';
+            }
             if (logsContentPanel) logsContentPanel.classList.remove('hidden');
             if (logTableTitle) logTableTitle.textContent = `Host information: ${hostName}`;
             if (container) container.innerHTML = '<div class="text-sm termix-muted">Loading host info...</div>';
             if (logContent) {
                 logContent.innerHTML = '<div class="text-center termix-muted mt-16"><p class="text-lg">Select a log file to view its content</p></div>';
             }
+
+            // If the user switched views while we were entering Host Info, stop here.
+            if (viewToken !== logsMainViewToken || logsMainMode !== 'info' || selectedHostId !== hostId) return;
 
             // Localhost or config-based hosts: only basic info
             const hostData = (hostId === 'local') ? { friendly_name: 'Localhost', ip: 'localhost', user: 'local' } : (hosts[hostId] || { ip: hostId, user: 'root' });
@@ -2907,6 +3195,9 @@ const showHostInfoMain = async () => {
                 const resp = await fetch(`/hosts/db/${dbId}/info`);
                 const info = await resp.json();
                 if (!resp.ok || info.error) throw new Error(info.error || `Failed to load host info (${resp.status})`);
+
+                // If the user switched views while we were loading host info, don't overwrite the Pull Logs list.
+                if (viewToken !== logsMainViewToken || logsMainMode !== 'info' || selectedHostId !== hostId) return;
 
                 const si = info.system_info || {};
                 const svc = info.services_summary || { total: 0, running: 0, stopped: 0 };
@@ -3046,10 +3337,16 @@ const showHostInfoMain = async () => {
 
         const pullLogsForSelectedHost = () => {
             if (!selectedHostId) return;
+
+            const viewToken = ++logsMainViewToken;
+            logsMainMode = 'pull';
+
             const topPane = document.getElementById('logs-top-pane');
             const bottomPane = document.getElementById('logs-bottom-pane');
             const topHeader = document.getElementById('logs-top-header');
             const logTableContainer = document.getElementById('log-table-container');
+            const logsContentPanel = document.getElementById('logs-content-panel');
+            const logTableTitle = document.getElementById('log-table-title');
 
             // Normal split-pane logs mode
             if (topPane) {
@@ -3062,16 +3359,29 @@ const showHostInfoMain = async () => {
             }
 
             if (topHeader) topHeader.classList.remove('hidden');
-            if (logTableContainer) logTableContainer.classList.remove('hidden');
-            if (sshTerminalContainer) sshTerminalContainer.classList.add('hidden');
+            if (logTableContainer) {
+                logTableContainer.classList.remove('hidden');
+                logTableContainer.innerHTML = '<div class="text-sm termix-muted">Loading logs...</div>';
+            }
+            if (logTableTitle) logTableTitle.textContent = 'Fetching logs...';
+            if (sshTerminalContainer) {
+                sshTerminalContainer.classList.add('hidden');
+                // Clear any SSH overlay styling so panes remain consistent sizes
+                sshTerminalContainer.style.position = '';
+                sshTerminalContainer.style.top = '';
+                sshTerminalContainer.style.left = '';
+                sshTerminalContainer.style.right = '';
+                sshTerminalContainer.style.bottom = '';
+                sshTerminalContainer.style.zIndex = '';
+            }
             if (logsContentPanel) logsContentPanel.classList.remove('hidden');
 
-            fetchSourcesForHost();
+            fetchSourcesForHost(viewToken);
         };
 
 
         // --- CORE APP LOGIC ---
-        const fetchSourcesForHost = () => {
+        const fetchSourcesForHost = (viewToken) => {
             const url = selectedHostId === 'local' ? '/sources/local' : `/sources/remote/${selectedHostId}`;
             const hostName = selectedHostId === 'local' ? 'Localhost' : (hosts[selectedHostId]?.friendly_name || selectedHostId);
 
@@ -3099,6 +3409,12 @@ const showHostInfoMain = async () => {
             currentEventSource = new EventSource(url);
 
             currentEventSource.onmessage = (event) => {
+                // If user navigated away (Host Info / SSH / Monitoring), ignore streamed updates.
+                if (viewToken !== logsMainViewToken || logsMainMode !== 'pull') {
+                    try { currentEventSource.close(); } catch (_) {}
+                    return;
+                }
+
                 const data = JSON.parse(event.data);
                 switch(data.status) {
                     case 'progress':
