@@ -1485,6 +1485,9 @@ def get_ai_config():
     elif provider == 'ollama':
         result['ollama_configured'] = bool(config.get('ollama_url') and config.get('ollama_model'))
         result['ollama_model'] = config.get('ollama_model', '')
+    elif provider == 'openrouter':
+        result['openrouter_configured'] = bool(config.get('openrouter_api_key') and config.get('openrouter_model'))
+        result['openrouter_model'] = config.get('openrouter_model', '')
     
     return jsonify(result)
 
@@ -1666,6 +1669,120 @@ def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
     except Exception as e:
         raise Exception(f'Ollama analysis failed: {str(e)}')
 
+@app.route('/openrouter/config', methods=['POST', 'GET'])
+def openrouter_config():
+    """Save or retrieve OpenRouter configuration"""
+    if request.method == 'POST':
+        data = request.get_json()
+        api_key = data.get('api_key', '').strip()
+        model = data.get('model', '').strip()
+        
+        if not api_key or not model:
+            return jsonify({'error': 'Both API key and model are required.'}), 400
+        
+        config = load_config()
+        config['openrouter_api_key'] = api_key
+        config['openrouter_model'] = model
+        config['analysis_provider'] = 'openrouter'  # Set as default provider
+        save_config(config)
+        return jsonify({'message': 'OpenRouter configuration saved.'})
+    else:  # GET
+        config = load_config()
+        return jsonify({
+            'api_key': config.get('openrouter_api_key', ''),
+            'model': config.get('openrouter_model', ''),
+            'analysis_provider': config.get('analysis_provider', 'openai')
+        })
+
+@app.route('/openrouter/models', methods=['POST'])
+def get_openrouter_models():
+    """Fetch available models from OpenRouter API"""
+    data = request.get_json()
+    api_key = (data.get('api_key') or '').strip()
+    
+    if not api_key:
+        # Fall back to saved config
+        config = load_config()
+        api_key = (config.get('openrouter_api_key') or '').strip()
+    
+    if not api_key:
+        return jsonify({'error': 'OpenRouter API key not provided.'}), 400
+    
+    try:
+        response = requests.get(
+            'https://openrouter.ai/api/v1/models',
+            headers={'Authorization': f'Bearer {api_key}'},
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+        models = data.get('data', [])
+        model_names = [m.get('id', 'unknown') for m in models if m.get('id')]
+        return jsonify({'models': model_names})
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
+
+@app.route('/openrouter/test-saved', methods=['GET'])
+def test_saved_openrouter_key():
+    """Test the saved OpenRouter API key"""
+    try:
+        cfg = load_config()
+        api_key = (cfg.get('openrouter_api_key') or '').strip()
+        if not api_key:
+            return jsonify({'success': False, 'error': 'No saved OpenRouter API key configured.'}), 400
+
+        response = requests.get(
+            'https://openrouter.ai/api/v1/models',
+            headers={'Authorization': f'Bearer {api_key}'},
+            timeout=10
+        )
+        if response.status_code == 200:
+            return jsonify({'success': True, 'message': 'Saved OpenRouter API key is valid.'})
+        try:
+            j = response.json()
+            err = j.get('error')
+            if isinstance(err, dict):
+                err = err.get('message')
+        except Exception:
+            err = None
+        return jsonify({'success': False, 'error': err or f'OpenRouter validation failed ({response.status_code}).'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def analyse_with_openrouter(log_content, log_name, api_key, model):
+    """Analyze log using OpenRouter (OpenAI-compatible API)"""
+    truncated_content = log_content
+    if len(log_content) > MAX_CHAR_COUNT:
+        truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+    
+    try:
+        response = requests.post(
+            'https://openrouter.ai/api/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': model,
+                'messages': [
+                    {'role': 'system', 'content': 'You are a helpful assistant that analyses log files.'},
+                    {'role': 'user', 'content': f'Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}'}
+                ]
+            },
+            timeout=60
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result['choices'][0]['message']['content']
+    except requests.exceptions.RequestException as e:
+        raise Exception(f'OpenRouter API error: {str(e)}')
+    except KeyError:
+        raise Exception(f'Unexpected response from OpenRouter: {response.text[:300]}')
+    except Exception as e:
+        raise Exception(f'OpenRouter analysis failed: {str(e)}')
+
 # --- ANALYSIS & SCHEDULER ROUTES (RESTORED) ---
 def save_config(config):
     """Persist relevant config keys to DB-backed AppSetting."""
@@ -1679,6 +1796,10 @@ def save_config(config):
         _setting_set('ollama_url', config.get('ollama_url'))
     if 'ollama_model' in config:
         _setting_set('ollama_model', config.get('ollama_model'))
+    if 'openrouter_api_key' in config:
+        _setting_set('openrouter_api_key', config.get('openrouter_api_key'))
+    if 'openrouter_model' in config:
+        _setting_set('openrouter_model', config.get('openrouter_model'))
 
     if 'discord_webhook_url' in config:
         _setting_set('discord_webhook_url', config.get('discord_webhook_url'))
@@ -1704,6 +1825,8 @@ def load_config():
     cfg['api_key'] = cfg['openai_api_key']  # backward-compatible alias
     cfg['ollama_url'] = _setting_get('ollama_url', '')
     cfg['ollama_model'] = _setting_get('ollama_model', '')
+    cfg['openrouter_api_key'] = _setting_get('openrouter_api_key', '')
+    cfg['openrouter_model'] = _setting_get('openrouter_model', '')
 
     cfg['discord_webhook_url'] = _setting_get('discord_webhook_url', '')
     cfg['webhook_url'] = cfg['discord_webhook_url']
@@ -1720,7 +1843,7 @@ def analyse_log():
     log_content = data.get('log_content')
     log_name = data.get('log_name')
     webhook_url = data.get('webhook_url')
-    provider = data.get('provider', 'openai')  # 'openai' or 'ollama'
+    provider = data.get('provider', 'openai')  # 'openai', 'ollama', or 'openrouter'
 
     if not log_content:
         return jsonify({'error': 'Missing log_content.'}), 400
@@ -1733,6 +1856,13 @@ def analyse_log():
             if not ollama_url or not ollama_model:
                 return jsonify({'error': 'Ollama not configured. Please set up Ollama in Settings.'}), 400
             analysis = analyse_with_ollama(log_content, log_name, ollama_url, ollama_model)
+        elif provider == 'openrouter':
+            config = load_config()
+            api_key = config.get('openrouter_api_key')
+            model = config.get('openrouter_model')
+            if not api_key or not model:
+                return jsonify({'error': 'OpenRouter not configured. Please set up OpenRouter in Settings.'}), 400
+            analysis = analyse_with_openrouter(log_content, log_name, api_key, model)
         else:
             api_key = data.get('api_key')
             if not api_key:
@@ -1784,6 +1914,13 @@ def suricata_analyse():
             if not ollama_url or not ollama_model:
                 return jsonify({'error': 'Ollama not configured. Please set it up in Settings.'}), 400
             analysis = analyse_with_ollama(f"{prompt}\n\n{log_content}", log_name, ollama_url, ollama_model)
+        elif provider == 'openrouter':
+            config = load_config()
+            api_key = config.get('openrouter_api_key')
+            model = config.get('openrouter_model')
+            if not api_key or not model:
+                return jsonify({'error': 'OpenRouter not configured. Please set it up in Settings.'}), 400
+            analysis = analyse_with_openrouter(f"{prompt}\n\n{log_content}", log_name, api_key, model)
         else:
             api_key = data.get('api_key')
             if not api_key:
@@ -1847,6 +1984,10 @@ def _do_analysis_task(emit=None):
         if not config.get('ollama_url') or not config.get('ollama_model'):
             _emit({'status': 'error', 'message': 'Scheduled analysis aborted: Ollama not configured.'})
             return
+    elif provider == 'openrouter':
+        if not config.get('openrouter_api_key') or not config.get('openrouter_model'):
+            _emit({'status': 'error', 'message': 'Scheduled analysis aborted: OpenRouter not configured.'})
+            return
     else:
         if not config.get('api_key'):
             _emit({'status': 'error', 'message': 'Scheduled analysis aborted: OpenAI API key not configured.'})
@@ -1907,6 +2048,8 @@ def _do_analysis_task(emit=None):
 
                     if provider == 'ollama':
                         part_analysis = analyse_with_ollama(chunk, f"{log_name} on {host}", config.get('ollama_url'), config.get('ollama_model'))
+                    elif provider == 'openrouter':
+                        part_analysis = analyse_with_openrouter(chunk, f"{log_name} on {host}", config.get('openrouter_api_key'), config.get('openrouter_model'))
                     else:
                         prompt = get_ai_search_prompt()
                         client = openai.OpenAI(api_key=config.get('api_key'))

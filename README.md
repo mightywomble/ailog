@@ -142,13 +142,19 @@ If a push is rejected
 ### Kubernetes + Helm deployment
 Helm is the **preferred and supported** way to deploy/upgrade AILog in Kubernetes. The repo ships a working chart in `helm/` and that should be treated as the source of truth.
 
-#### Kubeconfig
-Ensure your kubeconfig points at the target cluster before deploying:
+#### Kubeconfig Setup
+Before deploying with Helm, ensure your kubeconfig points at the target cluster:
 
 ```bash
+# Export your kubeconfig (required for all helm commands)
 export KUBECONFIG=~/.kube/config
+
+# Verify you're connected to the correct cluster
 kubectl config current-context
+kubectl cluster-info
 ```
+
+**IMPORTANT:** Without setting `KUBECONFIG`, the `helm` command will not be able to reach your Kubernetes cluster and the deployment will hang or fail silently.
 
 #### Build + push the Docker image
 The Helm chart deploys an image from a registry. Typical workflow is:

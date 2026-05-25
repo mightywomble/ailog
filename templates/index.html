@@ -1170,6 +1170,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <select id="provider-dropdown" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white">
                                 <option value="openai">OpenAI (GPT-3.5)</option>
                                 <option value="ollama">Ollama (Local)</option>
+                                <option value="openrouter">OpenRouter</option>
                             </select>
                         </div>
                         
@@ -1210,6 +1211,33 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
                                 <button id="test-ollama-model-btn" class="w-full bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test Selected Model</button>
                                 <p id="ollama-model-test-status" class="text-xs mt-2"></p>
+                            </div>
+                        </div>
+                        
+                        <!-- OpenRouter Configuration Section -->
+                        <div id="openrouter-config-panel" class="border-t border-white/10 pt-4 hidden">
+                            <h5 class="font-medium text-white mb-3">OpenRouter Configuration</h5>
+                            <div class="mb-3">
+                                <label for="openrouter-api-key" class="block text-sm font-medium termix-muted mb-1 flex items-center gap-2">API Key <span id="openrouter-key-status" class="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title="OpenRouter key status"></span></label>
+                                <div class="flex space-x-2">
+                                    <input type="password" id="openrouter-api-key" class="flex-grow bg-white/10 border border-white/20 rounded-md px-3 py-2 placeholder-gray-500 text-white" placeholder="sk-...">
+                                    <button id="toggle-openrouter-key-visibility" class="bg-white/5 hover:bg-white/10 text-white px-3 py-2 text-sm rounded-md font-medium transition-colors" type="button" title="Show/Hide">Show</button>
+                                    <button id="test-openrouter-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test</button>
+                                </div>
+                                <p id="openrouter-test-status" class="text-xs mt-2"></p>
+                            </div>
+                            
+                            <!-- Models Section (hidden until key is tested) -->
+                            <div id="openrouter-models-panel" class="mt-4 hidden pt-4 border-t border-white/10">
+                                <div class="flex space-x-2 mb-3">
+                                    <button id="openrouter-get-models-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors flex-1">Get Models</button>
+                                </div>
+                                <label class="block text-sm font-medium termix-muted mb-3">Select Model</label>
+                                <div id="openrouter-models-list" class="grid grid-cols-1 gap-2 mb-4 max-h-72 overflow-y-auto">
+                                    <!-- Models will be rendered here as radio buttons -->
+                                </div>
+                                <button id="test-openrouter-model-btn" class="w-full bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50">Test Selected Model</button>
+                                <p id="openrouter-model-test-status" class="text-xs mt-2"></p>
                             </div>
                         </div>
                         
@@ -3524,9 +3552,12 @@ const showHostInfoMain = async () => {
         const updateProviderIndicator = () => {
             const provider = localStorage.getItem('analysis_provider') || 'openai';
             const ollamaModel = localStorage.getItem('ollama_model');
+            const openrouterModel = localStorage.getItem('openrouter_model');
             
             if (provider === 'ollama' && ollamaModel) {
                 providerLabel.textContent = `🤖 Ollama (${ollamaModel})`;
+            } else if (provider === 'openrouter' && openrouterModel) {
+                providerLabel.textContent = `🚀 OpenRouter (${openrouterModel})`;
             } else if (provider === 'openai') {
                 providerLabel.textContent = '🔑 OpenAI';
             } else {
@@ -3702,6 +3733,7 @@ const showHostInfoMain = async () => {
             // Hide all panels first
             openaiConfigPanel.classList.add('hidden');
             ollamaConfigPanel.classList.add('hidden');
+            openrouterConfigPanel.classList.add('hidden');
             currentConfigStatus.classList.add('hidden');
             
             if (provider === 'openai') {
@@ -3732,6 +3764,23 @@ const showHostInfoMain = async () => {
                     activeProviderName.textContent = `Ollama (${savedModel})`;
                     currentConfigStatus.classList.remove('hidden');
                 }
+            } else if (provider === 'openrouter') {
+                openrouterConfigPanel.classList.remove('hidden');
+                window.fetchApi('/openrouter/config', { method: 'GET' })
+                    .then(cfg => { 
+                        if (cfg.api_key) openrouterApiKeyInput.value = cfg.api_key;
+                        if (cfg.openrouter_model) {
+                            localStorage.setItem('openrouter_model', cfg.openrouter_model);
+                            const savedModelRadio = document.querySelector(`input[name="openrouter-model"][value="${cfg.openrouter_model}"]`);
+                            if (savedModelRadio) {
+                                savedModelRadio.checked = true;
+                            }
+                            activeProviderName.textContent = `OpenRouter (${cfg.openrouter_model})`;
+                            currentConfigStatus.classList.remove('hidden');
+                        }
+                        setStatusDot(openrouterKeyStatusDot, !!cfg.api_key);
+                    })
+                    .catch(() => {});
             }
         };
         
@@ -3807,6 +3856,189 @@ const showHostInfoMain = async () => {
                 openaiTestStatus.className = 'text-xs text-red-600 mt-2';
                 testOpenaiBtn.disabled = false;
                 testOpenaiBtn.textContent = 'Retry Test';
+            }
+        });
+        
+        // --- OPENROUTER CONFIGURATION WORKFLOW ---
+        const openrouterConfigPanel = document.getElementById('openrouter-config-panel');
+        const openrouterApiKeyInput = document.getElementById('openrouter-api-key');
+        const testOpenrouterBtn = document.getElementById('test-openrouter-btn');
+        const openrouterTestStatus = document.getElementById('openrouter-test-status');
+        const openrouterKeyStatusDot = document.getElementById('openrouter-key-status');
+        const openrouterModelsPanel = document.getElementById('openrouter-models-panel');
+        const openrouterGetModelsBtn = document.getElementById('openrouter-get-models-btn');
+        const testOpenrouterModelBtn = document.getElementById('test-openrouter-model-btn');
+        const openrouterModelTestStatus = document.getElementById('openrouter-model-test-status');
+        const toggleOpenrouterKeyVisibilityBtn = document.getElementById('toggle-openrouter-key-visibility');
+        
+        // Wire OpenRouter visibility toggle
+        wireVisibilityToggle(toggleOpenrouterKeyVisibilityBtn, openrouterApiKeyInput);
+        
+        // Test OpenRouter API Key
+        testOpenrouterBtn.addEventListener('click', async () => {
+            const apiKey = openrouterApiKeyInput.value.trim();
+            if (!apiKey) {
+                // No key entered: test saved key in DB
+                testOpenrouterBtn.disabled = true;
+                testOpenrouterBtn.textContent = 'Testing...';
+                openrouterTestStatus.textContent = 'Testing saved API key...';
+                openrouterTestStatus.className = 'text-xs text-yellow-600 mt-2';
+                try {
+                    await window.fetchApi('/openrouter/test-saved', { method: 'GET' });
+                    openrouterTestStatus.textContent = '✅ Saved API key is valid!';
+                    openrouterTestStatus.className = 'text-xs text-green-600 mt-2';
+                    setStatusDot(openrouterKeyStatusDot, true);
+                } catch (error) {
+                    openrouterTestStatus.textContent = `❌ ${error.message}`;
+                    openrouterTestStatus.className = 'text-xs text-red-600 mt-2';
+                    setStatusDot(openrouterKeyStatusDot, false);
+                } finally {
+                    testOpenrouterBtn.disabled = false;
+                    testOpenrouterBtn.textContent = 'Test';
+                }
+                return;
+            }
+            
+            testOpenrouterBtn.disabled = true;
+            testOpenrouterBtn.textContent = 'Testing...';
+            openrouterTestStatus.textContent = 'Testing API key...';
+            openrouterTestStatus.className = 'text-xs text-yellow-600 mt-2';
+            
+            try {
+                const res = await window.fetchApi('/openrouter/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: apiKey })
+                });
+                
+                openrouterTestStatus.textContent = '✅ API key is valid!';
+                openrouterTestStatus.className = 'text-xs text-green-600 mt-2';
+                testOpenrouterBtn.className = 'bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
+                testOpenrouterBtn.textContent = 'Verified';
+                testOpenrouterBtn.disabled = true;
+                
+                // Show models panel and auto-load models
+                openrouterModelsPanel.classList.remove('hidden');
+                await loadOpenrouterModels(apiKey);
+                
+                localStorage.setItem('analysis_provider', 'openrouter');
+                activeProviderName.textContent = 'OpenRouter';
+                currentConfigStatus.classList.remove('hidden');
+                updateProviderIndicator();
+                
+                window.showToast('OpenRouter configured as default AI provider');
+            } catch (error) {
+                openrouterTestStatus.textContent = `❌ ${error.message}`;
+                openrouterTestStatus.className = 'text-xs text-red-600 mt-2';
+                testOpenrouterBtn.disabled = false;
+                testOpenrouterBtn.textContent = 'Retry Test';
+            }
+        });
+        
+        // Get Models button for OpenRouter
+        openrouterGetModelsBtn.addEventListener('click', async () => {
+            const apiKey = openrouterApiKeyInput.value.trim();
+            if (!apiKey) {
+                window.showToast('Please test the OpenRouter API key first', 'error');
+                return;
+            }
+            await loadOpenrouterModels(apiKey);
+        });
+        
+        // Load OpenRouter models
+        const loadOpenrouterModels = async (apiKey) => {
+            openrouterGetModelsBtn.disabled = true;
+            openrouterGetModelsBtn.textContent = 'Loading...';
+            const modelsList = document.getElementById('openrouter-models-list');
+            modelsList.innerHTML = '<div class="col-span-1 text-sm termix-muted">Loading models...</div>';
+            
+            try {
+                const data = await window.fetchApi('/openrouter/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: apiKey })
+                });
+                
+                const models = data.models || [];
+                
+                if (models.length === 0) {
+                    modelsList.innerHTML = '<div class="col-span-1 text-sm termix-muted">No models available</div>';
+                    return;
+                }
+                
+                modelsList.innerHTML = '';
+                models.forEach((modelObj, index) => {
+                    const modelName = modelObj.id || modelObj;
+                    const modelDisplay = modelObj.name || modelName;
+                    const radioId = `openrouter-model-${index}`;
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-3 p-2 rounded-md border border-white/10 hover:bg-white/5 cursor-pointer transition-colors';
+                    label.innerHTML = `
+                        <input type="radio" id="${radioId}" name="openrouter-model" value="${modelName}" class="w-4 h-4 cursor-pointer">
+                        <span class="text-sm text-gray-200 flex-1">${modelDisplay}</span>
+                    `;
+                    
+                    const input = label.querySelector('input[type="radio"]');
+                    input.addEventListener('change', () => {
+                        testOpenrouterModelBtn.disabled = false;
+                    });
+                    
+                    modelsList.appendChild(label);
+                });
+                
+                window.showToast(`Found ${models.length} model(s)`);
+            } catch (error) {
+                modelsList.innerHTML = `<div class="col-span-1 text-sm text-red-400">Error: ${error.message}</div>`;
+                window.showToast(`Error loading models: ${error.message}`, 'error');
+            } finally {
+                openrouterGetModelsBtn.disabled = false;
+                openrouterGetModelsBtn.textContent = 'Get Models';
+            }
+        };
+        
+        // Test OpenRouter Model button
+        testOpenrouterModelBtn.addEventListener('click', async () => {
+            const selectedRadio = document.querySelector('input[name="openrouter-model"]:checked');
+            const model = selectedRadio ? selectedRadio.value : '';
+            const apiKey = openrouterApiKeyInput.value.trim();
+            
+            if (!model) {
+                openrouterModelTestStatus.textContent = '❌ Please select a model';
+                openrouterModelTestStatus.className = 'text-xs text-red-600 mt-2';
+                return;
+            }
+            
+            testOpenrouterModelBtn.disabled = true;
+            testOpenrouterModelBtn.textContent = 'Testing...';
+            openrouterModelTestStatus.textContent = 'Testing model...';
+            openrouterModelTestStatus.className = 'text-xs text-yellow-600 mt-2';
+            
+            try {
+                const res = await window.fetchApi('/openrouter/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: apiKey, model: model })
+                });
+                
+                openrouterModelTestStatus.textContent = '✅ Model is configured and working!';
+                openrouterModelTestStatus.className = 'text-xs text-green-600 mt-2';
+                testOpenrouterModelBtn.className = 'bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors';
+                testOpenrouterModelBtn.textContent = 'Verified';
+                testOpenrouterModelBtn.disabled = true;
+                
+                localStorage.setItem('analysis_provider', 'openrouter');
+                localStorage.setItem('openrouter_model', model);
+                
+                activeProviderName.textContent = `OpenRouter (${model})`;
+                currentConfigStatus.classList.remove('hidden');
+                updateProviderIndicator();
+                
+                window.showToast('OpenRouter configured as default AI provider');
+            } catch (error) {
+                openrouterModelTestStatus.textContent = `❌ ${error.message}`;
+                openrouterModelTestStatus.className = 'text-xs text-red-600 mt-2';
+                testOpenrouterModelBtn.disabled = false;
+                testOpenrouterModelBtn.textContent = 'Retry Test';
             }
         });
         
