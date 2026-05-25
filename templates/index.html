@@ -2460,9 +2460,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 logTitle.textContent = `${logName} on ${hostName}`;
                 logContent.innerHTML = `<pre class="text-sm termix-text font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
-                if (localStorage.getItem('openai_api_key') && data.content) {
-                     aiAnalyseBtn.classList.remove('hidden');
-                     if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                // Check if any AI provider is configured (DB-backed settings)
+                if (data.content) {
+                    try {
+                        const aiConfig = await window.fetchApi('/ai/config');
+                        if (aiConfig && aiConfig.provider) {
+                            aiAnalyseBtn.classList.remove('hidden');
+                            if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                        }
+                    } catch (_) {
+                        // If config check fails, button stays hidden
+                    }
                 }
             } catch (error) {
                 logTitle.textContent = `Error loading ${logName}`;
