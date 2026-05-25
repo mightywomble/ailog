@@ -140,6 +140,7 @@ If a push is rejected
 * Discord webhook URL for notifications (optional)
 
 ### Kubernetes + Helm deployment
+Helm is the **preferred and supported** way to deploy/upgrade AILog in Kubernetes. The repo ships a working chart in `helm/` and that should be treated as the source of truth.
 
 #### Kubeconfig
 Ensure your kubeconfig points at the target cluster before deploying:
@@ -149,19 +150,41 @@ export KUBECONFIG=~/.kube/config
 kubectl config current-context
 ```
 
+#### Build + push the Docker image
+The Helm chart deploys an image from a registry. Typical workflow is:
+
+```bash
+# dev image tag (for a dev namespace)
+docker build -t mightywomble/ailog:dev -f docker/Dockerfile .
+docker push mightywomble/ailog:dev
+
+# production-ish tag (example)
+docker build -t mightywomble/ailog:ailog -f docker/Dockerfile .
+docker push mightywomble/ailog:ailog
+```
+
 #### Helm chart location
 The working chart is included in this repo at `helm/`.
 
-#### Deploy/upgrade
+#### Deploy/upgrade (preferred)
 ```bash
 helm upgrade --install ailog ./helm -n ailog
+```
+
+#### Deploy with explicit image overrides
+```bash
+helm upgrade --install ailog ./helm -n ailog \
+  --set image.repository=mightywomble/ailog \
+  --set image.tag=ailog
 ```
 
 #### Deploy to a dev namespace
 To run a separate dev instance, use a unique namespace and Tailscale hostname:
 ```bash
 helm upgrade --install ailog-dev ./helm -n ailog-dev --create-namespace \
-  --set tailscale.hostname=ailog-dev
+  --set tailscale.hostname=ailog-dev \
+  --set image.repository=mightywomble/ailog \
+  --set image.tag=dev
 ```
 
 #### Values files
@@ -183,6 +206,33 @@ helm upgrade --install ailog ./helm -n ailog \
   --set tailscale.egress.enabled=true \
   --set tailscale.egress.mode=tun \
   --set tailscale.egress.acceptRoutes=false
+```
+
+#### Optional: kubectl-based rollout procedure (not the primary method)
+If you deployed via Helm and just need to force a restart (for example after pushing a mutable tag like `:dev`), you can do:
+
+```bash
+# restart pods for the deployment
+kubectl -n ailog rollout restart deploy/ailog
+
+# watch the rollout
+kubectl -n ailog rollout status deploy/ailog --timeout=300s
+
+# see what is running
+kubectl -n ailog get pods -o wide
+```
+
+##### Optional workaround: PVC Multi-Attach (ReadWriteOnce)
+If the rollout hangs with errors like **Multi-Attach** (RWO volume still attached to the old pod), the quickest fix is usually:
+
+```bash
+kubectl -n ailog scale deploy/ailog --replicas=0
+
+# wait for the old pod to terminate so the PVC detaches
+kubectl -n ailog get pods
+
+kubectl -n ailog scale deploy/ailog --replicas=1
+kubectl -n ailog rollout status deploy/ailog --timeout=300s
 ```
 
 #### Step 1: Install System Dependencies
