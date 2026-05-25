@@ -3709,11 +3709,9 @@ const showHostInfoMain = async () => {
             });
         }
 
-        (async () => {
-            await loadSettingsFromBackend();
-        })();
+        // --- UNIFIED AI PROVIDER SELECTION WORKFLOW ---
         
-        // Load current provider configuration on settings open
+        // Load current provider config when settings open
         const loadCurrentProviderConfig = async () => {
             try {
                 const aiConfig = await window.fetchApi('/ai/config');
@@ -3726,9 +3724,7 @@ const showHostInfoMain = async () => {
             }
         };
         
-        // --- UNIFIED AI PROVIDER SELECTION WORKFLOW ---
-        
-        // Show/hide config panels based on dropdown selection
+        // Show/hide config panels based on dropdown selection (MUST be declared before use)
         const showProviderConfigPanel = (provider, config = null) => {
             // Hide all panels first
             openaiConfigPanel.classList.add('hidden');
