@@ -3634,7 +3634,7 @@ const showHostInfoMain = async () => {
         };
         
         // Initialize provider indicator on page load - async load from backend
-
+        loadSettingsFromBackend();
 
         const renderAlertKeywords = (keywords) => {
             if (!alertKeywordsList) return;
