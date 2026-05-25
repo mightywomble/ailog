@@ -831,7 +831,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         </div>
         <div id="logs-view" class="hidden flex-1 flex flex-col gap-4 termix-view" style="height: 100%;">
-            <div class="termix-panel p-4 flex items-center justify-between">
+            <div class="termix-panel p-4 flex items-center justify-between" style="position: relative; z-index: 40;">
                 <div class="flex items-center gap-3">
                     <button id="back-to-dashboard-btn" class="termix-btn" type="button">Back</button>
                     <div>
@@ -874,15 +874,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         <p class="text-lg">Click on a host to see available logs</p>
                     </div>
                 </div>
-
-                <!-- SSH Terminal Panel (replaces Host Info / log list area) -->
-                <div id="ssh-terminal-container" class="hidden w-full flex-1 flex flex-col termix-panel rounded-lg border" style="min-height: 200px;">
-                    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                        <div class="text-lg font-semibold termix-text">SSH Terminal</div>
-                        <div id="ssh-terminal-status" class="text-xs termix-muted">Disconnected</div>
-                    </div>
-                    <div id="ssh-terminal-body" class="flex-1 overflow-hidden w-full p-3" style="min-height: 200px;"></div>
+            </div>
+            
+            <!-- SSH Terminal Container (outside log panes for independent visibility) -->
+            <div id="ssh-terminal-container" class="hidden w-full flex-1 flex flex-col termix-panel rounded-lg border" style="min-height: 200px;">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                    <div class="text-lg font-semibold termix-text">SSH Terminal</div>
+                    <div id="ssh-terminal-status" class="text-xs termix-muted">Disconnected</div>
                 </div>
+                <div id="ssh-terminal-body" class="flex-1 overflow-hidden w-full p-3" style="min-height: 200px;"></div>
             </div>
             
             <!-- Log Content Area (Bottom 50%) -->
@@ -1845,6 +1845,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let sshFit = null;
         let sshSocket = null;
         let sshConnectedHost = null;
+        let sshSessionActive = false;  // Track if SSH session is currently active
 
         const setSshStatus = (text, tone = 'muted') => {
             if (!sshTerminalStatus) return;
@@ -1926,14 +1927,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     const msg = JSON.parse(event.data);
                     if (msg.type === 'data' && msg.data) {
                         sshTerm.write(msg.data);
+                        // Detect if user typed 'exit' and got shell exit response
+                        // When shell exits, it sends either connection closed or shell prompt indicating exit
+                        if (msg.data.includes('exit') || msg.data.includes('Connection closed')) {
+                            // Check if the disconnected message follows (session ended)
+                            sshSessionActive = false;
+                        }
                     } else if (msg.type === 'connected') {
                         sshTerm.write('\r\n');
+                        sshSessionActive = true;
                     } else if (msg.type === 'error') {
                         setSshStatus('Error', 'error');
                         sshTerm.write(`\r\n[error] ${msg.data?.message || 'Unknown error'}\r\n`);
+                        sshSessionActive = false;
                     } else if (msg.type === 'disconnected') {
                         setSshStatus('Disconnected', 'muted');
                         sshTerm.write(`\r\n[disconnected] ${msg.data?.message || ''}\r\n`);
+                        sshSessionActive = false;
+                        // User typed exit - return to host info view
+                        setTimeout(() => showHostInfoMain(), 500);
                     }
                 } catch (_) {
                     sshTerm.write(event.data);
@@ -1941,9 +1953,16 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             sshSocket.onclose = () => {
                 setSshStatus('Disconnected', 'muted');
+                // Reset socket reference so a new connection can be made
+                sshSocket = null;
+                sshSessionActive = false;
+                // Only return to host info if session was active (user exited intentionally)
+                // If they clicked away, session stays suppressed until SSH is clicked again
             };
-            sshSocket.onerror = () => {
+            sshSocket.onerror = (error) => {
                 setSshStatus('Connection error', 'error');
+                // Close socket to allow reconnection
+                closeSshSocket();
             };
         };
 
@@ -1974,11 +1993,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 sshTerminalContainer.classList.remove('hidden');
                 // Position SSH terminal as an absolute/fixed overlay that takes full space
                 sshTerminalContainer.style.position = 'fixed';
-                sshTerminalContainer.style.top = '150px';  // Account for header height
+                sshTerminalContainer.style.top = '200px';  // Account for header + toolbar height
                 sshTerminalContainer.style.left = '360px'; // Account for sidebar width
                 sshTerminalContainer.style.right = '16px';
                 sshTerminalContainer.style.bottom = '16px';
-                sshTerminalContainer.style.zIndex = '40';
+                sshTerminalContainer.style.zIndex = '30';  // Below toolbar (z-index 40)
             }
 
             // Ensure dependencies are loaded
