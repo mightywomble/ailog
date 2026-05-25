@@ -4,11 +4,11 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 ## 📋 Version History
 
-||| Date | Version | Major Changes | Status |
-|||------|---------|---------------|--------|
-||| 2026-05-25 | v2.9.16 | AI provider persistence: load from database on page init (survives hard refresh/pod restart); OpenRouter + Ollama model search filtering (real-time substring match on model list) | ✅ Complete |
-||| 2026-05-25 | v2.9.15 | OpenRouter AI provider integration: API key test → model discovery → selection workflow; fixed /openrouter/config to allow saving key before model; UI auto-loads models after key validation | ✅ Complete |
-|| 2026-05-25 | v2.9.14 | UI polish: SSH tabs/footer layout + main-pane sizing consistency; Pull Logs async clobber fix; Monitoring/Wizard now opens as modal (no full-page redirect) | ✅ Complete |
+| Date | Version | Major Changes | Status |
+|------|---------|---------------|--------|
+| 2026-05-25 | v2.9.16 | AI provider persistence: load from database on page init (survives hard refresh/pod restart); OpenRouter + Ollama model search filtering (real-time substring match on model list) | ✅ Complete |
+| 2026-05-25 | v2.9.15 | OpenRouter AI provider integration: API key test → model discovery → selection workflow; fixed /openrouter/config to allow saving key before model; UI auto-loads models after key validation | ✅ Complete |
+| 2026-05-25 | v2.9.14 | UI polish: SSH tabs/footer layout + main-pane sizing consistency; Pull Logs async clobber fix; Monitoring/Wizard now opens as modal (no full-page redirect) | ✅ Complete |
 | 2026-05-24 | v2.9.13 | Termix-style SSH terminal (WebSocket + Paramiko) in Logs view | ✅ Complete |
 | 2026-05-23 | v2.9.12 | Added in-repo Helm chart copy and Kubernetes/Helm deployment docs | ✅ Complete |
 | 2026-05-23 | v2.9.11 | SSH key encryption toggle + status; container adds cryptography + openssh-client; Helm adds Tailscale egress sidecar for tailnet SSH | ✅ Complete |
