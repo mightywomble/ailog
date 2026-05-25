@@ -2464,12 +2464,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.content) {
                     try {
                         const aiConfig = await window.fetchApi('/ai/config');
+                        console.log('[DEBUG] AI config response:', aiConfig);
                         if (aiConfig && aiConfig.provider) {
+                            console.log('[DEBUG] AI provider found:', aiConfig.provider);
                             aiAnalyseBtn.classList.remove('hidden');
                             if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                        } else {
+                            console.log('[DEBUG] No AI provider configured');
                         }
-                    } catch (_) {
-                        // If config check fails, button stays hidden
+                    } catch (err) {
+                        console.error('[DEBUG] Error checking AI config:', err);
                     }
                 }
             } catch (error) {
