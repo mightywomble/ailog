@@ -4749,25 +4749,19 @@ const showHostInfoMain = async () => {
                     return;
                 }
                 
-                // Show AI Analyse button if the currently selected provider is configured
-                const provider = localStorage.getItem('analysis_provider') || 'openai';
-                const openaiKey = localStorage.getItem('openai_api_key');
-                const ollamaUrl = localStorage.getItem('ollama_url');
-                const ollamaModel = localStorage.getItem('ollama_model');
-                
-                let shouldShowButton = false;
-                
-                if (provider === 'ollama') {
-                    shouldShowButton = !!(ollamaUrl && ollamaModel);
-                } else {
-                    shouldShowButton = !!openaiKey;
-                }
-                
-                if (shouldShowButton) {
-                    aiAnalyseBtn.classList.remove('hidden');
-                    if (data.will_be_truncated) {
-                        truncationWarning.classList.remove('hidden');
+                // Show AI Analyse button if any AI provider is configured (DB-backed settings)
+                try {
+                    const aiConfig = await window.fetchApi('/ai/config');
+                    console.log('[DEBUG] AI config response:', aiConfig);
+                    if (aiConfig && aiConfig.provider) {
+                        console.log('[DEBUG] AI provider found:', aiConfig.provider);
+                        aiAnalyseBtn.classList.remove('hidden');
+                        if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
+                    } else {
+                        console.log('[DEBUG] No AI provider configured');
                     }
+                } catch (err) {
+                    console.error('[DEBUG] Error checking AI config:', err);
                 }
             } catch (error) {
                 logContentTitle.textContent = `Error loading ${currentLogName}`;
