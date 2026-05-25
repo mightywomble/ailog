@@ -2815,7 +2815,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dockerSnap = data.docker_snapshot;
 
                 if (!monitors.length) {
-                    window.location.href = `/monitoring/wizard?host_id=${dbId}`;
+                    // No monitors exist yet for this host; open the wizard in a modal (not a full-page redirect).
+                    try {
+                        if (overlay) overlay.remove();
+                    } catch (_) {}
+                    if (typeof window.openMonitoringWizard === 'function') {
+                        window.openMonitoringWizard(dbId);
+                    } else {
+                        window.location.href = `/monitoring/wizard?host_id=${dbId}`;
+                    }
                     return;
                 }
 
