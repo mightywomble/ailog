@@ -2441,12 +2441,29 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         };
 
+        // Single function to update AI Analyse button visibility based on /ai/config endpoint
+        const updateAiAnalyseBtnVisibility = async (hasContent = true, willBeTruncated = false) => {
+            aiAnalyseBtn.classList.add('hidden');
+            truncationWarning.classList.add('hidden');
+            
+            if (!hasContent) return;
+            
+            try {
+                const aiConfig = await window.fetchApi('/ai/config');
+                if (aiConfig && aiConfig.provider) {
+                    aiAnalyseBtn.classList.remove('hidden');
+                    if (willBeTruncated) truncationWarning.classList.remove('hidden');
+                }
+            } catch (err) {
+                // Silently fail - button stays hidden if config can't be fetched
+            }
+        };
+
         const loadLogContent = async (logName, logType, hostId, hostName) => {
             currentLogName = logName;
             logTitle.textContent = `Loading: ${logName} from ${hostName}...`;
             logContent.innerHTML = '<div class="text-center termix-muted mt-16">Fetching log data...</div>';
-            aiAnalyseBtn.classList.add('hidden');
-            truncationWarning.classList.add('hidden');
+            await updateAiAnalyseBtnVisibility(false);
 
             const hostParam = hostId === 'local' ? '' : `?host=${hostId}`;
             const url = logType === 'file' ? `/log/${encodeURIComponent(logName)}${hostParam}` : `/journal/${encodeURIComponent(logName)}${hostParam}`;
@@ -2460,22 +2477,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 logTitle.textContent = `${logName} on ${hostName}`;
                 logContent.innerHTML = `<pre class="text-sm termix-text font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
-                // Check if any AI provider is configured (DB-backed settings)
-                if (data.content) {
-                    try {
-                        const aiConfig = await window.fetchApi('/ai/config');
-                        console.log('[DEBUG] AI config response:', aiConfig);
-                        if (aiConfig && aiConfig.provider) {
-                            console.log('[DEBUG] AI provider found:', aiConfig.provider);
-                            aiAnalyseBtn.classList.remove('hidden');
-                            if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
-                        } else {
-                            console.log('[DEBUG] No AI provider configured');
-                        }
-                    } catch (err) {
-                        console.error('[DEBUG] Error checking AI config:', err);
-                    }
-                }
+                // Update button visibility based on content and AI config
+                await updateAiAnalyseBtnVisibility(!!data.content, data.will_be_truncated);
             } catch (error) {
                 logTitle.textContent = `Error loading ${logName}`;
                 logContent.innerHTML = `<div class="text-center text-red-400 mt-16">${error.message}</div>`;
@@ -4727,8 +4730,7 @@ const showHostInfoMain = async () => {
             
             logContentTitle.textContent = `Loading: ${currentLogName}...`;
             logContentContainer.innerHTML = '<div class="text-center termix-muted mt-16">Fetching log data...</div>';
-            aiAnalyseBtn.classList.add('hidden');
-            truncationWarning.classList.add('hidden');
+            await updateAiAnalyseBtnVisibility(false);
 
             const hostParam = selectedHost === 'local' ? '' : `?host=${selectedHost}`;
             const url = type === 'file' ? `/log/${encodeURIComponent(currentLogName)}${hostParam}` : `/journal/${encodeURIComponent(currentLogName)}${hostParam}`;
@@ -4740,29 +4742,10 @@ const showHostInfoMain = async () => {
                 
                 currentLogContent = data.content;
                 logContentTitle.textContent = `${currentLogName} on ${selectedHostName}`;
-                
-                // Create a pre element with black text for log content
                 logContentContainer.innerHTML = `<pre class="text-sm termix-text font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
                 
-                // Check if we have content to analyze
-                if (!data.content) {
-                    return;
-                }
-                
-                // Show AI Analyse button if any AI provider is configured (DB-backed settings)
-                try {
-                    const aiConfig = await window.fetchApi('/ai/config');
-                    console.log('[DEBUG] AI config response:', aiConfig);
-                    if (aiConfig && aiConfig.provider) {
-                        console.log('[DEBUG] AI provider found:', aiConfig.provider);
-                        aiAnalyseBtn.classList.remove('hidden');
-                        if (data.will_be_truncated) truncationWarning.classList.remove('hidden');
-                    } else {
-                        console.log('[DEBUG] No AI provider configured');
-                    }
-                } catch (err) {
-                    console.error('[DEBUG] Error checking AI config:', err);
-                }
+                // Update button visibility based on content and AI config
+                await updateAiAnalyseBtnVisibility(!!data.content, data.will_be_truncated);
             } catch (error) {
                 logContentTitle.textContent = `Error loading ${currentLogName}`;
                 logContentContainer.innerHTML = `<div class="text-center text-red-400 mt-16">${error.message}</div>`;
