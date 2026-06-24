@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-06-24 | v2.9.17 | Hosts sidebar: sort by IP/name + manual drag reorder with grab handle + clearer drop target highlight; Rescan reliability: DB hosts without explicit ssh_key_id now fall back to default SSH key (matches SSH terminal/log pulls) | ✅ Complete |
 | 2026-05-25 | v2.9.16 | AI provider persistence: load from database on page init (survives hard refresh/pod restart); OpenRouter + Ollama model search filtering (real-time substring match on model list) | ✅ Complete |
 | 2026-05-25 | v2.9.15 | OpenRouter AI provider integration: API key test → model discovery → selection workflow; fixed /openrouter/config to allow saving key before model; UI auto-loads models after key validation | ✅ Complete |
 | 2026-05-25 | v2.9.14 | UI polish: SSH tabs/footer layout + main-pane sizing consistency; Pull Logs async clobber fix; Monitoring/Wizard now opens as modal (no full-page redirect) | ✅ Complete |
@@ -53,6 +54,7 @@ This application is designed for use on a trusted, internal development network 
 
 ### 🌐 **Multi-Host Architecture**
 * **Host Management Dashboard:** Intuitive interface for managing local and remote servers
+* **Hosts sidebar ordering:** Sort hosts by **IP** or **Name**, or use **Manual order** (drag via grab handle). Ordering preferences are stored in browser localStorage.
 * **SSH Connection Testing:** Built-in validation ensures proper SSH key setup and sudo permissions before adding hosts
 * **Dynamic Host Switching:** Seamlessly switch between configured servers with real-time log loading
 * **Connection Status Monitoring:** Visual indicators show host connectivity status
@@ -413,6 +415,10 @@ The **Add Devices** wizard lets you onboard one or more remote Linux hosts in a 
 
 The **Hosts** column on the left shows all available hosts (local + wizard onboarded):
 
+Ordering controls:
+- **Sort:** Manual / IP (asc/desc) / Name (A–Z / Z–A)
+- **Manual order:** drag-and-drop hosts using the grab handle (Localhost is pinned to the top)
+
 Each host card shows:
 
 - Friendly name
@@ -432,6 +438,8 @@ Each host card shows:
   - CPU type and cores
   - Main IP and Netbird IP
   - Service counts (total, running, stopped)
+- Click **Rescan** to refresh system info + service snapshot.
+  - Note: for database-backed hosts created by import/wizard that do not have an explicit `ssh_key_id`, the rescan path falls back to the most recently added SSH key (same behavior as SSH terminal/log pulls).
 - Local or non-database hosts show a basic `user@host` line and a note that detailed info is only available for wizard-managed hosts.
 
 ## 📖 Usage Guide

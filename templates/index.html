@@ -622,11 +622,18 @@ document.addEventListener('DOMContentLoaded', () => {
 /* Hosts sidebar collapse */
 #hosts-sidebar.collapsed { width: 4.5rem !important; padding-left: 0.5rem; padding-right: 0.5rem; }
 #hosts-sidebar.collapsed #hosts-title { display: none; }
+#hosts-sidebar.collapsed #hosts-controls { display: none; }
 #hosts-sidebar.collapsed #host-list-container { gap: 0.5rem; }
 #hosts-sidebar.collapsed .host-card { padding: 0.5rem; }
 #hosts-sidebar.collapsed .host-card h3,
 #hosts-sidebar.collapsed .host-card p { display: none; }
 #hosts-sidebar.collapsed .host-card .connection-indicator { margin-left: 0.25rem; }
+#hosts-sidebar.collapsed .host-card .hosts-grab-handle { display: none; }
+
+/* Drag/reorder affordances */
+.hosts-grab-handle { user-select: none; }
+.hosts-grab-handle:active { cursor: grabbing; }
+.hosts-drag-over { outline: 2px solid rgba(245, 158, 11, 0.9); outline-offset: 2px; }
 </style>
 </head>
 <body class="termix-text font-sans antialiased min-h-screen">
@@ -720,11 +727,21 @@ document.addEventListener('DOMContentLoaded', () => {
     <div class="flex flex-1 overflow-hidden m-4 gap-4" style="height: calc(100vh - 160px);">
         <!-- Host List Sidebar -->
         <aside id="hosts-sidebar" class="w-1/4 glass-container p-4 flex flex-col transition-all duration-200">
-            <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center justify-between mb-2">
                 <h2 class="text-lg font-semibold termix-text" id="hosts-title">Hosts</h2>
                 <button id="hosts-collapse-btn" class="termix-btn" type="button" title="Collapse/Expand Hosts">
                     <span id="hosts-collapse-icon">⟨</span>
                 </button>
+            </div>
+            <div class="flex items-center gap-2 mb-3" id="hosts-controls">
+                <select id="hosts-sort-select" class="rounded-lg px-2 py-1 text-xs bg-white/5 border border-white/10 text-gray-100">
+                    <option value="manual">Manual order</option>
+                    <option value="ip_asc">IP (asc)</option>
+                    <option value="ip_desc">IP (desc)</option>
+                    <option value="name_asc">Name (A-Z)</option>
+                    <option value="name_desc">Name (Z-A)</option>
+                </select>
+                <button id="hosts-reset-order-btn" class="termix-btn text-xs px-2 py-1" type="button" title="Reset manual host order">Reset</button>
             </div>
             <div id="host-list-container" class="flex-1 overflow-y-auto space-y-2">
                 <!-- Host cards will be populated here -->
@@ -1881,6 +1898,102 @@ document.addEventListener('DOMContentLoaded', () => {
         let tableData = null;
         let selectedHostId = 'local';
         let hosts = {};
+
+        // Hosts list sorting / manual ordering
+        const hostsSortSelect = document.getElementById('hosts-sort-select');
+        const hostsResetOrderBtn = document.getElementById('hosts-reset-order-btn');
+        const HOSTS_SORT_KEY = 'ui.hosts_sort';
+        const HOSTS_MANUAL_ORDER_KEY = 'ui.hosts_manual_order';
+
+        const getHostsSortMode = () => {
+            const v = (localStorage.getItem(HOSTS_SORT_KEY) || 'manual').trim();
+            return v || 'manual';
+        };
+
+        const setHostsSortMode = (mode) => {
+            localStorage.setItem(HOSTS_SORT_KEY, mode);
+            if (hostsSortSelect) hostsSortSelect.value = mode;
+        };
+
+        const getManualOrder = () => {
+            try {
+                const raw = localStorage.getItem(HOSTS_MANUAL_ORDER_KEY);
+                const arr = raw ? JSON.parse(raw) : [];
+                return Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : [];
+            } catch (_) {
+                return [];
+            }
+        };
+
+        const setManualOrder = (orderArr) => {
+            try {
+                localStorage.setItem(HOSTS_MANUAL_ORDER_KEY, JSON.stringify(orderArr || []));
+            } catch (_) {}
+        };
+
+        const ipToSortable = (ip) => {
+            // Returns an array of ints for IPv4; otherwise null (for hostnames, 'localhost', IPv6, etc)
+            const s = (ip || '').trim();
+            const m = /^\s*(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\s*$/.exec(s);
+            if (!m) return null;
+            const parts = m.slice(1).map(n => Number(n));
+            if (parts.some(n => !Number.isFinite(n) || n < 0 || n > 255)) return null;
+            return parts;
+        };
+
+        const compareIp = (aIp, bIp) => {
+            const aa = ipToSortable(aIp);
+            const bb = ipToSortable(bIp);
+            if (!aa && !bb) return String(aIp || '').localeCompare(String(bIp || ''), undefined, { numeric: true, sensitivity: 'base' });
+            if (!aa) return 1;
+            if (!bb) return -1;
+            for (let i = 0; i < 4; i++) {
+                if (aa[i] !== bb[i]) return aa[i] - bb[i];
+            }
+            return 0;
+        };
+
+        const hostDisplayName = (host) => {
+            return (host && (host.friendly_name || host.hostname || host.ip || host.ip_address)) ? String(host.friendly_name || host.hostname || host.ip || host.ip_address) : '';
+        };
+
+        const getOrderedHostEntries = (hostsObj) => {
+            const entries = Object.entries(hostsObj || {});
+            const mode = getHostsSortMode();
+
+            if (mode === 'manual') {
+                const manual = getManualOrder();
+                const idx = new Map(manual.map((id, i) => [id, i]));
+                entries.sort((a, b) => {
+                    const ai = idx.has(a[0]) ? idx.get(a[0]) : Number.POSITIVE_INFINITY;
+                    const bi = idx.has(b[0]) ? idx.get(b[0]) : Number.POSITIVE_INFINITY;
+                    if (ai !== bi) return ai - bi;
+                    // Stable fallback for hosts not yet in manual list
+                    return hostDisplayName(a[1]).localeCompare(hostDisplayName(b[1]), undefined, { numeric: true, sensitivity: 'base' });
+                });
+                return entries;
+            }
+
+            if (mode === 'ip_asc' || mode === 'ip_desc') {
+                entries.sort((a, b) => {
+                    const c = compareIp(a[1]?.ip, b[1]?.ip);
+                    return mode === 'ip_desc' ? -c : c;
+                });
+                return entries;
+            }
+
+            if (mode === 'name_asc' || mode === 'name_desc') {
+                entries.sort((a, b) => {
+                    const an = hostDisplayName(a[1]).toLowerCase();
+                    const bn = hostDisplayName(b[1]).toLowerCase();
+                    const c = an.localeCompare(bn, undefined, { numeric: true, sensitivity: 'base' });
+                    return mode === 'name_desc' ? -c : c;
+                });
+                return entries;
+            }
+
+            return entries;
+        };
         let currentLogType = null;
         let currentHostId = null;
 
@@ -2566,9 +2679,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const hostsData = await window.fetchApi('/hosts');
                 console.log('[DEBUG] Received hosts data:', hostsData);
                 hosts = hostsData;
+
+                // Ensure controls reflect persisted state
+                if (hostsSortSelect) hostsSortSelect.value = getHostsSortMode();
+
                 hostListContainer.innerHTML = '';
-                
-                // Add localhost card
+
+                // Add localhost card (always pinned to top)
                 console.log('[DEBUG] Creating localhost card...');
                 const localhostCard = createHostCard('local', {
                     friendly_name: 'Localhost',
@@ -2577,15 +2694,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     description: 'Local machine'
                 });
                 hostListContainer.appendChild(localhostCard);
-                
-                // Add remote host cards
-                console.log(`[DEBUG] Creating ${Object.keys(hosts).length} remote host cards...`);
-                for (const [id, host] of Object.entries(hosts)) {
+
+                // Add remote host cards in desired order
+                const ordered = getOrderedHostEntries(hosts);
+                console.log(`[DEBUG] Creating ${ordered.length} remote host cards...`);
+                for (const [id, host] of ordered) {
                     console.log(`[DEBUG] Creating card for host: ${host.friendly_name} (${id})`);
                     const hostCard = createHostCard(id, host);
                     hostListContainer.appendChild(hostCard);
                 }
-                
+
+                // In manual mode, keep manual order list up to date with newly seen hosts
+                if (getHostsSortMode() === 'manual') {
+                    const manual = getManualOrder();
+                    const seen = new Set(manual);
+                    let changed = false;
+                    for (const [id] of ordered) {
+                        if (!seen.has(id)) { manual.push(id); seen.add(id); changed = true; }
+                    }
+                    // Also drop any IDs that no longer exist
+                    const existing = new Set(Object.keys(hosts || {}));
+                    const filtered = manual.filter(id => existing.has(id));
+                    if (filtered.length !== manual.length) changed = true;
+                    if (changed) setManualOrder(filtered);
+                }
+
                 // Select localhost by default
                 console.log('[DEBUG] Selecting localhost by default...');
                 window.showDashboard();
@@ -2606,24 +2739,128 @@ document.addEventListener('DOMContentLoaded', () => {
             const card = document.createElement('div');
             card.className = 'host-card termix-host';
             card.dataset.hostId = hostId;
-            
+
+            const isManualMode = (getHostsSortMode() === 'manual');
+            const isReorderable = isManualMode && hostId !== 'local';
+            if (isReorderable) {
+                // We keep the card draggable, but only allow drag when the user grabs the handle.
+                card.draggable = true;
+                card.title = 'Drag the handle to reorder';
+            }
+
+            const grabHandleHtml = isReorderable ? `
+                <div class="hosts-grab-handle shrink-0 mr-3 px-2 py-2 rounded bg-white/5 border border-white/10 text-gray-300"
+                     title="Drag to reorder" aria-label="Drag handle" role="button" tabindex="0">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 6h.01M8 12h.01M8 18h.01M12 6h.01M12 12h.01M12 18h.01M16 6h.01M16 12h.01M16 18h.01" />
+                    </svg>
+                </div>
+            ` : '';
+
             card.innerHTML = `
                 <div class="flex items-center justify-between">
-                    <div class="flex-1">
-                        <h3 class="font-bold termix-text">${hostData.friendly_name}</h3>
-                        <p class="text-sm termix-muted">Group: ${(hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none'}</p>
-                        <p class="text-xs termix-muted font-mono">${hostData.user}@${hostData.ip}</p>
+                    <div class="flex items-center min-w-0 flex-1">
+                        ${grabHandleHtml}
+                        <div class="min-w-0 flex-1">
+                            <h3 class="font-bold termix-text truncate">${hostData.friendly_name}</h3>
+                            <p class="text-sm termix-muted truncate">Group: ${(hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none'}</p>
+                            <p class="text-xs termix-muted font-mono truncate">${hostData.user}@${hostData.ip}</p>
+                        </div>
                     </div>
-                    <div class="flex items-center space-x-3">
+                    <div class="flex items-center space-x-3 shrink-0">
                         <div class="connection-indicator w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
                     </div>
                 </div>
             `;
 
             // Clicking the card selects a host but does NOT automatically pull logs
-            card.addEventListener('click', () => {
+            card.addEventListener('click', (e) => {
+                // Avoid click-select while dragging
+                if (card.dataset.dragging === '1') return;
                 selectHost(hostId);
             });
+
+            // Drag/drop reordering (manual mode only)
+            if (isReorderable) {
+                const handle = card.querySelector('.hosts-grab-handle');
+                const armDrag = () => { card.dataset.allowDrag = '1'; };
+                const disarmDrag = () => { card.dataset.allowDrag = '0'; };
+
+                if (handle) {
+                    handle.classList.add('cursor-grab');
+                    handle.addEventListener('mousedown', armDrag);
+                    handle.addEventListener('mouseup', disarmDrag);
+                    handle.addEventListener('mouseleave', disarmDrag);
+                    handle.addEventListener('keydown', (e) => {
+                        // Allow keyboard users to start drag with Enter/Space (still uses mouse for drop)
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            armDrag();
+                        }
+                    });
+                }
+
+                card.addEventListener('dragstart', (e) => {
+                    // Only start drag if the user grabbed the handle.
+                    if (card.dataset.allowDrag !== '1') {
+                        e.preventDefault();
+                        return;
+                    }
+
+                    card.dataset.dragging = '1';
+                    try { e.dataTransfer.setData('text/plain', hostId); } catch (_) {}
+                    e.dataTransfer.effectAllowed = 'move';
+                    card.classList.add('opacity-60');
+                    card.classList.add('hosts-dragging');
+                });
+
+                card.addEventListener('dragend', () => {
+                    card.classList.remove('opacity-60');
+                    card.classList.remove('hosts-dragging');
+                    card.classList.remove('hosts-drag-over');
+                    card.dataset.dragging = '0';
+                    disarmDrag();
+                });
+
+                card.addEventListener('dragenter', (e) => {
+                    e.preventDefault();
+                    if (card.dataset.dragging === '1') return;
+                    card.classList.add('hosts-drag-over');
+                });
+
+                card.addEventListener('dragleave', (e) => {
+                    // Only remove highlight if leaving the card entirely
+                    if (!card.contains(e.relatedTarget)) {
+                        card.classList.remove('hosts-drag-over');
+                    }
+                });
+
+                card.addEventListener('dragover', (e) => {
+                    // Allow drop
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                });
+
+                card.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    card.classList.remove('hosts-drag-over');
+
+                    const draggedId = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
+                    if (!draggedId || draggedId === hostId) return;
+                    if (getHostsSortMode() !== 'manual') return;
+
+                    const draggedEl = hostListContainer.querySelector(`.host-card[data-host-id="${CSS.escape(draggedId)}"]`);
+                    if (!draggedEl) return;
+
+                    // Insert dragged before drop target
+                    hostListContainer.insertBefore(draggedEl, card);
+
+                    // Persist manual order based on current DOM (excluding localhost)
+                    const ids = Array.from(hostListContainer.querySelectorAll('.host-card'))
+                        .map(el => el.dataset.hostId)
+                        .filter(id => id && id !== 'local');
+                    setManualOrder(ids);
+                });
+            }
 
             return card;
         };
@@ -6099,6 +6336,26 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
         // Toggle Suricata Stats button based on whether Suricata is configured
         refreshSuricataConfiguredState();
+
+        // Hosts sort/reset wiring
+        if (hostsSortSelect) {
+            // initial from storage
+            hostsSortSelect.value = getHostsSortMode();
+            hostsSortSelect.addEventListener('change', async () => {
+                const mode = hostsSortSelect.value || 'manual';
+                setHostsSortMode(mode);
+                await populateHostCards();
+            });
+        }
+
+        if (hostsResetOrderBtn) {
+            hostsResetOrderBtn.addEventListener('click', async () => {
+                setManualOrder([]);
+                setHostsSortMode('manual');
+                await populateHostCards();
+                window.showToast('Host order reset', 'success');
+            });
+        }
 
         // --- INITIALIZATION ---
         populateHostCards();

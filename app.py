@@ -4388,7 +4388,10 @@ def rescan_host(host_id):
 
         # IMPORTANT: ssh_keys.key_content is stored encrypted. Use the materializer which decrypts
         # and writes a proper private key file.
-        ssh_key_path = _materialize_ssh_key_path(host.ssh_key_id)
+        # If this DB host has no ssh_key_id (common for imported hosts), fall back to the most
+        # recently added SSH key so rescans behave consistently with other SSH operations.
+        ssh_key_id = host.ssh_key_id or _get_default_ssh_key_id()
+        ssh_key_path = _materialize_ssh_key_path(ssh_key_id)
 
         sys_info = collect_system_info(user, ip, ssh_key_path)
         services = collect_services(user, ip, ssh_key_path)
@@ -4475,7 +4478,10 @@ def rescan_all_hosts():
             ip = host.ip_address
             # IMPORTANT: ssh_keys.key_content is stored encrypted. Use the materializer which decrypts
             # and writes a proper private key file.
-            ssh_key_path = _materialize_ssh_key_path(host.ssh_key_id)
+            # If this DB host has no ssh_key_id (common for imported hosts), fall back to the most
+            # recently added SSH key so rescans behave consistently with other SSH operations.
+            ssh_key_id = host.ssh_key_id or _get_default_ssh_key_id()
+            ssh_key_path = _materialize_ssh_key_path(ssh_key_id)
 
             try:
                 sys_info = collect_system_info(user, ip, ssh_key_path)
