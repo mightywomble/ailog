@@ -572,7 +572,14 @@ def execute_command(hostname, command_str, timeout=10):
         if not host_info:
             raise ValueError(f"Host ID '{hostname}' not found in configuration or database.")
 
-        identity_path = _materialize_ssh_key_path(host_info.get('ssh_key_id'))
+        # If a DB-backed host has no ssh_key_id set (common for imported hosts),
+        # fall back to the most recently added SSH key so CLI-based operations
+        # (pull logs, host info, scans) behave consistently with the SSH terminal.
+        ssh_key_id = host_info.get('ssh_key_id')
+        if not ssh_key_id and hostname.startswith('db-'):
+            ssh_key_id = _get_default_ssh_key_id()
+
+        identity_path = _materialize_ssh_key_path(ssh_key_id)
         ssh_prefix_args = get_ssh_prefix_args(host_info['user'], host_info['ip'], identity_file=identity_path)
 
     cmd_list = ssh_prefix_args + [command_str] if ssh_prefix_args else [command_str]
