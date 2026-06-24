@@ -1404,6 +1404,155 @@ def test_host_connection():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+
+@app.route('/hosts/import/template', methods=['GET'])
+def hosts_import_template():
+    """Download a JSON template for bulk host import."""
+    template = {
+        "mode": "merge",  # merge|replace
+        "hosts": [
+            {
+                "friendly_name": "example-server",
+                "hostname": "example-server",  # optional; defaults to friendly_name/ip_address
+                "ip_address": "100.64.0.10",
+                "ssh_user": "david",
+                "description": "optional"
+            }
+        ]
+    }
+
+    payload = json.dumps(template, indent=2)
+    return Response(
+        payload,
+        mimetype='application/json',
+        headers={'Content-Disposition': 'attachment; filename=ailog-host-import-template.json'}
+    )
+
+
+def _normalize_import_payload(obj):
+    """Return (mode, hosts_list) from supported payload shapes."""
+    # Shape A: {"mode": "merge|replace", "hosts": [ ... ]}
+    if isinstance(obj, dict) and isinstance(obj.get('hosts'), list):
+        mode = (obj.get('mode') or 'merge')
+        return (str(mode).strip().lower(), obj['hosts'])
+
+    # Shape B: [ ... ]
+    if isinstance(obj, list):
+        return ('merge', obj)
+
+    raise ValueError('Invalid JSON format. Expected {"mode": ..., "hosts": [...]} or a JSON array of hosts.')
+
+
+def _coerce_host_record(raw, idx: int):
+    if not isinstance(raw, dict):
+        raise ValueError(f'hosts[{idx}] must be an object')
+
+    ip = (raw.get('ip_address') or raw.get('ip') or raw.get('host') or '').strip()
+    user = (raw.get('ssh_user') or raw.get('user') or '').strip()
+    friendly = (raw.get('friendly_name') or raw.get('name') or '').strip()
+    hostname = (raw.get('hostname') or '').strip()
+    desc = (raw.get('description') or '').strip()
+
+    if not ip:
+        raise ValueError(f'hosts[{idx}].ip_address is required')
+    if not user:
+        raise ValueError(f'hosts[{idx}].ssh_user is required')
+
+    if not friendly:
+        friendly = hostname or ip
+    if not hostname:
+        hostname = friendly or ip
+
+    return {
+        'ip_address': ip,
+        'ssh_user': user,
+        'friendly_name': friendly,
+        'hostname': hostname,
+        'description': desc,
+    }
+
+
+@app.route('/hosts/import', methods=['POST'])
+def import_hosts_from_file():
+    """Import hosts into the database so they appear in the main UI (db-<id> hosts).
+
+    Accepts multipart form upload with field 'file'.
+    JSON shapes supported:
+      - {"mode":"merge|replace","hosts":[...]}
+      - [...] (defaults to merge)
+
+    merge: upsert by ip_address (create new or update existing)
+    replace: delete all existing DB hosts first, then import
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+
+        upload = request.files['file']
+        if not upload or not upload.filename:
+            return jsonify({'error': 'No file selected'}), 400
+
+        raw_bytes = upload.read()
+        try:
+            obj = json.loads(raw_bytes.decode('utf-8'))
+        except Exception:
+            return jsonify({'error': 'Uploaded file is not valid JSON'}), 400
+
+        mode, hosts_list = _normalize_import_payload(obj)
+        if mode not in ('merge', 'replace'):
+            return jsonify({'error': 'mode must be one of: merge, replace'}), 400
+
+        normalized = []
+        for i, h in enumerate(hosts_list):
+            normalized.append(_coerce_host_record(h, i))
+
+        # Replace mode wipes DB-backed hosts (wizard/imported). Does not touch config-file hosts.json.
+        if mode == 'replace':
+            try:
+                # Prefer ORM delete to keep relationship cleanup simple.
+                for h in Host.query.all():
+                    db.session.delete(h)
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({'error': f'Failed to clear existing hosts: {e}'}), 500
+
+        created = 0
+        updated = 0
+        for rec in normalized:
+            existing = Host.query.filter_by(ip_address=rec['ip_address']).first()
+            if existing:
+                existing.hostname = rec['hostname']
+                existing.friendly_name = rec['friendly_name']
+                existing.ssh_user = rec['ssh_user']
+                existing.description = rec['description']
+                updated += 1
+            else:
+                db.session.add(Host(
+                    hostname=rec['hostname'],
+                    friendly_name=rec['friendly_name'],
+                    ip_address=rec['ip_address'],
+                    ssh_user=rec['ssh_user'],
+                    description=rec['description'],
+                ))
+                created += 1
+
+        db.session.commit()
+        return jsonify({
+            'message': 'Hosts imported successfully.',
+            'mode': mode,
+            'created': created,
+            'updated': updated,
+            'total': created + updated,
+        })
+
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
 # --- OLLAMA INTEGRATION ROUTES ---
 @app.route('/ollama/test', methods=['POST'])
 def test_ollama():

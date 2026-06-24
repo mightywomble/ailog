@@ -1355,10 +1355,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
 <!-- Remote Hosts Section -->
                     <section id="remote-hosts-section" class="settings-section space-y-4 hidden">
-                        <div class="flex justify-between items-center">
-                            <h4 class="font-semibold text-lg text-white">Delete Hosts</h4>
-                                                    </div>
-                        <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="font-semibold text-lg text-white">Remote Hosts</h4>
+                                <p class="text-sm termix-muted">Import hosts in bulk or manage existing hosts.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap gap-2">
+                            <button id="remote-hosts-tab-import" class="remote-hosts-tab button text-sm px-4 py-2 bg-indigo-600 text-white" type="button" data-remote-hosts-tab="import">Import Hosts</button>
+                            <button id="remote-hosts-tab-delete" class="remote-hosts-tab button text-sm px-4 py-2" type="button" data-remote-hosts-tab="delete">Delete Hosts</button>
+                        </div>
+
+                        <!-- Import Hosts -->
+                        <div id="remote-hosts-import-panel" class="remote-hosts-panel space-y-3" data-remote-hosts-panel="import">
+                            <div class="termix-panel p-4 border border-white/10 rounded-lg space-y-3">
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <h5 class="font-medium text-white">Import Hosts (JSON)</h5>
+                                    <button id="download-host-import-template-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-3 py-1.5 text-xs rounded-md font-medium transition-colors" type="button">Download template</button>
+                                </div>
+
+                                <p class="text-xs termix-muted">Upload a JSON file in the template format. Imported hosts are stored in the database and will appear on the homepage.</p>
+
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div class="md:col-span-2">
+                                        <label class="block text-xs termix-muted mb-1">JSON file</label>
+                                        <input id="host-import-file" type="file" accept="application/json,.json" class="text-sm text-gray-200" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs termix-muted mb-1">Import mode</label>
+                                        <select id="host-import-mode" class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white">
+                                            <option value="merge" selected>Merge (amend existing)</option>
+                                            <option value="replace">Replace (start from scratch)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center gap-2">
+                                    <button id="import-hosts-btn" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors disabled:opacity-50" type="button" disabled>Import</button>
+                                    <span id="host-import-status" class="text-xs termix-muted"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Delete Hosts (existing functionality) -->
+                        <div id="remote-hosts-delete-panel" class="remote-hosts-panel space-y-3 hidden" data-remote-hosts-panel="delete">
+                            <div class="flex justify-between items-center">
+                                <h5 class="font-medium text-white">Delete Hosts</h5>
+                            </div>
+                            <div id="host-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                        </div>
                     </section>
 
 
@@ -4304,6 +4350,137 @@ const showHostInfoMain = async () => {
             settingsModal.classList.add('hidden');
             hostModal.classList.remove('hidden');
         };
+
+        // Remote Hosts sub-navigation (Import / Delete)
+        const remoteHostsTabs = document.querySelectorAll('.remote-hosts-tab');
+        const remoteHostsPanels = document.querySelectorAll('.remote-hosts-panel');
+        const hostImportFile = document.getElementById('host-import-file');
+        const hostImportMode = document.getElementById('host-import-mode');
+        const importHostsBtn = document.getElementById('import-hosts-btn');
+        const hostImportStatus = document.getElementById('host-import-status');
+        const downloadHostImportTemplateBtn = document.getElementById('download-host-import-template-btn');
+
+        const switchRemoteHostsPanel = (panel) => {
+            remoteHostsPanels.forEach(p => p.classList.add('hidden'));
+            remoteHostsTabs.forEach(t => {
+                t.classList.remove('bg-indigo-600', 'text-white');
+            });
+
+            const target = document.querySelector(`.remote-hosts-panel[data-remote-hosts-panel="${panel}"]`);
+            if (target) target.classList.remove('hidden');
+
+            const activeTab = document.querySelector(`.remote-hosts-tab[data-remote-hosts-tab="${panel}"]`);
+            if (activeTab) activeTab.classList.add('bg-indigo-600', 'text-white');
+
+            if (panel === 'delete') {
+                populateHostList();
+            }
+        };
+
+        if (remoteHostsTabs && remoteHostsTabs.length) {
+            remoteHostsTabs.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    switchRemoteHostsPanel(btn.dataset.remoteHostsTab);
+                });
+            });
+        }
+
+        if (hostImportFile && importHostsBtn) {
+            const updateImportEnabled = () => {
+                importHostsBtn.disabled = !(hostImportFile.files && hostImportFile.files.length);
+            };
+            hostImportFile.addEventListener('change', updateImportEnabled);
+            updateImportEnabled();
+        }
+
+        if (downloadHostImportTemplateBtn) {
+            downloadHostImportTemplateBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await fetch('/hosts/import/template', { method: 'GET' });
+                    if (!resp.ok) throw new Error(`Template download failed (${resp.status})`);
+
+                    const blob = await resp.blob();
+                    let filename = 'ailog-host-import-template.json';
+                    const cd = resp.headers.get('Content-Disposition') || resp.headers.get('content-disposition');
+                    if (cd) {
+                        const m = /filename\s*=\s*([^;]+)/i.exec(cd);
+                        if (m && m[1]) filename = m[1].trim().replace(/^"|"$/g, '');
+                    }
+
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+
+                    window.showToast('Template downloaded.', 'success');
+                } catch (e) {
+                    window.showToast(e.message || 'Template download failed.', 'error');
+                }
+            });
+        }
+
+        if (importHostsBtn && hostImportFile && hostImportMode) {
+            importHostsBtn.addEventListener('click', async () => {
+                if (!(hostImportFile.files && hostImportFile.files.length)) return;
+
+                const mode = hostImportMode.value || 'merge';
+                if (mode === 'replace') {
+                    const ok = confirm('Replace mode will delete ALL database-backed hosts (wizard/imported). Continue?');
+                    if (!ok) return;
+                }
+
+                importHostsBtn.disabled = true;
+                const originalText = importHostsBtn.textContent;
+                importHostsBtn.textContent = 'Importing...';
+                if (hostImportStatus) hostImportStatus.textContent = '';
+
+                try {
+                    // We send a file; backend reads mode from JSON. If the JSON doesn't include mode,
+                    // the backend defaults to merge.
+                    // For convenience, we also patch mode into the payload if it is a wrapped object.
+                    const file = hostImportFile.files[0];
+                    const text = await file.text();
+                    let parsed = null;
+                    try { parsed = JSON.parse(text); } catch (_) {}
+
+                    let blobToSend = file;
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                        parsed.mode = mode;
+                        const patched = new Blob([JSON.stringify(parsed, null, 2)], { type: 'application/json' });
+                        blobToSend = new File([patched], file.name, { type: 'application/json' });
+                    }
+
+                    const fd = new FormData();
+                    fd.append('file', blobToSend);
+
+                    const resp = await fetch('/hosts/import', { method: 'POST', body: fd });
+                    const data = await resp.json().catch(() => ({}));
+                    if (!resp.ok || data.error) {
+                        throw new Error(data.error || `Import failed (${resp.status})`);
+                    }
+
+                    const msg = `Imported: ${data.total} (created ${data.created}, updated ${data.updated})`;
+                    if (hostImportStatus) hostImportStatus.textContent = msg;
+                    window.showToast(msg, 'success');
+
+                    // Refresh UI
+                    await populateHostCards();
+                    await populateHostList();
+
+                    // Move user to Delete tab so they can verify list immediately
+                    switchRemoteHostsPanel('delete');
+                } catch (e) {
+                    window.showToast(e.message || 'Import failed.', 'error');
+                } finally {
+                    importHostsBtn.textContent = originalText;
+                    importHostsBtn.disabled = false;
+                }
+            });
+        }
 
         const populateHostList = async () => {
             try {
