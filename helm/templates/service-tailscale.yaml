@@ -1,0 +1,29 @@
+{{- if .Values.tailscale.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ailog.fullname" . }}-tailscale
+  labels:
+{{ include "ailog.labels" . | indent 4 }}
+  annotations:
+    tailscale.com/hostname: {{ .Values.tailscale.hostname | quote }}
+    {{- if .Values.tailscale.proxyClass }}
+    tailscale.com/proxy-class: {{ .Values.tailscale.proxyClass | quote }}
+    {{- end }}
+    {{- if .Values.tailscale.proxyGroup }}
+    tailscale.com/proxy-group: {{ .Values.tailscale.proxyGroup | quote }}
+    {{- end }}
+    {{- if .Values.tailscale.tags }}
+    tailscale.com/tags: {{ join "," .Values.tailscale.tags | quote }}
+    {{- end }}
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+{{ include "ailog.selectorLabels" . | indent 4 }}
+{{- end }}

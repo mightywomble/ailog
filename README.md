@@ -6,6 +6,28 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-06-24 | v2.9.17 | Hosts sidebar: sort by IP/name + manual drag reorder with grab handle + clearer drop target highlight; Rescan reliability: DB hosts without explicit ssh_key_id now fall back to default SSH key (matches SSH terminal/log pulls) | ✅ Complete |
+| 2026-05-25 | v2.9.16 | AI provider persistence: load from database on page init (survives hard refresh/pod restart); OpenRouter + Ollama model search filtering (real-time substring match on model list) | ✅ Complete |
+| 2026-05-25 | v2.9.15 | OpenRouter AI provider integration: API key test → model discovery → selection workflow; fixed /openrouter/config to allow saving key before model; UI auto-loads models after key validation | ✅ Complete |
+| 2026-05-25 | v2.9.14 | UI polish: SSH tabs/footer layout + main-pane sizing consistency; Pull Logs async clobber fix; Monitoring/Wizard now opens as modal (no full-page redirect) | ✅ Complete |
+| 2026-05-24 | v2.9.13 | Termix-style SSH terminal (WebSocket + Paramiko) in Logs view | ✅ Complete |
+| 2026-05-23 | v2.9.12 | Added in-repo Helm chart copy and Kubernetes/Helm deployment docs | ✅ Complete |
+| 2026-05-23 | v2.9.11 | SSH key encryption toggle + status; container adds cryptography + openssh-client; Helm adds Tailscale egress sidecar for tailnet SSH | ✅ Complete |
+| 2026-04-29 | v2.9.10 | Monitoring: stop creating TCP/53 monitors; add UDP listen monitor (e.g. DNS/Pi-hole on 53/udp) via SSH ss checks | ✅ Complete |
+| 2026-04-29 | v2.9.9 | Monitoring UX: wizard has Done button and clearer Docker visibility; adds Docker container running monitors; monitoring renders inline in main host panel | ✅ Complete |
+| 2026-04-29 | v2.9.8 | Monitoring UX: Monitoring button now works with db-<id> hosts and redirects to Monitoring Wizard when host has no monitors; wizard supports preselect + auto-discover | ✅ Complete |
+| 2026-04-29 | v2.9.7 | Add modular monitoring subsystem: monitoring wizard (SSH discovery + HTTP probe), per-host monitoring pages, persisted Docker inventory snapshots | ✅ Complete |
+| 2026-04-28 | v2.9.6 | Fix SSH key persistence + encryption metadata (enc_version), improve SSH error surfacing, repair DB URL mismatch and rescan/system-info collection to use decrypted key materialization | ✅ Complete |
+| 2026-04-24 | v2.9.5 | Host selection workflow: select host → host info → pull logs; Groups management in Settings (CRUD + list members); Host Info UI enhancements (full-pane view, action buttons w/icons, resource/service visuals, running/stopped service lists) | ✅ Complete |
+| 2026-04-24 | v2.9.4 | SSH key management: encryption-at-rest + checksum integrity verification; Add Devices wizard stability fixes (SSE parsing, logging, Step 4→5 completion/close flow) | ✅ Complete |
+| 2026-04-06 | v2.9.3 | Wizard UX fixes (step indicators, verify failure reasons, progress counts, duplicate/skip reporting) + Remote Hosts Edit modal restyled to termix theme | ✅ Complete |
+| 2026-04-06 | v2.9.2 | Homepage: removed Top Noisy Servers + Recommendations and replaced with a large tech-themed logo panel matching the termix theme | ✅ Complete |
+| 2026-04-06 | v2.9.1 | UI polish: collapsible Hosts sidebar, cleaner toolbar (More menu), Suricata button shown only when configured, wizard restyled to match termix theme | ✅ Complete |
+| 2026-04-06 | v2.9.0 | Suricata integration: remote sensor config + incremental ingest, Suricata Stats dashboards (Overview/Endpoint Stats/Raw), persistence + selective restore | ✅ Complete |
+| 2026-04-04 | v2.8.0 | Discord alert hostname resolution - use actual server hostname instead of db-<id> identifier | ✅ Complete |
+| 2026-04-02 | v2.6.0 | Termix-style dark dashboard (default view), logs view on host click, global dark theme consistency pass | ✅ Complete |
+| 2026-04-02 | v2.5.0 | Multi-schedule system (DB schedules), host-first selection per schedule, queued serial execution, schedule-scoped Run Now SSE + log picker | ✅ Complete |
+| 2026-04-02 | v2.4.0 | DB-backed Settings + Backup/Selective Restore, AI Search prompt/keywords, Run Now SSE progress, Export improvements, Rescan/Netbird enhancements | ✅ Complete |
 | 2026-01-27 | v2.3.0 | Settings Modal Redesign, Sidebar Navigation, Radio Button Models, Dark Theme, Bug Fixes | ✅ Complete |
 | 2026-01-27 | v2.2.0 | Unified AI Provider Settings, DOM Element Fixes, Host Card Styling, Multi-Model Support | ✅ Complete |
 | 2026-01-15 | v2.1.0 | Global Search, Multi-Host Enhancements, Progress Tracking | ✅ Complete |
@@ -20,6 +42,11 @@ This application is designed for use on a trusted, internal development network 
 
 ## 🚀 Key Features
 
+### 🧭 **Navigation (Dashboard → Logs)**
+* **Dashboard-first:** The app opens on a dark dashboard view showing stats, recent activity, and quick actions.
+* **Logs on demand:** Click any host in the left sidebar to switch into the Logs view for that host.
+* **Back button:** The Logs view has a Back button to return to the dashboard without reloading.
+
 ### 📊 **Unified Log Management**
 * **Multi-Source Access:** View traditional syslog files from `/var/log` and systemd journal entries in a unified interface
 * **Cross-Platform Compatibility:** Works seamlessly across Linux distributions with systemd support
@@ -27,9 +54,11 @@ This application is designed for use on a trusted, internal development network 
 
 ### 🌐 **Multi-Host Architecture**
 * **Host Management Dashboard:** Intuitive interface for managing local and remote servers
+* **Hosts sidebar ordering:** Sort hosts by **IP** or **Name**, or use **Manual order** (drag via grab handle). Ordering preferences are stored in browser localStorage.
 * **SSH Connection Testing:** Built-in validation ensures proper SSH key setup and sudo permissions before adding hosts
 * **Dynamic Host Switching:** Seamlessly switch between configured servers with real-time log loading
 * **Connection Status Monitoring:** Visual indicators show host connectivity status
+* **SSH Terminal:** Click the green **SSH** button to open an interactive terminal to the selected host (UI inspired by the Termix project on GitHub)
 
 ### 🔍 **Advanced Search Capabilities**
 * **Global Search:** Search across all logs from all configured hosts simultaneously
@@ -39,22 +68,63 @@ This application is designed for use on a trusted, internal development network 
 * **Cross-Host Discovery:** Find log entries across your entire infrastructure from a single search
 
 ### 🤖 **AI-Powered Analysis**
-* **On-Demand Analysis:** Manual log analysis using OpenAI's GPT models with intelligent error detection
-* **Scheduled Monitoring:** Automated recurring analysis with customizable intervals
-* **Multi-Host Scheduling:** Monitor logs across different servers with unified scheduling
-* **Smart Alerting:** Proactive Discord notifications for detected issues and anomalies
+* **Provider Support:** OpenAI, Ollama, and OpenRouter
+* **AI Search Settings:** Configurable analysis prompt + alert keyword/phrase list (DB-backed) used by manual analysis, Run Now, and scheduled runs
+* **On-Demand Analysis:** Manual log analysis with provider-specific validation and status indicators
+* **Scheduled Monitoring (Multi-Schedule):** Create multiple schedules, each with its own hosts, logs, and interval
+* **Queued Execution:** Scheduled runs and Run Now requests are queued and execute serially (no skipping)
+* **Run Now with Live Progress:** Server-Sent Events (SSE) streaming progress + heartbeat while the model is working
+* **Smart Alerting:** Discord notifications when alert keywords are detected; otherwise a summary message can be sent
 
 ### 📈 **Real-Time Progress Tracking**
-* **Streaming Updates:** Server-Sent Events (SSE) provide real-time feedback during log loading
-* **Progress Visualization:** Detailed progress bars and status messages for all operations
+
+### 🎨 **UI Theme**
+* Termix-style dark theme throughout: dark panel surfaces, subtle borders, consistent spacing, and typography.
+* Fully dark headers, search bar, log viewer, settings modals, and host cards.
+* **Streaming Updates:** Server-Sent Events (SSE) provide real-time feedback during log loading and analysis
+* **Progress Visualization:** Detailed progress bars, log output, and status messages for all operations
 * **Error Recovery:** Automatic retry mechanisms for failed host connections
 * **Performance Optimization:** Concurrent processing with timeout handling for reliable operations
 
+### 💾 **Database Backup & Restore**
+* **One-Click Backup Download:** Download the sqlite database bundle
+* **Selective Restore:** Restore only selected categories (AI provider/key, Discord webhook, AI Search prompt/keywords, Hosts (replace all), legacy schedule interval/is_running)
+  - Note: Full schedules (multi-schedule tables) are included in a full DB restore, but are not currently part of the selective restore toggle.
+
 ### 🔒 **Security & Privacy**
-* **Local Credential Storage:** API keys and webhooks stored securely in browser localStorage
+* **DB-Backed Credential Storage:** API keys/webhooks and settings are stored in the application database (plaintext, by choice) and persist across restarts
+* **Backup Awareness:** Database backups include settings/secrets; keep backups protected
 * **SSH Key Authentication:** Passwordless SSH access with proper key-based security
 * **Granular Sudo Permissions:** Minimal required permissions for enhanced security
 * **Network Isolation:** Designed for trusted internal networks only
+
+### 🔌 Tailscale egress for SSH (Kubernetes deployments)
+If your target hosts are only reachable over Tailscale, the AILog pod needs tailnet routing to connect to `100.x` addresses. The Helm chart now supports an optional Tailscale **egress sidecar** (tun mode) that provides outbound tailnet/subnet access from the pod. See the Helm chart README for configuration details.
+
+
+### 🕵️ Secret scanning (gitleaks)
+This repository is protected by a server-side `gitleaks` hook that rejects pushes if it detects secrets (or secret-like strings) anywhere in the commit history.
+
+Tips
+- Do not commit backup copies of templates or scratch files (for example `*.backup` or `templates/*_old.html`).
+- Avoid including real key material in the repo. If you need examples, use generic wording like “PEM format” rather than pasting literal key headers.
+- Run a local scan before pushing:
+  - `gitleaks detect --source . --redact`
+
+If a push is rejected
+- Run `gitleaks detect --source . --redact --verbose` to see which file/line is triggering.
+- Remove the secret from the working tree. If the finding is in history, you must rewrite history (for example using `git filter-repo`) and then force-push the branch.
+
+### 🟣 Suricata (Remote Sensor)
+- Configure a Suricata sensor under **Settings → Suricata Data** (host/user/log directory/SSH key)
+- Test SSH + sudo access and confirm the sensor can see `eve.json`, `fast.log`, `stats.log`, `suricata.log`
+- Incremental ingest into SQLite with rotation/truncation handling
+- **Suricata Stats** (toolbar button) dashboards:
+  - **Suricata Stats:** KPIs, alerts-over-time, engine counters, category breakdown, top signatures
+  - **Endpoint Data (Endpoint Stats):** total endpoints, alerts per endpoint, alerts per destination port, endpoint×port stacked chart, top sources to endpoints
+  - **Raw Data:** tail and search raw logs + AI Analyse using a dedicated Suricata prompt
+- Backup/restore: Suricata settings/prompt included in DB backup; selective restore includes a Suricata checkbox
+
 
 ## 🛠 Installation & Setup
 
@@ -72,6 +142,108 @@ This application is designed for use on a trusted, internal development network 
 * SSH key-based authentication configured for remote host access
 * OpenAI API key for AI analysis features (optional but recommended)
 * Discord webhook URL for notifications (optional)
+
+### Kubernetes + Helm deployment
+Helm is the **preferred and supported** way to deploy/upgrade AILog in Kubernetes. The repo ships a working chart in `helm/` and that should be treated as the source of truth.
+
+#### Kubeconfig Setup
+Before deploying with Helm, ensure your kubeconfig points at the target cluster:
+
+```bash
+# Export your kubeconfig (required for all helm commands)
+export KUBECONFIG=~/.kube/config
+
+# Verify you're connected to the correct cluster
+kubectl config current-context
+kubectl cluster-info
+```
+
+**IMPORTANT:** Without setting `KUBECONFIG`, the `helm` command will not be able to reach your Kubernetes cluster and the deployment will hang or fail silently.
+
+#### Build + push the Docker image
+The Helm chart deploys an image from a registry. Typical workflow is:
+
+```bash
+# dev image tag (for a dev namespace)
+docker build -t mightywomble/ailog:dev -f docker/Dockerfile .
+docker push mightywomble/ailog:dev
+
+# production-ish tag (example)
+docker build -t mightywomble/ailog:ailog -f docker/Dockerfile .
+docker push mightywomble/ailog:ailog
+```
+
+#### Helm chart location
+The working chart is included in this repo at `helm/`.
+
+#### Deploy/upgrade (preferred)
+```bash
+helm upgrade --install ailog ./helm -n ailog
+```
+
+#### Deploy with explicit image overrides
+```bash
+helm upgrade --install ailog ./helm -n ailog \
+  --set image.repository=mightywomble/ailog \
+  --set image.tag=ailog
+```
+
+#### Deploy to a dev namespace
+To run a separate dev instance, use a unique namespace and Tailscale hostname:
+```bash
+helm upgrade --install ailog-dev ./helm -n ailog-dev --create-namespace \
+  --set tailscale.hostname=ailog-dev \
+  --set image.repository=mightywomble/ailog \
+  --set image.tag=dev
+```
+
+#### Values files
+The chart uses `values.yaml` for defaults. You can override settings by:
+- Editing `helm/values.yaml`, or
+- Passing `-f` with your own values file, or
+- Using `--set` flags for one-off changes.
+
+Common overrides:
+- `image.repository`, `image.tag`, `image.pullPolicy`
+- `env.databaseUrl`
+- `tailscale.enabled` (ingress)
+- `tailscale.egress.enabled` / `tailscale.egress.mode` (egress sidecar)
+
+Example:
+```bash
+helm upgrade --install ailog ./helm -n ailog \
+  --set tailscale.enabled=true \
+  --set tailscale.egress.enabled=true \
+  --set tailscale.egress.mode=tun \
+  --set tailscale.egress.acceptRoutes=false
+```
+
+#### Optional: kubectl-based rollout procedure (not the primary method)
+If you deployed via Helm and just need to force a restart (for example after pushing a mutable tag like `:dev`), you can do:
+
+```bash
+# restart pods for the deployment
+kubectl -n ailog rollout restart deploy/ailog
+
+# watch the rollout
+kubectl -n ailog rollout status deploy/ailog --timeout=300s
+
+# see what is running
+kubectl -n ailog get pods -o wide
+```
+
+##### Optional workaround: PVC Multi-Attach (ReadWriteOnce)
+If the rollout hangs with errors like **Multi-Attach** (RWO volume still attached to the old pod), the quickest fix is usually:
+
+```bash
+kubectl -n ailog scale deploy/ailog --replicas=0
+
+# wait for the old pod to terminate so the PVC detaches
+kubectl -n ailog get pods
+
+kubectl -n ailog scale deploy/ailog --replicas=1
+kubectl -n ailog rollout status deploy/ailog --timeout=300s
+```
 
 #### Step 1: Install System Dependencies
 
@@ -102,11 +274,15 @@ The project includes a `requirements.txt` file with all necessary dependencies:
 
 **requirements.txt**
 ```
-Flask>=2.3.3
-Werkzeug>=2.3.7
-openai>=1.3.0
-requests>=2.31.0
-APScheduler>=3.10.4
+Flask==3.0.0
+Werkzeug==3.0.1
+openai==1.3.7
+requests==2.31.0
+APScheduler==3.10.4
+SQLAlchemy==2.0.23
+Flask-SQLAlchemy==3.1.1
+cryptography==42.0.8
+# Note: openai==1.3.7 requires httpx<0.28 (pinned in the deployed venv)
 ```
 
 Install the dependencies:
@@ -142,7 +318,7 @@ Create a `systemd` service on the main Log Viewer server to ensure the applicati
 1.  Create a new service file:
 
     ```bash
-    sudo nano /etc/systemd/system/logviewer.service
+    sudo nano /etc/systemd/system/ailog.service
     ```
 
 2.  Paste the following configuration into the file. Crucially, replace `david` with your username and `your-repo-name` with your project's directory name.
@@ -159,6 +335,8 @@ Create a `systemd` service on the main Log Viewer server to ensure the applicati
     # Use 'debug=False' for production stability with the scheduler
     ExecStart=/home/david/code/your-repo-name/venv/bin/python3 /home/david/code/your-repo-name/app.py
     Restart=always
+    # Persist DB outside the repo (recommended)
+    Environment=DATABASE_URL=sqlite:////var/lib/ailog/ailog.db
 
     [Install]
     WantedBy=multi-user.target
@@ -171,17 +349,98 @@ Create a `systemd` service on the main Log Viewer server to ensure the applicati
 Reload the `systemd` daemon, then start and enable the service.
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl start logviewer
-sudo systemctl enable logviewer
+sudo systemctl start ailog
+sudo systemctl enable ailog
 ```
 
 #### Step 7: Verify the Service is Running
 
 Check the status of the service to ensure it's active.
 ```bash
-sudo systemctl status logviewer
+sudo systemctl status ailog
 ```
 You should see output indicating the service is `active (running)`.
+
+## 🧭 Device Onboarding Wizard & Host Info
+
+### Device Onboarding Wizard (Add Devices)
+
+The **Add Devices** wizard lets you onboard one or more remote Linux hosts in a few guided steps. It will:
+
+- Validate SSH connectivity with your chosen user + key
+- Collect system information (OS, host name, RAM, disk, CPU, IPs)
+- Enumerate systemd services
+- Store everything in the database and expose hosts in the main UI
+
+#### Requirements
+
+- Passwordless sudo for the SSH user on the target hosts for commands used to read logs and systemd state.
+- SSH key-based login from the AI Log Viewer host to the remote hosts.
+
+#### Wizard Stages
+
+1. **Device entry**
+   - Click the green **Add Devices** button in the top bar.
+   - Paste one or more hostnames or IPs (one per line).
+   - Enter the SSH username you want the app to use (for example `david`).
+   - Either:
+     - Upload a PRIVATE SSH key file, or
+     - Select a previously saved key, or
+     - Paste key content.
+
+2. **Verify SSH connectivity**
+   - The app attempts SSH connections to each host using the provided user/key.
+   - Status icons:
+     - **✓** – connection successful
+     - **⚠** – authentication or sudo warning
+     - **✗** – connection failed
+   - Only successfully validated hosts continue to collection.
+
+3. **Collect system information**
+   - For each validated host the app collects:
+     - OS version
+     - Hostname
+     - RAM total / used
+     - Disk total / used
+     - CPU type and core count
+     - Main IP and Netbird IP (if available)
+     - Full list of systemd services and running state
+   - This data is stored in the `Host`, `SystemInfo` and `Service` tables in the database.
+
+4. **Add devices**
+   - The collected data is written to the database.
+   - New hosts appear in the **Hosts** sidebar on the left.
+
+### Hosts Sidebar: Info vs Logs
+
+The **Hosts** column on the left shows all available hosts (local + wizard onboarded):
+
+Ordering controls:
+- **Sort:** Manual / IP (asc/desc) / Name (A–Z / Z–A)
+- **Manual order:** drag-and-drop hosts using the grab handle (Localhost is pinned to the top)
+
+Each host card shows:
+
+- Friendly name
+- Short description
+- `user@host` line (truncated with full value on hover)
+- A green connection indicator
+- Two action buttons:
+  - **Info** (blue circle icon) – open the host information card
+  - **Logs** (document icon) – load logs for that host (existing behaviour)
+
+#### Host Info card
+
+- Click the **Info** button for a wizard-onboarded host (labelled *Remote*).
+- The app calls `GET /hosts/db/<id>/info` and displays:
+  - OS version and host name
+  - RAM and disk usage (GB)
+  - CPU type and cores
+  - Main IP and Netbird IP
+  - Service counts (total, running, stopped)
+- Click **Rescan** to refresh system info + service snapshot.
+  - Note: for database-backed hosts created by import/wizard that do not have an explicit `ssh_key_id`, the rescan path falls back to the most recently added SSH key (same behavior as SSH terminal/log pulls).
+- Local or non-database hosts show a basic `user@host` line and a note that detailed info is only available for wizard-managed hosts.
 
 ## 📖 Usage Guide
 
@@ -203,6 +462,7 @@ The interface features a clean, modern design with:
    - Select your provider:
      - **OpenAI**: Enter your API key and click **Test**
      - **Ollama**: Enter API URL, test connection, get models, select model
+     - **OpenRouter**: Enter your API key and click **Test**, then click **Get Models** to load available models from OpenRouter. Select a model via radio button, then click **Save** to persist both key and model.
    - Provider configuration is saved automatically when tested
 
 2. **Configure Notifications** (Optional):
@@ -439,3 +699,16 @@ For issues, feature requests, or questions:
 2. Review application logs for detailed error information
 3. Open an issue on the project repository
 4. Include system information and error logs for faster resolution
+
+## Suricata Quick Start
+1. Open **Settings → Suricata Data** and enter host/user/log dir (default `/var/log/suricata`) and optional SSH key.
+2. Click **Test Connection** to verify SSH + sudo + log visibility.
+3. Click **Run Ingest Once** to populate the local SQLite cache (the scheduler also ingests periodically).
+4. Click **Suricata Stats** in the toolbar and use:
+   - The range slider (1h / 6h / 24h / 7d)
+   - Tabs: **Suricata Stats**, **Endpoint Data**, **Raw Data**
+
+### Suricata Raw Data AI Analyse
+- Configure the Suricata prompt in **Settings → AI Search → Suricata AI Prompt**
+- Use **Suricata Stats → Raw Data → AI Analyse** to analyze the currently loaded raw log tail
+
