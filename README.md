@@ -359,7 +359,35 @@ Check the status of the service to ensure it's active.
 ```bash
 sudo systemctl status ailog
 ```
-You should see output indicating the service is `active (running)`.
+You should see output indicating that the service is `active (running)`.
+
+### Docker Swarm deployment (homelab)
+
+AILog also runs on the homelab Docker Swarm (manager: swarm1) via the
+[homelab_docker_build](https://git.safehomelan.com/david/homelab_docker_build) +
+[homelab_docker_deploy](https://git.safehomelan.com/david/homelab_docker_deploy)
+pipelines: the published image `docker.io/mightywomble/ailog:latest` is mirrored
+into the private zot registry (`zot.safehomelan.com/ailog:latest`) and deployed
+by the `stacks/ailog/stack.yml` stack file.
+
+- **URL:** `http://<any swarm node LAN or Tailscale IP>:5001` (swarm routing
+  mesh), e.g. `http://100.79.189.118:5001`
+- **Login:** none — the app is unauthenticated by design; trusted internal
+  network only (see the security warning above)
+- **Data:** the SQLite db persists on the shared NFS
+  (`/opt/docker/data/ailog` → `/var/lib/ailog`) so the service can reschedule
+  to any node; `DATABASE_URL=sqlite:////var/lib/ailog/ailog.db`
+- SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
+  outbound SSH to LAN/tailnet hosts works via node networking
+
+Plain Docker host equivalent:
+
+```bash
+docker run -d --name ailog -p 5001:5001 \
+  -v ailog-data:/var/lib/ailog \
+  -e DATABASE_URL=sqlite:////var/lib/ailog/ailog.db \
+  mightywomble/ailog:latest
+```
 
 ## 🧭 Device Onboarding Wizard & Host Info
 
