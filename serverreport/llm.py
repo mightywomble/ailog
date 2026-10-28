@@ -164,15 +164,40 @@ def call_model(provider, cfg, system_prompt, user_prompt, max_tokens=2500, timeo
 
 
 def parse_verdict(markdown):
-    """Pull HEALTHY/DEGRADED/FAILING out of the Verdict section."""
+    """Pull HEALTHY/DEGRADED/FAILING out of the Verdict section.
+
+    Only the opening statement counts. Scanning the whole section would let
+    prose like "fatally-failing healthchecks" be read as the verdict, so the
+    match must not be part of a hyphenated word, and the earliest match in the
+    first sentence wins (not the first word in a priority list).
+    """
     if not markdown:
         return 'unknown'
+
     match = VERDICT_RE.search(markdown)
-    section = markdown[match.end():match.end() + 400] if match else markdown[:400]
+    if match:
+        rest = markdown[match.end():]
+        nxt = re.search(r'^##\s', rest, re.MULTILINE)
+        section = rest[:nxt.start()] if nxt else rest
+    else:
+        section = markdown
+    section = section.strip()[:600]
+    if not section:
+        return 'unknown'
+
+    # Leading statement first, tolerating markdown emphasis and "-"/":" separators.
+    lead = re.sub(r'^[\s*_`>#-]+', '', section.split('\n', 1)[0])
     for word, value in VERDICT_WORDS:
-        if re.search(rf'\b{word}\b', section, re.IGNORECASE):
+        if re.match(rf'{word}\b', lead, re.IGNORECASE):
             return value
-    return 'unknown'
+
+    first_sentence = re.split(r'(?<=[.!?])\s', section, maxsplit=1)[0]
+    best_pos, best_value = None, None
+    for word, value in VERDICT_WORDS:
+        found = re.search(rf'(?<![\w-]){word}\b', first_sentence, re.IGNORECASE)
+        if found and (best_pos is None or found.start() < best_pos):
+            best_pos, best_value = found.start(), value
+    return best_value or 'unknown'
 
 
 def missing_headings(markdown):
