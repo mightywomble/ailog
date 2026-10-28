@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-28 | v2.11.0 | Server-wide correlated log reports: **Analyse All Logs** collects every file / journald / container source on a host into a uniform time window, normalises lines into signature clusters, correlates sources statistically (lift, bursts, silence gaps, container state), sends one compact evidence pack to the model and stores a report at `/reports/<id>` with a history list | ✅ Complete |
 | 2026-10-28 | v2.10.1 | AI analysis UX: live staged progress in the modal (preparing → contacting → analysing with elapsed clock → formatting) streamed from the new `/analyse/stream` SSE endpoint; results rendered as sanitised Markdown (marked + DOMPurify) in the AI and Suricata analyse modals | ✅ Complete |
 | 2026-10-28 | v2.10.0 | Docker monitoring: host-wide Docker API discovery (unix socket over SSH / TCP 2375 / TLS 2376), standalone `/docker/<host_key>` page (live CPU/RAM/network charts, containers with size + image tag, swarm cluster/node drill-down); Pull Logs now lists per-container logs with a **Docker logs only** filter; faster connect feedback (proxy-safe SSE, indeterminate progress bar, elapsed clock); security hardening (log path traversal blocked, log output XSS-escaped, Docker SDK pinned) | ✅ Complete |
 | 2026-06-24 | v2.9.17 | Hosts sidebar: sort by IP/name + manual drag reorder with grab handle + clearer drop target highlight; Rescan reliability: DB hosts without explicit ssh_key_id now fall back to default SSH key (matches SSH terminal/log pulls) | ✅ Complete |
@@ -91,6 +92,16 @@ This application is designed for use on a trusted, internal development network 
 * **Run Now with Live Progress:** Server-Sent Events (SSE) streaming progress + heartbeat while the model is working
 * **Smart Alerting:** Discord notifications when alert keywords are detected; otherwise a summary message can be sent
 
+### 🧠 **Server-Wide Correlated Reports** (`serverreport/`)
+* **Analyse All Logs:** a button in the Pull Logs toolbar runs one analysis across *every* log source on the selected host — log files, journald units and Docker container logs — and reports on the **server**, not on individual files
+* **Time-aligned collection:** sources are bounded by wall-clock window (default 2 hours) rather than `tail -n 500`, so a busy nginx log and a quiet syslog cover the same slice of time and can legitimately be compared
+* **Deterministic correlation first, model second:** lines become signature clusters (typically a 50–200× reduction), then a correlation engine computes cross-source co-occurrence **lift** over an independence baseline, per-source **bursts** against median/MAD, **silence gaps**, and container restarts / exit codes / OOM kills
+* **One bounded model call:** the model receives a compact evidence pack (clusters + correlations + timeline + coverage), never the raw logs, so a 40-source run stays at one call and a predictable token budget
+* **Stored reports:** every run is saved (`log_reports`) and viewable at `/reports/<id>` with verdict banner, severity counts, incident timeline, correlation table, source coverage and a `.md` download; `/reports` lists history by host
+* **Model override:** per-run model selection (default `gpt-3.5-turbo`); the evidence pack is retained so a report can be re-summarised later without re-collecting
+* **On request only:** nothing is posted to Discord automatically — the report page has an explicit **Send to Discord** button
+* **Honest about blind spots:** truncation, source caps, failed sources and logging gaps are all stated in the report
+
 ### 📈 **Real-Time Progress Tracking**
 * **Instant connect feedback:** SSE responses for log discovery disable proxy buffering (`X-Accel-Buffering: no`) and send an immediate `: connected` heartbeat, so the first update lands in tens of milliseconds instead of after an nginx buffer flush
 * **Indeterminate bar + spinner:** while no measurable progress exists the bar sweeps and a spinner is shown, switching to a normal percentage bar on the first event
@@ -121,6 +132,10 @@ This application is designed for use on a trusted, internal development network 
 * **No authentication by design:** every Docker endpoint (`/docker/<host_key>`, `/api/docker/*`) inherits the app's unauthenticated trusted-network model. Anyone who can reach the UI can read container logs and swarm metadata — keep the app off the public internet and restrict access at the proxy.
 * **TLS Docker endpoints:** discovery accepts self-signed certificates (`verify=False` unless a CA is supplied). Only enable TLS endpoints you trust on the network path.
 * **Dependency pinning:** the Docker SDK is pinned (`docker>=7.1.0,<8.0`) to avoid surprise breaking/major-version changes on image rebuild.
+* **Server reports treat logs as hostile input:** log content is attacker-controlled, so the evidence pack is fenced with `<<<EVIDENCE … EVIDENCE>>>` and the system prompt states it is untrusted data that must never be followed as instructions (prompt-injection defence). Report Markdown is rendered through DOMPurify.
+* **Model names validated:** per-run model overrides must match `[A-Za-z0-9][A-Za-z0-9._:/@-]*` (max 128 chars) before reaching a provider request.
+* **Report fan-out is bounded:** all file paths still go through `_safe_log_path`, container names through the existing identifier regex, and each run is capped by source count, byte budget, worker count and a per-host lock.
+* **No automatic Discord posts:** reports only reach Discord when a user presses **Send to Discord** on `/reports/<id>`.
 
 ### 🔌 Tailscale egress for SSH (Kubernetes deployments)
 If your target hosts are only reachable over Tailscale, the AILog pod needs tailnet routing to connect to `100.x` addresses. The Helm chart now supports an optional Tailscale **egress sidecar** (tun mode) that provides outbound tailnet/subnet access from the pod. See the Helm chart README for configuration details.
@@ -648,6 +663,36 @@ The application provides detailed startup logs showing:
 5. **Scheduling**: APScheduler for automated monitoring tasks
 
 ## 📝 Recent Updates
+
+### v2.11.0 - Server-Wide Correlated Log Reports
+- 🧠 **New `serverreport/` blueprint:** `collect` → `normalize` → `correlate` → `pack` → `llm` → `routes`
+- 🪟 **Time-windowed collection** (`collect.py`)
+  - Default window is 2 hours; every source is fetched with `--since`/`tail` bounded by that
+    window, so sources share a clock
+  - One `find -printf` round trip for file discovery instead of a `stat` per file; files not
+    written in the window are skipped
+  - journald unit listing capped (`head -n 60`) — an uncapped `--field _SYSTEMD_UNIT` emits
+    ~118k lines on db-11 and times out
+  - Caps: `AILOG_REPORT_MAX_SOURCES` (60), `AILOG_REPORT_MAX_BYTES` (24 MB), 6 workers,
+    per-host lock so two clicks cannot stack SSH sessions, failures isolated per source
+- 🧩 **Normalisation** (`normalize.py`): timestamps parsed from RFC3339, syslog (with year
+  rollover), journal `short-iso` and bracketed formats; multi-line stack traces attach to
+  their parent event; severity tiers; volatile values (PIDs, IPs, UUIDs, hex, numbers) are
+  replaced so similar lines collapse into one signature
+- 📐 **Correlation** (`correlate.py`): co-occurrence lift within 10 s buckets across
+  *different* sources (ranked by lift × √hits, with median lag), median/MAD burst detection,
+  silence/early-stop detection, container state, and a chronological first-occurrence timeline
+- 📦 **Evidence pack** (`pack.py`): plain-text, token-estimated, trimmed to
+  `AILOG_REPORT_MAX_TOKENS` when necessary
+- 🛡 **Prompt-injection guard** (`llm.py`): evidence is fenced and the system prompt marks it
+  as untrusted data; required section headings keep output parseable; verdict parsed to
+  healthy / degraded / failing
+- 📄 **Routes & UI:** `POST /serverreport/stream` (SSE stages), `/reports`, `/reports/<id>`,
+  `/reports/<id>/markdown`, `POST /reports/<id>/discord`, `/api/reports*`; toolbar button,
+  scope dialog (window / sources / model) and a stepper showing collect → normalise →
+  correlate → summarise → save
+- 🗄 **`log_reports` table** (additive, created by `db.create_all()`) storing severity,
+  timeline, correlations, container state, coverage and the evidence pack itself
 
 ### v2.10.1 - AI Analysis Progress & Markdown Output
 - ⏱ **Staged progress in the AI modal** (replaces the static "Contacting AI assistant...")

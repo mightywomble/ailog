@@ -579,3 +579,98 @@ class DockerEndpoint(db.Model):
             'last_checked_at': self.last_checked_at.isoformat() if self.last_checked_at else None,
             'last_error': self.last_error,
         }
+
+
+class LogReport(db.Model):
+    """A stored server-wide correlated log report.
+
+    Additive table - created automatically by ``db.create_all()``.
+
+    ``evidence_text`` is kept on purpose: re-running the summarise stage against
+    a different model later does not need a fresh (expensive) collection pass.
+    """
+    __tablename__ = 'log_reports'
+
+    id = db.Column(db.Integer, primary_key=True)
+    host_key = db.Column(db.String(128), nullable=False, index=True)
+    host_label = db.Column(db.String(255))
+    window_minutes = db.Column(db.Integer, default=120, nullable=False)
+    window_start = db.Column(db.DateTime)
+    window_end = db.Column(db.DateTime)
+
+    provider = db.Column(db.String(32))
+    model = db.Column(db.String(128))
+    verdict = db.Column(db.String(32))  # healthy | degraded | failing | unknown
+
+    sources_total = db.Column(db.Integer, default=0)
+    sources_ok = db.Column(db.Integer, default=0)
+    sources_failed = db.Column(db.Integer, default=0)
+    events_total = db.Column(db.Integer, default=0)
+    clusters_total = db.Column(db.Integer, default=0)
+
+    severity_json = db.Column(db.Text)
+    timeline_json = db.Column(db.Text)
+    correlations_json = db.Column(db.Text)
+    containers_json = db.Column(db.Text)
+    coverage_json = db.Column(db.Text)
+    evidence_text = db.Column(db.Text)
+
+    tokens_in = db.Column(db.Integer)
+    tokens_out = db.Column(db.Integer)
+    duration_ms = db.Column(db.Integer)
+
+    report_markdown = db.Column(db.Text)
+    error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def _load(self, raw, default):
+        try:
+            return json.loads(raw) if raw else default
+        except Exception:
+            return default
+
+    def severity(self):
+        return self._load(self.severity_json, {})
+
+    def timeline(self):
+        return self._load(self.timeline_json, [])
+
+    def correlations(self):
+        return self._load(self.correlations_json, [])
+
+    def containers(self):
+        return self._load(self.containers_json, [])
+
+    def coverage(self):
+        return self._load(self.coverage_json, {})
+
+    def to_dict(self, include_markdown=False):
+        data = {
+            'id': self.id,
+            'host_key': self.host_key,
+            'host_label': self.host_label,
+            'window_minutes': self.window_minutes,
+            'window_start': self.window_start.isoformat() if self.window_start else None,
+            'window_end': self.window_end.isoformat() if self.window_end else None,
+            'provider': self.provider,
+            'model': self.model,
+            'verdict': self.verdict,
+            'sources_total': self.sources_total,
+            'sources_ok': self.sources_ok,
+            'sources_failed': self.sources_failed,
+            'events_total': self.events_total,
+            'clusters_total': self.clusters_total,
+            'severity': self.severity(),
+            'timeline': self.timeline(),
+            'correlations': self.correlations(),
+            'containers': self.containers(),
+            'coverage': self.coverage(),
+            'tokens_in': self.tokens_in,
+            'tokens_out': self.tokens_out,
+            'duration_ms': self.duration_ms,
+            'error': self.error,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_markdown:
+            data['report_markdown'] = self.report_markdown
+        return data

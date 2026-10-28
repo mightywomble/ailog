@@ -40,6 +40,10 @@ app.register_blueprint(monitoring_bp)
 from dockermon import docker_bp
 app.register_blueprint(docker_bp)
 
+# Server-wide correlated log reports (modular bolt-on)
+from serverreport import reports_bp
+app.register_blueprint(reports_bp)
+
 # --- DATABASE CONFIGURATION ---
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
@@ -2132,16 +2136,42 @@ class AnalysisConfigError(Exception):
 ANALYSIS_PROVIDER_LABELS = {'openai': 'OpenAI', 'ollama': 'Ollama', 'openrouter': 'OpenRouter'}
 
 
-def _analysis_config(provider, data):
+DEFAULT_OPENAI_MODEL = 'gpt-3.5-turbo'
+
+
+def _clean_model_name(model):
+    """Return a safe model identifier or None.
+
+    Model names are host/admin supplied and end up in a provider request body,
+    so restrict them to the characters real model ids use.
+    """
+    if not model:
+        return None
+    model = str(model).strip()
+    if not model or len(model) > 128:
+        return None
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/@\-]*', model):
+        return None
+    return model
+
+
+def _analysis_config(provider, data, model=None):
     """Validate the selected provider's configuration.
 
     Returns a dict with the credentials/model to use and raises
     ``AnalysisConfigError`` when something is missing.
+
+    ``model`` optionally overrides the configured model for this one call
+    (used by the server-wide report runner). Ollama and OpenRouter both need a
+    model, so an override is only honoured when one is supplied; otherwise the
+    configured default is used, preserving previous behaviour.
     """
+    override = _clean_model_name(model)
+
     if provider == 'ollama':
         config = load_config()
         ollama_url = config.get('ollama_url')
-        ollama_model = config.get('ollama_model')
+        ollama_model = override or config.get('ollama_model')
         if not ollama_url or not ollama_model:
             raise AnalysisConfigError('Ollama not configured. Please set up Ollama in Settings.')
         return {'url': ollama_url, 'model': ollama_model}
@@ -2149,24 +2179,24 @@ def _analysis_config(provider, data):
     if provider == 'openrouter':
         config = load_config()
         api_key = config.get('openrouter_api_key')
-        model = config.get('openrouter_model')
-        if not api_key or not model:
+        openrouter_model = override or config.get('openrouter_model')
+        if not api_key or not openrouter_model:
             raise AnalysisConfigError('OpenRouter not configured. Please set up OpenRouter in Settings.')
-        return {'api_key': api_key, 'model': model}
+        return {'api_key': api_key, 'model': openrouter_model}
 
     api_key = data.get('api_key')
     if not api_key:
         raise AnalysisConfigError('OpenAI API key not provided.')
-    return {'api_key': api_key, 'model': 'gpt-3.5-turbo'}
+    return {'api_key': api_key, 'model': override or DEFAULT_OPENAI_MODEL}
 
 
-def _run_analysis(provider, data, log_content, log_name):
+def _run_analysis(provider, data, log_content, log_name, model=None):
     """Run one analysis against the selected provider.
 
     Returns ``(analysis_text, meta)`` where meta carries the provider and model
     that were used. Raises ``AnalysisConfigError`` for configuration problems.
     """
-    cfg = _analysis_config(provider, data)
+    cfg = _analysis_config(provider, data, model=model)
 
     if provider == 'ollama':
         analysis = analyse_with_ollama(log_content, log_name, cfg['url'], cfg['model'])
@@ -2184,13 +2214,13 @@ def _run_analysis(provider, data, log_content, log_name):
 
     client = openai.OpenAI(api_key=api_key)
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model=cfg['model'],
         messages=[
             {"role": "system", "content": "You are a helpful assistant that analyses log files."},
             {"role": "user", "content": f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"}
         ]
     )
-    return response.choices[0].message.content, {'provider': 'openai', 'model': 'gpt-3.5-turbo'}
+    return response.choices[0].message.content, {'provider': 'openai', 'model': cfg['model']}
 
 
 def _notify_if_alerting(webhook_url, log_name, log_content, analysis):
