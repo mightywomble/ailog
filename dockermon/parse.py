@@ -198,3 +198,171 @@ def downsample(values, limit):
         return list(values)
     step = len(values) / float(limit)
     return [values[int(i * step)] for i in range(limit)]
+
+
+# --------------------------------------------------------------------------
+# docker system df / filesystem
+# --------------------------------------------------------------------------
+
+_SYSDF_TYPES = {
+    "Images": "images",
+    "Local Volumes": "volumes",
+    "Containers": "containers",
+    "Build Cache": "build_cache",
+}
+
+
+def parse_sysdf(obj):
+    """One ``{{json .}}`` row from `docker system df` -> (key, counts).
+
+    Returns ``(None, None)`` for row types we do not track.
+    """
+    key = _SYSDF_TYPES.get((obj or {}).get("Type"))
+    if key is None:
+        return None, None
+
+    def _reclaimable(value):
+        if not value:
+            return 0.0
+        m = re.match(r"^([\d.]+\s*[A-Za-z]*)", str(value).strip())
+        return parse_size(m.group(1)) if m else 0.0
+
+    return key, {
+        "count": _int(obj.get("TotalCount")),
+        "size": parse_size(obj.get("Size")) or 0.0,
+        "reclaimable": _reclaimable(obj.get("Reclaimable")),
+    }
+
+
+def parse_df_root(text):
+    """Parse `df -B1 /` output -> (total_bytes, used_bytes)."""
+    for line in (text or "").splitlines():
+        fields = line.split()
+        if len(fields) >= 6 and fields[5] == "/" and fields[4].endswith("%"):
+            try:
+                return float(fields[1]), float(fields[2])
+            except ValueError:
+                continue
+    return (None, None)
+
+
+def rate(prev, cur, dt):
+    """Counter delta over ``dt`` seconds -> per-second rate.
+
+    Returns ``None`` when unknown and ``0.0`` on a counter reset (reboot, or a
+    network interface that was recreated) rather than a negative spike.
+    """
+    if prev is None or cur is None or not dt or dt <= 0:
+        return None
+    delta = cur - prev
+    if delta < 0:
+        return 0.0
+    return delta / float(dt)
+
+
+# --------------------------------------------------------------------------
+# app (swarm stack) grouping
+# --------------------------------------------------------------------------
+
+APP_TOTALS = ("cpu_pct", "mem_used", "net_rx", "net_tx")
+
+
+def _c_num(container, *names):
+    for name in names:
+        value = container.get(name)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def aggregate_apps(containers):
+    """Group containers by stack (app) -> service, summing resource usage.
+
+    ``containers`` may come from either transport, so both the SSH rows
+    (``cpu_percent``/``mem_percent``) and the SDK rows use the same field
+    names; anything missing counts as zero.
+    """
+    apps = {}
+    for container in containers or []:
+        app_name = container.get("stack") or "(standalone)"
+        app = apps.setdefault(app_name, {
+            "name": app_name, "cpu_pct": 0.0, "mem_used": 0.0,
+            "net_rx": 0.0, "net_tx": 0.0, "size": 0.0,
+            "container_count": 0, "running_count": 0,
+            "nodes": set(), "services": {},
+        })
+        service_name = (container.get("service")
+                        or (container.get("name") or "").split(".")[0]
+                        or "(none)")
+        service = app["services"].setdefault(service_name, {
+            "name": service_name, "cpu_pct": 0.0, "mem_used": 0.0,
+            "net_rx": 0.0, "net_tx": 0.0,
+            "container_count": 0, "running_count": 0, "containers": [],
+        })
+
+        cpu = _c_num(container, "cpu_percent", "cpu_pct")
+        mem = _c_num(container, "mem_used")
+        rx = _c_num(container, "net_rx")
+        tx = _c_num(container, "net_tx")
+        size = _c_num(container, "size_rw", "size")
+        running = (container.get("state") or "").lower() == "running"
+
+        for scope in (app, service):
+            scope["container_count"] += 1
+            if running:
+                scope["running_count"] += 1
+            scope["cpu_pct"] += cpu
+            scope["mem_used"] += mem
+            scope["net_rx"] += rx
+            scope["net_tx"] += tx
+
+        app["size"] += size
+        if container.get("node"):
+            app["nodes"].add(container["node"])
+
+        service["containers"].append({
+            "id": container.get("id"),
+            "short_id": container.get("short_id") or (container.get("id") or "")[:12],
+            "name": container.get("name"),
+            "image": container.get("image"),
+            "image_tag": container.get("image_tag"),
+            "state": container.get("state"),
+            "status": container.get("status"),
+            "node": container.get("node"),
+            "cpu_pct": round(cpu, 2),
+            "mem_used": mem,
+            "mem_percent": _c_num(container, "mem_percent", "mem_pct"),
+        })
+    return apps
+
+
+def finalize_apps(apps):
+    """``aggregate_apps`` output -> sorted, JSON-ready list."""
+    out = []
+    for app in apps.values():
+        services = sorted(app["services"].values(), key=lambda s: s["name"])
+        for service in services:
+            service["containers"] = sorted(
+                service["containers"], key=lambda c: c.get("name") or "")
+            for key in ("cpu_pct", "mem_used", "net_rx", "net_tx"):
+                service[key] = round(service[key], 2)
+        out.append({
+            "name": app["name"],
+            "cpu_pct": round(app["cpu_pct"], 2),
+            "mem_used": round(app["mem_used"], 1),
+            "net_rx": round(app["net_rx"], 1),
+            "net_tx": round(app["net_tx"], 1),
+            "size": round(app["size"], 1),
+            "container_count": app["container_count"],
+            "running_count": app["running_count"],
+            "nodes": sorted(app["nodes"]),
+            "services": services,
+        })
+    # Busiest first, but keep the un-stacked leftovers at the bottom.
+    out.sort(key=lambda a: (a["name"] == "(standalone)",
+                            -(a["cpu_pct"] or 0), a["name"]))
+    return out

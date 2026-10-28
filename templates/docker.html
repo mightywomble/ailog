@@ -50,6 +50,18 @@
 
     <div id="error-banner" class="hidden mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm px-4 py-3"></div>
 
+    <!-- view tabs -->
+    <div class="mt-5 flex flex-wrap items-center gap-1 border-b border-white/10">
+      <button type="button" data-view="overview"
+              class="view-tab px-3 py-2 text-sm rounded-t-lg -mb-px border-b-2">Overview</button>
+      <button type="button" data-view="apps"
+              class="view-tab px-3 py-2 text-sm rounded-t-lg -mb-px border-b-2">Apps</button>
+      <button type="button" data-view="cluster" id="tab-cluster"
+              class="view-tab hidden px-3 py-2 text-sm rounded-t-lg -mb-px border-b-2">Cluster</button>
+      <span id="history-window" class="ml-auto text-[11px] text-slate-500"></span>
+    </div>
+
+    <div id="view-overview">
     <!-- swarm cluster view -->
     <section id="swarm-section" class="mt-5 hidden">
       <div class="flex items-center justify-between">
@@ -60,7 +72,7 @@
     </section>
 
     <!-- row 1: live graphs -->
-    <section class="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+    <section class="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       <div class="card rounded-xl p-4">
         <div class="flex items-center justify-between mb-2">
           <h3 class="text-sm font-medium text-slate-300">CPU</h3>
@@ -88,6 +100,14 @@
         <div class="chart-box"><canvas id="chart-net"></canvas></div>
         <div id="net-sub" class="mt-1 text-xs text-slate-500">&nbsp;</div>
       </div>
+      <div class="card rounded-xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-medium text-slate-300">Disk</h3>
+          <span id="disk-value" class="text-lg font-semibold tabular-nums text-emerald-400">&mdash;</span>
+        </div>
+        <div class="chart-box"><canvas id="chart-disk"></canvas></div>
+        <div id="disk-sub" class="mt-1 text-xs text-slate-500">&nbsp;</div>
+      </div>
     </section>
 
     <!-- row 2: containers -->
@@ -107,9 +127,37 @@
       <div id="container-list" class="mt-3 space-y-2"></div>
       <div id="container-empty" class="hidden mt-6 text-center text-sm text-slate-500">No containers match.</div>
     </section>
+    </div><!-- /view-overview -->
+
+    <!-- apps view: containers grouped by stack (swarm service / compose project) -->
+    <div id="view-apps" class="hidden mt-5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">
+          Apps <span id="apps-count" class="text-slate-500 normal-case"></span>
+        </h2>
+        <div class="flex items-center gap-2">
+          <input id="app-filter" type="text" placeholder="filter app / service / container"
+                 class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm w-64 focus:outline-none focus:border-sky-500/60" />
+        </div>
+      </div>
+      <div id="apps-summary" class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+      <div id="apps-list" class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
+      <div id="apps-empty" class="hidden mt-6 text-center text-sm text-slate-500">
+        No containers are grouped into apps on this host.
+      </div>
+    </div>
+
+    <!-- cluster view: swarm-wide totals, per-node cards, docker system df -->
+    <div id="view-cluster" class="hidden mt-5">
+      <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Cluster</h2>
+      <div id="cluster-totals" class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+      <div id="nodes-list" class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
+      <div id="cluster-df" class="mt-4"></div>
+    </div>
 
     <div class="mt-8 text-center text-[11px] text-slate-600">
-      Live statistics only (no history is stored) &middot; polling every 2s &middot; {{ host_key }}
+      Live stats polled every 2s &middot; charts seed from a {{ history_minutes }}-minute
+      in-memory history (one sample every {{ history_interval }}s, lost on restart) &middot; {{ host_key }}
     </div>
   </div>
 
@@ -117,9 +165,12 @@
 (function () {
   const HOST_KEY = {{ host_key|tojson }};
   const API = '/api/docker/hosts/' + encodeURIComponent(HOST_KEY);
-  const MAX_POINTS = 60;
+  const MAX_POINTS = {{ [((history_minutes * 60 / history_interval) | round(0, 'floor') | int), 240] | min }};
   const POLL_MS = 2000;
   const CONTAINER_POLL_MS = 5000;
+  const SWARM_POLL_MS = 10000;
+  const HISTORY_INTERVAL = {{ history_interval }};
+  const HISTORY_MINUTES = {{ history_minutes }};
 
   const state = {
     stats: null,
@@ -132,7 +183,12 @@
     showStopped: true,
     timer: null,
     containerTimer: null,
+    swarmTimer: null,
     failures: 0,
+    view: 'overview',
+    swarm: null,
+    appsOpen: new Set(),
+    appFilter: '',
   };
 
   // ---------------------------------------------------------------- helpers
@@ -239,6 +295,49 @@
     { label: 'tx', data: [], borderColor: 'rgba(251,191,36,1)', backgroundColor: 'rgba(251,191,36,0.12)', fill: true },
   ], 1024, ' B/s');
 
+  const diskChart = makeChart('chart-disk', [{
+    label: 'Disk %', data: [], borderColor: 'rgba(52,211,153,1)',
+    backgroundColor: 'rgba(52,211,153,0.15)', fill: true,
+  }], 100, '%');
+
+  // ------------------------------------------------------------- history seed
+  // The charts used to start empty on every load; seeding them from the
+  // server's rolling window means a refresh keeps the last hour on screen.
+  function seedChart(chart, values) {
+    const series = (values || []).map(v => (v == null ? 0 : Number(v)));
+    chart.data.labels = series.map(() => '');
+    chart.data.datasets[0].data = series;
+    chart.update('none');
+  }
+
+  function seedNetChart(rx, tx) {
+    const a = rx || [], b = tx || [];
+    const n = Math.max(a.length, b.length);
+    netChart.data.labels = new Array(n).fill('');
+    netChart.data.datasets[0].data = new Array(n).fill(0).map((_, i) => Number(a[i] || 0));
+    netChart.data.datasets[1].data = new Array(n).fill(0).map((_, i) => Number(b[i] || 0));
+    const peak = Math.max(1024, ...netChart.data.datasets[0].data, ...netChart.data.datasets[1].data);
+    netChart.options.scales.y.suggestedMax = peak * 1.2;
+    netChart.update('none');
+  }
+
+  async function seedHistory() {
+    try {
+      const body = await getJSON(API + '/history');
+      const s = body.series || {};
+      seedChart(cpuChart, s.cpu);
+      seedChart(memChart, s.mem_pct);
+      seedChart(diskChart, s.disk_pct);
+      seedNetChart(s.net_rx, s.net_tx);
+      if (body.points) {
+        document.getElementById('history-window').textContent =
+          'history: last ' + body.points + ' samples (' + body.window_minutes + ' min window)';
+      }
+    } catch (e) {
+      // history is an enhancement; live polling still works
+    }
+  }
+
   // ---------------------------------------------------------------- stats
   function renderStats(s) {
     state.stats = s;
@@ -261,9 +360,16 @@
       'total \u2193 ' + humanBytes(s.net_rx) + '  \u2191 ' + humanBytes(s.net_tx) +
       '  \u00b7  ' + (s.containers_running || 0) + '/' + (s.containers_total || 0) + ' running';
 
+    const diskPct = s.disk_percent;
+    document.getElementById('disk-value').textContent = (diskPct == null) ? '\u2014' : Number(diskPct).toFixed(1) + '%';
+    document.getElementById('disk-sub').textContent = (s.disk_total
+      ? humanBytes(s.disk_used) + ' / ' + humanBytes(s.disk_total) + ' on /'
+      : 'not reported for this endpoint');
+
     pushPoint(cpuChart, [Number(cpu || 0)]);
     pushPoint(memChart, [Number(memPct || 0)]);
     pushPoint(netChart, [Number(s.net_rx_bps || 0), Number(s.net_tx_bps || 0)]);
+    pushPoint(diskChart, [diskPct == null ? 0 : Number(diskPct)]);
 
     // dynamic network axis ceiling
     const peak = Math.max(Number(s.net_rx_bps || 0), Number(s.net_tx_bps || 0), 1024);
@@ -273,6 +379,8 @@
 
     if (s.swarm && !state.nodes.length) loadNodes();
     document.getElementById('swarm-section').classList.toggle('hidden', !s.swarm);
+    document.getElementById('tab-cluster').classList.toggle('hidden', !s.swarm);
+    if (!state.swarm) loadSwarm();
   }
 
   // ---------------------------------------------------------------- swarm nodes
@@ -523,6 +631,311 @@
     '</div>';
   }
 
+  // ---------------------------------------------------------------- views
+  const VIEWS = ['overview', 'apps', 'cluster'];
+
+  function setView(view) {
+    if (VIEWS.indexOf(view) === -1) view = 'overview';
+    state.view = view;
+    VIEWS.forEach(v => {
+      const el = document.getElementById('view-' + v);
+      if (el) el.classList.toggle('hidden', v !== view);
+    });
+    document.querySelectorAll('.view-tab').forEach(btn => {
+      const active = btn.dataset.view === view;
+      btn.classList.toggle('text-sky-300', active);
+      btn.classList.toggle('border-sky-500', active);
+      btn.classList.toggle('border-transparent', !active);
+      btn.classList.toggle('text-slate-400', !active);
+      btn.classList.toggle('hover:text-slate-200', !active);
+    });
+    if (view === 'apps' || view === 'cluster') loadSwarm();
+  }
+
+  // ---------------------------------------------------------------- sparkline
+  const sparkColors = { cpu: 'rgba(56,189,248,1)', mem: 'rgba(167,139,250,1)',
+                        disk: 'rgba(52,211,153,1)', net: 'rgba(251,191,36,1)' };
+
+  function sparkline(canvas, values, color) {
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 120;
+    const h = canvas.clientHeight || 28;
+    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.height = Math.max(1, Math.round(h * dpr));
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const vals = (values || []).filter(v => v != null && isFinite(v)).map(Number);
+    if (vals.length < 2) {
+      ctx.strokeStyle = 'rgba(148,163,184,0.25)';
+      ctx.beginPath();
+      ctx.moveTo(1, h / 2);
+      ctx.lineTo(w - 1, h / 2);
+      ctx.stroke();
+      return;
+    }
+    const max = Math.max.apply(null, vals);
+    const min = Math.min.apply(null, vals);
+    const span = (max - min) || 1;
+    const xAt = i => 1 + (i / (vals.length - 1)) * (w - 2);
+    const yAt = v => h - 1 - ((v - min) / span) * (h - 2);
+
+    ctx.beginPath();
+    vals.forEach((v, i) => { i ? ctx.lineTo(xAt(i), yAt(v)) : ctx.moveTo(xAt(i), yAt(v)); });
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    ctx.lineTo(xAt(vals.length - 1), h);
+    ctx.lineTo(xAt(0), h);
+    ctx.closePath();
+    ctx.globalAlpha = 0.14;
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function appHue(name) {
+    let h = 0;
+    for (let i = 0; i < String(name).length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+    return h;
+  }
+
+  function appAvatar(name) {
+    const initials = String(name || '?').replace(/[^A-Za-z0-9]/g, ' ').trim()
+      .split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+    const hue = appHue(name);
+    return '<div class="w-9 h-9 rounded-lg flex items-center justify-center text-[13px] font-semibold shrink-0" ' +
+      'style="background:hsl(' + hue + ',60%,22%);color:hsl(' + hue + ',80%,72%);border:1px solid hsl(' + hue + ',60%,35%)">' +
+      esc(initials) + '</div>';
+  }
+
+  function bar(pct, colorClass) {
+    const p = Number(pct || 0);
+    return '<div class="h-1.5 rounded-full bg-white/10 overflow-hidden">' +
+      '<div class="h-full ' + colorClass + '" style="width:' + Math.min(100, Math.max(0, p)).toFixed(1) + '%"></div></div>';
+  }
+
+  // ---------------------------------------------------------------- apps view
+  async function loadSwarm() {
+    try {
+      const body = await getJSON(API + '/swarm');
+      state.swarm = body;
+      document.getElementById('tab-cluster').classList.toggle('hidden', !body.swarm);
+      if (!body.swarm && state.view === 'cluster') setView('apps');
+      renderApps();
+      renderCluster();
+    } catch (e) {
+      state.swarm = { apps: [], nodes: [], totals: {}, swarm: false, error: e.message };
+      renderApps();
+      renderCluster();
+    }
+  }
+
+  function appMatches(app) {
+    const f = state.appFilter.trim().toLowerCase();
+    if (!f) return true;
+    if (String(app.name).toLowerCase().includes(f)) return true;
+    return (app.services || []).some(s =>
+      String(s.name || '').toLowerCase().includes(f) ||
+      (s.containers || []).some(c =>
+        [c.name, c.image].filter(Boolean).some(v => String(v).toLowerCase().includes(f))));
+  }
+
+  function renderApps() {
+    const view = state.swarm || {};
+    const totals = view.totals || {};
+    const apps = (view.apps || []).filter(appMatches);
+    const sparks = view.app_spark || {};
+
+    document.getElementById('apps-count').textContent =
+      (view.apps || []).length + (view.swarm ? ' across ' + (totals.nodes_online || 0) + ' nodes' : '');
+
+    const sum = document.getElementById('apps-summary');
+    const cell = (label, value, sub) =>
+      '<div class="card rounded-xl px-4 py-3">' +
+        '<div class="text-[10px] uppercase tracking-wide text-slate-500">' + esc(label) + '</div>' +
+        '<div class="text-lg font-semibold tabular-nums text-slate-100 mt-0.5">' + value + '</div>' +
+        (sub ? '<div class="text-[11px] text-slate-500">' + sub + '</div>' : '') +
+      '</div>';
+    sum.innerHTML =
+      cell('Apps', (view.apps || []).length, (totals.containers_running || 0) + ' containers running') +
+      cell('Cluster CPU', totals.cpu_pct == null ? '\u2014' : Number(totals.cpu_pct || 0).toFixed(1) + '%',
+           (totals.cpu_cores_used || 0) + ' of ' + (totals.cores || 0) + ' cores') +
+      cell('Cluster RAM', totals.mem_pct == null ? '\u2014' : Number(totals.mem_pct || 0).toFixed(1) + '%',
+           humanBytes(totals.mem_used) + ' / ' + humanBytes(totals.mem_total)) +
+      cell('Cluster disk', totals.disk_pct == null ? '\u2014' : Number(totals.disk_pct || 0).toFixed(1) + '%',
+           totals.disk_total ? humanBytes(totals.disk_used) + ' / ' + humanBytes(totals.disk_total) : 'not reported');
+
+    const list = document.getElementById('apps-list');
+    list.innerHTML = '';
+    document.getElementById('apps-empty').classList.toggle('hidden', apps.length > 0);
+    if (view.error) {
+      list.innerHTML = '<div class="text-rose-400 text-sm">Could not load app grouping: ' +
+        esc(view.error) + '</div>';
+      return;
+    }
+
+    apps.forEach(app => {
+      const open = state.appsOpen.has(app.name);
+      const spark = sparks[app.name] || {};
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl overflow-hidden';
+
+      const services = (app.services || []).map(svc => {
+        const rows = (svc.containers || []).map(c =>
+          '<div class="flex items-center gap-2 px-3 py-1.5 border-t border-white/5">' +
+            '<span class="text-[11px] ' + stateColor(c.state) + '">\u25cf</span>' +
+            '<span class="truncate text-slate-200">' + esc(c.name || c.short_id) + '</span>' +
+            (c.node ? '<span class="text-[10px] px-1.5 rounded bg-white/5 text-slate-400">' + esc(c.node) + '</span>' : '') +
+            '<span class="ml-auto tabular-nums text-slate-400">' +
+              (c.cpu_pct == null ? '\u2013' : Number(c.cpu_pct).toFixed(1) + '%') + ' \u00b7 ' +
+              humanBytes(c.mem_used) + '</span>' +
+          '</div>').join('');
+        return '<div>' +
+          '<div class="flex items-center gap-2 px-3 py-2 bg-white/[0.02] border-t border-white/5">' +
+            '<span class="text-[11px] font-medium text-sky-300">' + esc(svc.name) + '</span>' +
+            '<span class="text-[10px] text-slate-500">' + (svc.running_count || 0) + '/' + (svc.container_count || 0) + ' up</span>' +
+            '<span class="ml-auto text-[11px] tabular-nums text-slate-400">' +
+              Number(svc.cpu_pct || 0).toFixed(1) + '% \u00b7 ' + humanBytes(svc.mem_used) + '</span>' +
+          '</div>' + rows + '</div>';
+      }).join('');
+
+      card.innerHTML =
+        '<button type="button" class="row-hover w-full text-left px-4 py-3 flex items-center gap-3 transition-colors" data-app="' + esc(app.name) + '">' +
+          appAvatar(app.name) +
+          '<div class="min-w-0 flex-1">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="truncate text-sm font-medium text-slate-100">' + esc(app.name) + '</span>' +
+              '<span class="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400">' +
+                (app.running_count || 0) + '/' + (app.container_count || 0) + ' up</span>' +
+            '</div>' +
+            '<div class="text-[11px] text-slate-500 truncate">' +
+              (app.services || []).length + ' services' +
+              (app.nodes && app.nodes.length ? ' \u00b7 ' + app.nodes.join(', ') : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="hidden sm:flex items-center gap-4 shrink-0">' +
+            '<div class="w-24"><canvas class="spark h-7 w-24" data-spark="cpu"></canvas></div>' +
+            '<div class="w-24"><canvas class="spark h-7 w-24" data-spark="mem"></canvas></div>' +
+            '<div class="w-28 text-right text-[11px] tabular-nums text-slate-400">' +
+              Number(app.cpu_pct || 0).toFixed(1) + '%<br>' + humanBytes(app.mem_used) +
+            '</div>' +
+          '</div>' +
+        '</button>' +
+        '<div class="apps-detail ' + (open ? '' : 'hidden') + '">' + services + '</div>';
+
+      list.appendChild(card);
+
+      const cvCpu = card.querySelector('[data-spark="cpu"]');
+      const cvMem = card.querySelector('[data-spark="mem"]');
+      sparkline(cvCpu, spark.cpu, sparkColors.cpu);
+      sparkline(cvMem, spark.mem_used, sparkColors.mem);
+      cvCpu.title = 'CPU% (session history)';
+      cvMem.title = 'Memory (session history)';
+
+      card.querySelector('[data-app]').addEventListener('click', () => {
+        if (state.appsOpen.has(app.name)) state.appsOpen.delete(app.name);
+        else state.appsOpen.add(app.name);
+        renderApps();
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------- cluster view
+  function renderCluster() {
+    const view = state.swarm || {};
+    const totals = view.totals || {};
+    const nodes = view.nodes || [];
+    const el = document.getElementById('cluster-totals');
+    const cell = (label, value, sub) =>
+      '<div class="card rounded-xl px-4 py-3">' +
+        '<div class="text-[10px] uppercase tracking-wide text-slate-500">' + esc(label) + '</div>' +
+        '<div class="text-lg font-semibold tabular-nums text-slate-100 mt-0.5">' + value + '</div>' +
+        (sub ? '<div class="text-[11px] text-slate-500">' + sub + '</div>' : '') +
+      '</div>';
+    el.innerHTML =
+      cell('Nodes', (totals.nodes_online || 0) + '/' + (totals.nodes_total || 0),
+           (totals.managers || 0) + ' managers') +
+      cell('CPU', totals.cpu_pct == null ? '\u2014' : Number(totals.cpu_pct || 0).toFixed(1) + '%',
+           (totals.cpu_cores_used || 0) + ' of ' + (totals.cores || 0) + ' cores') +
+      cell('Network', humanRate(totals.net_rx_bps || 0),
+           '\u2191 ' + humanRate(totals.net_tx_bps || 0)) +
+      cell('Containers', (totals.containers_running || 0) + ' running',
+           (totals.containers_total || 0) + ' total \u00b7 ' + (totals.apps_total || 0) + ' apps');
+
+    const list = document.getElementById('nodes-list');
+    list.innerHTML = '';
+    nodes.forEach(node => {
+      const m = node.metrics || {};
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl p-4';
+      card.innerHTML =
+        '<div class="flex items-start justify-between gap-3">' +
+          '<div class="min-w-0">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="w-2 h-2 rounded-full ' + (node.online ? 'bg-emerald-500' : 'bg-rose-500') + '"></span>' +
+              '<span class="truncate text-sm font-medium text-slate-100">' + esc(node.hostname || node.id) + '</span>' +
+              '<span class="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400">' + esc(node.role || 'node') + '</span>' +
+              '<span class="text-[10px] text-slate-500">' + esc(node.availability || '') + '</span>' +
+            '</div>' +
+            '<div class="text-[11px] text-slate-500 mt-0.5">' +
+              esc(node.addr || '') + ' \u00b7 ' + (node.container_count || 0) + ' containers' +
+            '</div>' +
+          '</div>' +
+          '<canvas class="spark h-8 w-24 shrink-0" data-node-cpu></canvas>' +
+        '</div>' +
+        (node.online ? '' :
+          '<div class="mt-2 text-[11px] text-rose-400">' + esc(node.error || 'offline') + '</div>') +
+        '<div class="mt-3 grid grid-cols-3 gap-3 text-[11px]">' +
+          '<div><div class="flex justify-between text-slate-400"><span>CPU</span><span class="tabular-nums">' +
+            (m.cpu_pct == null ? '\u2013' : Number(m.cpu_pct).toFixed(1) + '%') + '</span></div>' +
+            bar(m.cpu_pct, 'bg-sky-500') + '</div>' +
+          '<div><div class="flex justify-between text-slate-400"><span>RAM</span><span class="tabular-nums">' +
+            (m.mem_pct == null ? '\u2013' : Number(m.mem_pct).toFixed(1) + '%') + '</span></div>' +
+            bar(m.mem_pct, 'bg-violet-500') + '</div>' +
+          '<div><div class="flex justify-between text-slate-400"><span>Disk</span><span class="tabular-nums">' +
+            (m.disk_pct == null ? '\u2013' : Number(m.disk_pct).toFixed(1) + '%') + '</span></div>' +
+            bar(m.disk_pct, 'bg-emerald-500') + '</div>' +
+        '</div>';
+      list.appendChild(card);
+      sparkline(card.querySelector('[data-node-cpu]'), (node.spark || {}).cpu, sparkColors.cpu);
+    });
+
+    // docker system df, per node
+    const dfBox = document.getElementById('cluster-df');
+    const withDf = nodes.filter(n => n.docker_df && Object.keys(n.docker_df).length);
+    if (!withDf.length) {
+      dfBox.innerHTML = '';
+      return;
+    }
+    const rows = withDf.map(n => {
+      const df = n.docker_df;
+      const order = ['images', 'containers', 'volumes', 'build_cache'];
+      return '<tr class="border-t border-white/5">' +
+        '<td class="py-2 pr-3 text-slate-200">' + esc(n.hostname || '') + '</td>' +
+        order.map(key => '<td class="py-2 px-3 text-right tabular-nums text-slate-300">' +
+          (df[key] ? humanBytes(df[key].size) : '\u2013') +
+          '<div class="text-[10px] text-slate-500">' + (df[key] ? df[key].count + ' items' : '') + '</div>' +
+          '</td>').join('') +
+      '</tr>';
+    }).join('');
+    dfBox.innerHTML =
+      '<div class="card rounded-xl p-4">' +
+        '<h3 class="text-sm font-medium text-slate-300">Docker disk usage <span class="text-slate-500">(docker system df)</span></h3>' +
+        '<div class="mt-2 overflow-x-auto"><table class="w-full text-xs">' +
+          '<thead><tr class="text-[10px] uppercase tracking-wide text-slate-500">' +
+            '<th class="text-left py-1 pr-3">Node</th><th class="text-right px-3">Images</th>' +
+            '<th class="text-right px-3">Containers</th><th class="text-right px-3">Volumes</th>' +
+            '<th class="text-right px-3">Build cache</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody>' +
+        '</table></div>' +
+      '</div>';
+  }
+
   // ---------------------------------------------------------------- polling
   async function pollStats() {
     try {
@@ -554,6 +967,17 @@
     }
   }
 
+  // Only refresh the (expensive) cluster view while a tab that shows it is open.
+  function startSwarmTick() {
+    const tick = async () => {
+      if (state.view === 'apps' || state.view === 'cluster') await loadSwarm();
+      if (state.swarmTimer) clearTimeout(state.swarmTimer);
+      state.swarmTimer = setTimeout(tick, SWARM_POLL_MS);
+    };
+    if (state.swarmTimer) clearTimeout(state.swarmTimer);
+    state.swarmTimer = setTimeout(tick, SWARM_POLL_MS);
+  }
+
   function schedule(fn, ms, key) {
     const tick = async () => {
       await fn();
@@ -565,6 +989,7 @@
   function stop() {
     if (state.timer) clearTimeout(state.timer);
     if (state.containerTimer) clearTimeout(state.containerTimer);
+    if (state.swarmTimer) clearTimeout(state.swarmTimer);
   }
 
   // ---------------------------------------------------------------- wiring
@@ -578,19 +1003,40 @@
   });
   document.getElementById('btn-refresh').addEventListener('click', async () => {
     state.details = {};
-    await Promise.all([pollStats(), pollContainers(), loadNodes()]);
+    state.swarm = null;
+    await Promise.all([pollStats(), pollContainers(), loadNodes(), loadSwarm()]);
+  });
+
+  // tabs
+  document.querySelectorAll('.view-tab').forEach(btn => {
+    btn.addEventListener('click', () => setView(btn.dataset.view));
+  });
+  document.getElementById('app-filter').addEventListener('input', (ev) => {
+    state.appFilter = ev.target.value;
+    renderApps();
   });
   window.addEventListener('beforeunload', stop);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { stop(); } else { stop(); pollStats(); pollContainers(); schedule(pollStats, POLL_MS, 'timer'); schedule(pollContainers, CONTAINER_POLL_MS, 'containerTimer'); }
+    if (document.hidden) { stop(); return; }
+    stop();
+    pollStats();
+    pollContainers();
+    loadSwarm();
+    schedule(pollStats, POLL_MS, 'timer');
+    schedule(pollContainers, CONTAINER_POLL_MS, 'containerTimer');
+    startSwarmTick();
   });
 
   (async function boot() {
     setLive(false, 'connecting');
+    setView('overview');
+    await seedHistory();
     await pollStats();
     await pollContainers();
     schedule(pollStats, POLL_MS, 'timer');
     schedule(pollContainers, CONTAINER_POLL_MS, 'containerTimer');
+    loadSwarm();
+    startSwarmTick();
   })();
 })();
 </script>

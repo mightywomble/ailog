@@ -12,6 +12,9 @@ GET  /api/docker/hosts/<host_key>/stats     live CPU / RAM / network
 GET  /api/docker/hosts/<host_key>/containers
 GET  /api/docker/hosts/<host_key>/containers/<container_id>
 GET  /api/docker/hosts/<host_key>/nodes      swarm cluster-wide nodes
+GET  /api/docker/hosts/<host_key>/history    rolling in-memory host series
+GET  /api/docker/hosts/<host_key>/history/stream  same, pushed over SSE
+GET  /api/docker/hosts/<host_key>/swarm      cluster view grouped per app
 """
 
 from __future__ import annotations
@@ -25,8 +28,10 @@ from flask import (Blueprint, Response, current_app, jsonify, render_template,
                    request, stream_with_context)
 
 from . import endpoints as ep
+from . import history as dhistory
 from . import sshstats
 from . import stats as dstats
+from . import swarm as dswarm
 
 docker_bp = Blueprint('docker', __name__)
 
@@ -165,6 +170,41 @@ def _error(message, status=502):
     return jsonify({'success': False, 'error': str(message)}), status
 
 
+def host_snapshot(host_key: str) -> dict:
+    """One collection for ``host_key``, whatever the transport.
+
+    Returns ``{'stats', 'containers', 'nodes', 'ts'}``. The stats endpoints,
+    the history sampler and the swarm view all go through here so they cannot
+    disagree about what a host is currently doing.
+    """
+    info, transport, client = _transport_for(host_key)
+    if transport == 'ssh':
+        snap = _snapshot_ssh(host_key, info)
+        stats = snap.get('stats') or {}
+        return {
+            'stats': stats,
+            'containers': snap.get('containers') or [],
+            'nodes': snap.get('nodes') or [],
+            'ts': stats.get('ts') or time.time(),
+        }
+    containers = dstats.collect_containers(client)
+    totals = dstats.collect_totals(client, containers)
+    return {
+        'stats': totals,
+        'containers': containers,
+        'nodes': dstats.swarm_nodes(client),
+        'ts': totals.get('ts') or time.time(),
+    }
+
+
+def _ensure_sampler():
+    """Start the history sampler on first use (idempotent)."""
+    try:
+        dhistory.start_sampler(current_app._get_current_object())
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------
 # page
 # --------------------------------------------------------------------------
@@ -173,7 +213,11 @@ def _error(message, status=502):
 def docker_page(host_key):
     info = ep.resolve_host(host_key) or {'key': host_key, 'friendly_name': host_key}
     endpoint = _known_endpoints().get(host_key) or {}
-    return render_template('docker.html', host_key=host_key, host=info, endpoint=endpoint)
+    _ensure_sampler()
+    return render_template('docker.html', host_key=host_key, host=info,
+                           endpoint=endpoint,
+                           history_interval=dhistory.interval_seconds(),
+                           history_minutes=dhistory.window_minutes())
 
 
 # --------------------------------------------------------------------------
@@ -449,3 +493,82 @@ def api_nodes(host_key):
         nodes = dstats.swarm_nodes(client)
     nodes = _normalize_nodes(nodes)
     return jsonify({'success': True, 'nodes': nodes, 'count': len(nodes)})
+
+
+# --------------------------------------------------------------------------
+# history (rolling in-memory series)
+# --------------------------------------------------------------------------
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/history')
+def api_history(host_key):
+    _ensure_sampler()
+    payload = dhistory.payload(host_key)
+    return jsonify({'success': True, **payload})
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/history/stream')
+def api_history_stream(host_key):
+    """Push the series whenever the sampler records a new point."""
+    _ensure_sampler()
+    interval = dhistory.interval_seconds()
+
+    def generate():
+        yield ': connected\n\n'
+        yield 'retry: 5000\n\n'
+        last = None
+        # Bounded so an abandoned browser tab cannot pin a worker forever.
+        for _ in range(int(3600 / max(interval, 1))):
+            payload = dhistory.payload(host_key)
+            if payload['revision'] != last:
+                last = payload['revision']
+                yield 'data: ' + json.dumps(payload) + '\n\n'
+            else:
+                yield ': keepalive\n\n'
+            time.sleep(max(1, interval))
+
+    return Response(stream_with_context(generate()),
+                    mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache, no-transform',
+                             'X-Accel-Buffering': 'no',
+                             'Connection': 'keep-alive'})
+
+
+# --------------------------------------------------------------------------
+# swarm cluster (master -> nodes, grouped per app)
+# --------------------------------------------------------------------------
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/swarm')
+def api_swarm(host_key):
+    try:
+        info, transport, client = _transport_for(host_key)
+    except DockerRequestError as exc:
+        return _error(exc)
+    try:
+        snap = host_snapshot(host_key)
+    except DockerRequestError as exc:
+        return _error(exc)
+    is_swarm = bool((snap.get('stats') or {}).get('swarm'))
+    try:
+        if is_swarm:
+            view = dswarm.cluster(host_key, info, master_snap=snap,
+                                  transport=transport, client=client)
+        else:
+            view = dswarm.single_host(host_key, info, snap)
+    except Exception as exc:
+        return _error(exc)
+    view['success'] = True
+    return jsonify(view)
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/swarm/refresh', methods=['POST'])
+def api_swarm_refresh(host_key):
+    dswarm.clear(host_key)
+    return api_swarm(host_key)
+
+
+@docker_bp.route('/api/docker/history/clear', methods=['POST'])
+def api_history_clear():
+    host_key = (request.args.get('host_key') or '').strip() or None
+    dhistory.clear(host_key)
+    dswarm.clear(host_key)
+    return jsonify({'success': True, 'cleared': host_key or 'all'})
