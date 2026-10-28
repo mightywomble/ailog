@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-28 | v2.12.1 | Docs: server-report usage walkthrough with depth guidance, report tuning settings/env table, endpoint reference, report-specific sudoers entries, blueprint and report-pipeline architecture notes | ✅ Complete |
 | 2026-10-28 | v2.12.0 | Report tuning: default model `openai/gpt-4o-mini`; **Executive Summary** and **How to Resolve** closing sections; a depth slider (Lite → Maximum) plus Auto; a sizing engine that measures the evidence pack and recommends depth, chunking and model; map-reduce chunking for packs too large for one request; "Check size & suggest" pre-flight that does not call the model | ✅ Complete |
 | 2026-10-28 | v2.11.0 | Server-wide correlated log reports: **Analyse All Logs** collects every file / journald / container source on a host into a uniform time window, normalises lines into signature clusters, correlates sources statistically (lift, bursts, silence gaps, container state), sends one compact evidence pack to the model and stores a report at `/reports/<id>` with a history list | ✅ Complete |
 | 2026-10-28 | v2.10.1 | AI analysis UX: live staged progress in the modal (preparing → contacting → analysing with elapsed clock → formatting) streamed from the new `/analyse/stream` SSE endpoint; results rendered as sanitised Markdown (marked + DOMPurify) in the AI and Suricata analyse modals | ✅ Complete |
@@ -105,6 +106,23 @@ This application is designed for use on a trusted, internal development network 
 * **Chunked for big hosts:** packs larger than the model can hold are split on section boundaries, summarised pass-by-pass (map) and merged into one reduced pack (reduce), with progress and the pass count shown
 * **Closing sections:** every report ends with an **Executive Summary** (plain-English, non-specialist) and **How to Resolve** (numbered remediation steps marked immediate / soon / preventive, with verification)
 * **Honest about blind spots:** truncation, source caps, failed sources and logging gaps are all stated in the report
+
+Tuning, in **Settings** (DB-backed) or as environment variables:
+
+| Setting | Env var | Default | Purpose |
+|---|---|---|---|
+| `report.default_model` | – | `openai/gpt-4o-mini` | model used when no per-run override is given |
+| `report.window_minutes` | – | `120` | default time window |
+| `report.depth` | – | `0` (Auto) | `0` = size the run automatically, `1`-`5` = pinned depth |
+| – | `AILOG_REPORT_MAX_SOURCES` | `60` | hard cap on sources per run |
+| – | `AILOG_REPORT_MAX_BYTES` | `25165824` (24 MB) | total log text collected per run |
+| – | `AILOG_REPORT_MAX_TOKENS` | `12000` | ceiling for the `fit_pack` trim path |
+| – | `AILOG_DOCKER_REFRESH_SECONDS` | `300` | Docker endpoint re-discovery cadence |
+
+Endpoints: `POST /serverreport/stream` (SSE), `POST /serverreport/preflight`,
+`GET /api/serverreport/defaults`, `GET /reports`, `GET /reports/<id>`,
+`GET /reports/<id>/markdown`, `POST /reports/<id>/discord`, `GET /api/reports`,
+`GET|DELETE /api/reports/<id>`.
 
 ### 📈 **Real-Time Progress Tracking**
 * **Instant connect feedback:** SSE responses for log discovery disable proxy buffering (`X-Accel-Buffering: no`) and send an immediate `: connected` heartbeat, so the first update lands in tens of milliseconds instead of after an nginx buffer flush
@@ -358,6 +376,16 @@ For the application to read logs, the user running it needs passwordless `sudo` 
     david ALL=(ALL) NOPASSWD: /usr/bin/docker version --format *, /usr/bin/docker info --format *, /usr/bin/docker ps -a --no-trunc --size --format *, /usr/bin/docker stats --no-stream --no-trunc --format *, /usr/bin/docker node ls --format *, /usr/bin/docker inspect *, /usr/bin/docker logs --tail 500 *, /usr/bin/docker service logs --tail 500 *, /usr/bin/docker image inspect *
     ```
 
+    **Server reports** (Analyse All Logs) need a few wider read-only commands than the log viewer
+    uses, because it reads a time window rather than the last 500 lines:
+
+    ```
+    david ALL=(ALL) NOPASSWD: /usr/bin/find /var/log -maxdepth 1 -type f -printf *, /usr/bin/tail -n 4000 /var/log/*, /usr/bin/journalctl -u * --since * -n 5000 --no-pager -o short-iso, /usr/bin/systemctl list-units --type=service --all --no-pager --no-legend --plain, /usr/bin/docker logs --since * --timestamps --tail 5000 *, /usr/bin/docker service logs --since * --timestamps --tail 5000 *
+    ```
+
+    Without these the report still runs, but affected sources are skipped and listed under
+    "collection errors" / "sources with no output" on the report page.
+
 3.  Save and exit the editor (`Ctrl+X`, then `Y`, then `Enter`).
 
 #### Step 5: Set Up the Systemd Service
@@ -598,6 +626,39 @@ The interface features a clean, modern design with:
 3. View detailed analysis in popup modal
 4. Automatic Discord alerts for detected issues
 
+#### Server Reports (Analyse All Logs)
+Reports answer "what happened on this server?" instead of "what does this file say?".
+
+1. Select a host in the sidebar, then click **Pull Logs**
+2. In the log-list toolbar click **Analyse All Logs** (only shown when an AI provider is configured)
+3. Choose a **time window** (default 2 hours) and which source types to include — log files,
+   journald units, Docker container logs, optionally stopped containers
+4. Optional: click **Check size & suggest** to size the run *without* calling the model. It
+   collects the logs, reports events/clusters/token estimates per depth level, and recommends a
+   depth and model. Pressing **Start analysis** afterwards reuses that collection
+5. Set **Report size / depth** — leave **Auto** on, or drag the slider from *Lite* to *Maximum*
+6. Press **Start analysis** and watch the stepper: *preparing → collecting → normalising →
+   correlating → asking the model → saving*
+7. The report opens at `/reports/<id>`; **Reports** in the toolbar lists history
+
+Choosing a depth:
+
+| Depth | Evidence tokens (db-11, 2h) | Use when |
+|---|---|---|
+| Lite | ~1.7k | quick "is anything on fire?" check |
+| Standard | ~4.2k | routine check |
+| Detailed | ~6.5k | suspected issue, want the timeline |
+| Deep | ~13.4k | investigating a specific incident |
+| Maximum | ~22.9k | post-incident write-up |
+
+A report contains a verdict (healthy / degraded / failing), incident timeline, ranked root-cause
+candidates, the correlation table, subsystem health, what was checked and found clean, ordered
+recommended actions, and two closing sections: an **Executive Summary** for non-specialists and
+**How to Resolve** with commands and verification steps.
+
+Reports state their own limits: if a source cap was hit, the evidence pack was trimmed, a source
+failed, or the model stopped before finishing a section, the report page says so.
+
 #### Scheduled Monitoring
 1. **Settings** → **Select Logs for Schedule...**
 2. **Cross-host selection**: Choose logs from multiple servers
@@ -652,6 +713,11 @@ The application provides detailed startup logs showing:
 - **Streaming**: Server-Sent Events (SSE) for real-time progress updates
 - **Concurrency**: ThreadPoolExecutor for parallel host operations
 - **Security**: SSH key-based authentication with minimal sudo permissions
+- **Blueprints** (modular bolt-ons registered in `app.py`):
+  - `monitoring/` – host monitors, checks and alerting
+  - `dockermon/` – Docker endpoint discovery, live stats, swarm view
+  - `serverreport/` – server-wide correlated reports:
+    `collect` → `normalize` → `correlate` → `pack` → `sizing` → `llm` → `routes`
 
 ### Frontend (Vanilla JavaScript)
 - **UI Framework**: Tailwind CSS for responsive design
@@ -665,8 +731,39 @@ The application provides detailed startup logs showing:
 3. **Search Processing**: Distributed grep operations with result aggregation
 4. **AI Analysis**: OpenAI API integration with Discord webhook notifications
 5. **Scheduling**: APScheduler for automated monitoring tasks
+6. **Server Reports**: per-host collection is bounded by a wall-clock window, lines are reduced
+   to signature clusters, clusters are correlated across sources (co-occurrence lift, bursts,
+   silence gaps, container state), the result is rendered as a compact evidence pack, sized
+   against the model's context, chunked if necessary, and stored as a `log_reports` row
+
+### Report Pipeline (detail)
+1. **Collect** (`serverreport/collect.py`) – one `find -printf` round trip for file discovery,
+   `journalctl --since`, `docker logs --since` / `service logs --since`, per-source timeouts,
+   source/byte/worker caps, one run per host at a time
+2. **Normalise** (`normalize.py`) – timestamp parsing (RFC3339, syslog with year rollover,
+   journal short-iso, bracketed), multi-line stack-trace joining, severity tiers, signature
+   clustering (volatile values replaced) which typically shrinks volume by 50-200x
+3. **Correlate** (`correlate.py`) – 10s buckets, lift vs an independence baseline, median lag,
+   median/MAD bursts, silence/early-stop gaps, container state
+4. **Pack** (`pack.py`) – plain-text evidence pack; `PACK_LIMITS` scales with depth, section
+   boundaries are the split points when chunking
+5. **Size** (`sizing.py`) – recommends depth, chunk count and model from the pack, with model
+   context awareness
+6. **Model** (`llm.py`) – fenced untrusted evidence, required sections, one call (or
+   map/reduce passes), verdict parsed
+7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v2.12.1 - Documentation for Server Reports
+- 📖 Usage walkthrough for **Analyse All Logs**: window/scope selection, size check, depth
+  guidance with real token costs per level, where reports live
+- ⚙️ Report tuning table: `report.default_model`, `report.window_minutes`, `report.depth` and the
+  `AILOG_REPORT_MAX_SOURCES` / `MAX_BYTES` / `MAX_TOKENS` environment variables
+- 🔗 Endpoint reference for `/serverreport/*`, `/reports*` and `/api/reports*`
+- 🔑 Sudoers entries the report collection needs (windowed `journalctl`, `tail -n 4000`,
+  `find -printf`, `systemctl list-units`, `docker logs --since`) plus what degrades without them
+- 🏗 Architecture notes: blueprint layout and the seven-stage report pipeline
 
 ### v2.12.0 - Report Sizing, Chunking and Closing Sections
 - 🧮 **`serverreport/sizing.py`** - measures the evidence pack and recommends a run profile
