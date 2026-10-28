@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% if report %}Report - {{ report.host_label }}{% else %}Report not found{% endif %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 5px; }
+    /* Markdown rendering (mirrors the AI modal styling) */
+    .ai-markdown h1, .ai-markdown h2, .ai-markdown h3 { color: #e2e8f0; font-weight: 600; margin: 1.1em 0 0.45em; }
+    .ai-markdown h2 { font-size: 1.05rem; padding-bottom: 0.3rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .ai-markdown h3 { font-size: 0.95rem; }
+    .ai-markdown p { margin: 0.55em 0; line-height: 1.65; color: #cbd5e1; }
+    .ai-markdown ul, .ai-markdown ol { margin: 0.55em 0 0.55em 1.25rem; color: #cbd5e1; }
+    .ai-markdown li { margin: 0.25em 0; line-height: 1.6; }
+    .ai-markdown ul { list-style: disc; }
+    .ai-markdown ol { list-style: decimal; }
+    .ai-markdown code { background: rgba(255,255,255,0.08); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; color: #a5b4fc; }
+    .ai-markdown pre { background: rgba(0,0,0,0.4); padding: 0.85rem; border-radius: 8px; overflow-x: auto; margin: 0.75em 0; }
+    .ai-markdown pre code { background: none; padding: 0; color: #cbd5e1; }
+    .ai-markdown strong { color: #f1f5f9; font-weight: 600; }
+    .ai-markdown blockquote { border-left: 3px solid rgba(129,140,248,0.5); padding-left: 0.85rem; color: #94a3b8; margin: 0.75em 0; }
+    .ai-markdown table { width: 100%; border-collapse: collapse; margin: 0.75em 0; font-size: 0.85rem; }
+    .ai-markdown th, .ai-markdown td { border: 1px solid rgba(255,255,255,0.08); padding: 0.4rem 0.6rem; text-align: left; }
+    .ai-markdown th { background: rgba(255,255,255,0.04); color: #e2e8f0; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="max-w-6xl mx-auto p-4 sm:p-6">
+
+    {% if not report %}
+      <div class="card rounded-lg p-8 text-center">
+        <h1 class="text-lg font-semibold">Report not found</h1>
+        <p class="text-slate-400 text-sm mt-2">Report #{{ report_id }} does not exist or was deleted.</p>
+        <a href="/reports" class="inline-block mt-4 bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">All reports</a>
+      </div>
+    {% else %}
+      {% set verdict = (report.verdict or 'unknown')|lower %}
+      {% set verdict_classes = {
+        'failing': 'border-rose-500/40 bg-rose-500/10 text-rose-200',
+        'degraded': 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+        'healthy': 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+      }.get(verdict, 'border-slate-500/40 bg-slate-500/10 text-slate-300') %}
+
+      <!-- header -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 class="text-xl font-semibold leading-tight">Server report &mdash; {{ report.host_label or report.host_key }}</h1>
+          <div class="text-xs text-slate-400 mt-1">
+            {{ report.window_minutes }} minute window &middot;
+            {{ report.sources_ok }}/{{ report.sources_total }} sources with data &middot;
+            {{ '{:,}'.format(report.events_total or 0) }} events &rarr; {{ report.clusters_total }} signatures &middot;
+            {{ report.provider }} / {{ report.model }}
+            {% if report.duration_ms %} &middot; {{ '%.1f'|format(report.duration_ms / 1000) }}s{% endif %}
+            {% if report.tokens_in %} &middot; ~{{ '{:,}'.format(report.tokens_in) }} tokens in{% endif %}
+            {% if report.tokens_out %} / {{ '{:,}'.format(report.tokens_out) }} out{% endif %}
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-discord" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-sm px-3 py-2 rounded-lg">Send to Discord</button>
+          <a href="/reports/{{ report.id }}/markdown" class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">Download .md</a>
+          <a href="/reports" class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">All reports</a>
+          <a href="/" class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">Back</a>
+        </div>
+      </div>
+
+      <!-- verdict + severity strip -->
+      <div class="mt-4 grid gap-3 sm:grid-cols-2">
+        <div class="rounded-lg border px-4 py-3 {{ verdict_classes }}">
+          <div class="text-xs uppercase tracking-wide opacity-70">Verdict</div>
+          <div class="text-lg font-semibold">{{ verdict|upper }}</div>
+        </div>
+        <div class="card rounded-lg px-4 py-3">
+          <div class="text-xs uppercase tracking-wide text-slate-400">Events in window</div>
+          {% set sev = report.severity() %}
+          <div class="flex flex-wrap gap-3 mt-1 text-sm">
+            <span class="text-rose-300">crit {{ sev.get('crit', 0) }}</span>
+            <span class="text-orange-300">error {{ sev.get('error', 0) }}</span>
+            <span class="text-amber-300">warn {{ sev.get('warn', 0) }}</span>
+            <span class="text-slate-400">info {{ sev.get('info', 0) }}</span>
+          </div>
+        </div>
+      </div>
+
+      {% set coverage = report.coverage() %}
+      {% if coverage.get('truncated') or coverage.get('pack_fitted') or report.sources_failed %}
+        <div class="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm px-4 py-3">
+          <strong>Partial view.</strong>
+          {% if report.sources_failed %}{{ report.sources_failed }} source(s) could not be read.{% endif %}
+          {% if coverage.get('sources_empty') %}{{ coverage.get('sources_empty') }} source(s) had no output in the window (not a fault).{% endif %}
+          {% if coverage.get('truncated') %} Source cap or byte budget was reached.{% endif %}
+          {% if coverage.get('pack_fitted') %} The evidence pack was trimmed to fit the model context.{% endif %}
+        </div>
+      {% endif %}
+
+      {% if coverage.get('missing_headings') %}
+        <div class="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm px-4 py-3">
+          <strong>Incomplete report.</strong>
+          The model stopped before finishing these sections:
+          {{ coverage.get('missing_headings')|join(', ') }}.
+          This usually means it hit its output limit &mdash; try a model with a larger context.
+        </div>
+      {% endif %}
+
+      {% if report.error %}
+        <div class="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-200 text-sm px-4 py-3">
+          <strong>Run failed:</strong> {{ report.error }}
+        </div>
+      {% endif %}
+
+      <!-- main report -->
+      <div class="card rounded-lg p-5 mt-4">
+        <div id="report-body" class="ai-markdown text-sm"></div>
+      </div>
+
+      <!-- correlations -->
+      {% set correlations = report.correlations() %}
+      {% if correlations %}
+        <div class="card rounded-lg p-5 mt-4">
+          <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Cross-source correlations</h2>
+          <p class="text-xs text-slate-500 mt-1">Co-occurrence within a 10 second bucket, ranked by lift over chance. Correlation is not causation.</p>
+          <div class="overflow-x-auto mt-3">
+            <table class="w-full text-xs">
+              <thead class="text-slate-400">
+                <tr class="border-b border-white/10">
+                  <th class="text-left py-2 pr-3">Lift</th>
+                  <th class="text-left py-2 pr-3">Hits</th>
+                  <th class="text-left py-2 pr-3">Lag</th>
+                  <th class="text-left py-2 pr-3">Source A</th>
+                  <th class="text-left py-2">Source B</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for c in correlations %}
+                  <tr class="border-b border-white/5">
+                    <td class="py-2 pr-3 text-indigo-300 font-medium">{{ c.lift }}x</td>
+                    <td class="py-2 pr-3 text-slate-400">{{ c.coincidences }}</td>
+                    <td class="py-2 pr-3 text-slate-400">{% if c.lag_seconds is not none %}{{ c.lag_seconds }}s{% else %}n/a{% endif %}</td>
+                    <td class="py-2 pr-3"><span class="text-slate-500">{{ c.a.label }}:</span> <span class="text-slate-300">{{ c.a.sig }}</span></td>
+                    <td class="py-2"><span class="text-slate-500">{{ c.b.label }}:</span> <span class="text-slate-300">{{ c.b.sig }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- timeline -->
+      {% set timeline = report.timeline() %}
+      {% if timeline %}
+        <div class="card rounded-lg p-5 mt-4">
+          <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Incident timeline</h2>
+          <ul class="mt-3 space-y-1.5 text-xs">
+            {% for item in timeline %}
+              {% set sev_color = 'text-slate-400' %}
+              {% if item.sev >= 4 %}{% set sev_color = 'text-rose-300' %}{% elif item.sev == 3 %}{% set sev_color = 'text-orange-300' %}{% elif item.sev == 2 %}{% set sev_color = 'text-amber-300' %}{% endif %}
+              <li class="flex gap-3">
+                <span class="text-slate-500 shrink-0 w-44">{{ item.ts }}</span>
+                <span class="{{ sev_color }} shrink-0 w-20">{{ item.label|truncate(18, true) }}</span>
+                <span class="text-slate-300">{{ item.sig }}</span>
+                <span class="text-slate-500 shrink-0">&times;{{ item.count }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      <!-- gaps + containers -->
+      <div class="grid gap-4 sm:grid-cols-2 mt-4">
+        {% if coverage.get('gaps') %}
+          <div class="card rounded-lg p-5">
+            <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Silence / gaps</h2>
+            <ul class="mt-3 space-y-1.5 text-xs text-slate-300">
+              {% for g in coverage.get('gaps') %}
+                <li>
+                  <span class="text-slate-500">{{ g.src }}</span>
+                  {% if g.kind == 'stopped_early' %}
+                    stopped logging {{ (g.seconds // 60)|int }}m before the window ended
+                  {% else %}
+                    silent for {{ g.seconds|int }}s
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+
+        {% set containers = report.containers() %}
+        {% if containers %}
+          <div class="card rounded-lg p-5">
+            <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Containers</h2>
+            <ul class="mt-3 space-y-1.5 text-xs">
+              {% for c in containers %}
+                <li class="flex items-center gap-2">
+                  <span class="text-slate-300">{{ c.name }}</span>
+                  <span class="text-slate-500">{{ c.image }}</span>
+                  <span class="text-slate-400">{{ c.status }}</span>
+                  {% if c.restarts %}<span class="text-amber-300">restarts {{ c.restarts }}</span>{% endif %}
+                  {% if c.oom_killed %}<span class="text-rose-300">OOMKilled</span>{% endif %}
+                  {% if c.exit_code and c.status != 'running' %}<span class="text-orange-300">exit {{ c.exit_code }}</span>{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- source coverage -->
+      {% set stats = coverage.get('source_stats') %}
+      {% if stats %}
+        <div class="card rounded-lg p-5 mt-4">
+          <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Source coverage</h2>
+          <div class="mt-3 grid gap-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
+            {% for s in stats %}
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-slate-400 truncate" title="{{ s.label }}">{{ s.label|truncate(30, true) }}</span>
+                {% if s.error %}
+                  <span class="text-rose-300 shrink-0" title="{{ s.error }}">failed</span>
+                {% else %}
+                  <span class="text-slate-500 shrink-0">{{ s.kept }} events</span>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="text-xs text-slate-500 mt-6">
+        Generated {{ report.created_at }} UTC &middot; report #{{ report.id }}
+      </div>
+    {% endif %}
+  </div>
+
+  <script>
+    // The report is model output: render through DOMPurify, never innerHTML.
+    (function () {
+      const el = document.getElementById('report-body');
+      if (!el) return;
+      const raw = {{ (report.report_markdown if report else '')|tojson }};
+      const fallback = () => {
+        el.innerHTML = '<pre class="whitespace-pre-wrap text-sm"></pre>';
+        el.querySelector('pre').textContent = raw || 'No report content.';
+      };
+      if (!window.marked || !window.DOMPurify) { fallback(); return; }
+      try {
+        const html = window.marked.parse(raw, { gfm: true, breaks: true });
+        el.innerHTML = window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+      } catch (e) { fallback(); }
+    })();
+
+    (function () {
+      const btn = document.getElementById('btn-discord');
+      if (!btn) return;
+      const reportId = {{ (report.id if report else 0)|tojson }};
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = 'Sending...';
+        try {
+          const res = await fetch('/reports/' + reportId + '/discord', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          const data = await res.json().catch(() => ({}));
+          btn.textContent = res.ok ? 'Sent' : (data.error || 'Failed');
+        } catch (e) {
+          btn.textContent = 'Failed';
+        } finally {
+          setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2500);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

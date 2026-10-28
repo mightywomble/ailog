@@ -945,6 +945,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div id="logs-top-header" class="flex justify-between items-center mb-4">
                     <h2 id="log-table-title" class="text-lg font-semibold termix-text">Select a host to view logs</h2>
                     <div class="flex items-center space-x-2">
+                        <button id="analyse-all-logs-btn" type="button"
+                                class="hidden bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                                title="Correlate every log source on this host into one server report">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                            </svg>
+                            <span>Analyse All Logs</span>
+                        </button>
+                        <a id="logs-action-reports" href="/reports" target="_blank" rel="noopener"
+                           class="text-xs termix-muted hover:text-white px-2 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                           title="View previous server reports">Reports</a>
                         <label class="flex items-center text-sm termix-muted" title="Show only Docker container logs">
                             <input type="checkbox" id="docker-only-logs" class="mr-2">
                             Docker logs only
@@ -1189,6 +1200,77 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button id="close-ai-modal-btn" class="termix-muted hover:text-gray-200 text-2xl leading-none">&times;</button>
             </div>
             <div id="ai-analysis-content" class="overflow-auto termix-muted" style="max-height: 70vh"></div>
+        </div>
+    </div>
+
+    <!-- Server-wide report: analyse every log source on a host together -->
+    <div id="server-report-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="glass-container w-full max-w-2xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h2 class="text-xl font-semibold text-gray-200">Analyse All Logs</h2>
+                    <p id="server-report-subtitle" class="text-xs termix-muted mt-1">Build one correlated report for this server.</p>
+                </div>
+                <button id="close-server-report-btn" class="termix-muted hover:text-gray-200 text-2xl leading-none">&times;</button>
+            </div>
+
+            <div id="server-report-form">
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                    <label class="flex flex-col gap-1">
+                        <span class="termix-muted text-xs">Time window</span>
+                        <select id="server-report-window" class="bg-gray-800 border border-white/10 rounded-lg px-3 py-2 text-gray-200">
+                            <option value="15">Last 15 minutes</option>
+                            <option value="30">Last 30 minutes</option>
+                            <option value="60">Last hour</option>
+                            <option value="120" selected>Last 2 hours</option>
+                            <option value="360">Last 6 hours</option>
+                            <option value="1440">Last 24 hours</option>
+                        </select>
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="termix-muted text-xs">Model</span>
+                        <input id="server-report-model" type="text" placeholder="gpt-3.5-turbo"
+                               class="bg-gray-800 border border-white/10 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs">
+                    </label>
+                </div>
+
+                <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+                    <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-files" class="mr-2" checked> Log files</label>
+                    <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-journal" class="mr-2" checked> Journald units</label>
+                    <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-docker" class="mr-2" checked> Docker container logs</label>
+                    <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-stopped" class="mr-2"> Include stopped containers</label>
+                </div>
+
+                <div id="server-report-estimate" class="mt-3 text-xs termix-muted"></div>
+                <div id="server-report-error" class="hidden mt-3 text-xs text-red-400"></div>
+
+                <div class="mt-4 flex justify-end gap-2">
+                    <button id="server-report-cancel" type="button" class="bg-white/10 hover:bg-white/20 text-sm px-4 py-2 rounded-lg text-gray-200">Cancel</button>
+                    <button id="server-report-start" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-sm px-4 py-2 rounded-lg text-white font-medium">Start analysis</button>
+                </div>
+            </div>
+
+            <div id="server-report-progress" class="hidden">
+                <div class="flex items-center gap-3 mb-3">
+                    <span class="top-progress-spinner" aria-hidden="true"></span>
+                    <span id="server-report-progress-message" class="text-sm termix-text">Starting...</span>
+                    <span id="server-report-progress-elapsed" class="text-xs termix-muted ml-auto">0s</span>
+                </div>
+                <div class="w-full bg-white/10 rounded-full h-1.5 overflow-hidden mb-4">
+                    <div id="server-report-progress-bar" class="bg-indigo-500 h-1.5 rounded-full transition-all duration-500" style="width: 6%"></div>
+                </div>
+                <ul id="server-report-steps" class="space-y-1.5 text-xs termix-muted"></ul>
+                <div id="server-report-log" class="mt-3 h-28 overflow-auto text-xs termix-muted bg-black/30 rounded-lg p-2 font-mono"></div>
+            </div>
+
+            <div id="server-report-result" class="hidden">
+                <div id="server-report-result-summary" class="text-sm termix-text"></div>
+                <div class="mt-4 flex justify-end gap-2">
+                    <button id="server-report-close-2" type="button" class="bg-white/10 hover:bg-white/20 text-sm px-4 py-2 rounded-lg text-gray-200">Close</button>
+                    <a id="server-report-open" href="#" target="_blank" rel="noopener"
+                       class="bg-indigo-600 hover:bg-indigo-500 text-sm px-4 py-2 rounded-lg text-white font-medium">Open report</a>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2300,6 +2382,262 @@ document.addEventListener('DOMContentLoaded', () => {
             window.location.href = '/docker/' + encodeURIComponent(selectedHostId);
         });
 
+        // --- SERVER-WIDE CORRELATED REPORT -----------------------------------
+        // Runs one analysis over *every* log source on the host and writes a
+        // server report (see /reports). Stages come from the SSE pipeline.
+        const REPORT_STAGES = ['prepare', 'collect', 'normalise', 'correlate', 'summarise', 'report'];
+        const REPORT_STAGE_LABELS = {
+            prepare: 'Preparing scope',
+            collect: 'Collecting logs',
+            normalise: 'Normalising events',
+            correlate: 'Correlating sources',
+            summarise: 'Asking the model',
+            report: 'Saving report'
+        };
+
+        const analyseAllLogsBtn = document.getElementById('analyse-all-logs-btn');
+        const serverReportModal = document.getElementById('server-report-modal');
+        const serverReportForm = document.getElementById('server-report-form');
+        const serverReportProgress = document.getElementById('server-report-progress');
+        const serverReportResult = document.getElementById('server-report-result');
+        const serverReportLog = document.getElementById('server-report-log');
+        const serverReportError = document.getElementById('server-report-error');
+        const serverReportStart = document.getElementById('server-report-start');
+        const serverReportSubtitle = document.getElementById('server-report-subtitle');
+        const serverReportEstimate = document.getElementById('server-report-estimate');
+        const serverReportSteps = document.getElementById('server-report-steps');
+        const serverReportOpen = document.getElementById('server-report-open');
+        let serverReportDefaults = null;
+        let serverReportRunning = false;
+
+        const refreshAnalyseAllLogsButton = async (hostId) => {
+            if (!analyseAllLogsBtn) return;
+            analyseAllLogsBtn.classList.add('hidden');
+            if (!hostId) return;
+            try {
+                const cfg = await window.fetchApi('/ai/config');
+                if (selectedHostId !== hostId) return;
+                if (cfg && cfg.provider) analyseAllLogsBtn.classList.remove('hidden');
+            } catch (err) {
+                // No AI provider configured: button stays hidden.
+            }
+        };
+
+        const loadServerReportDefaults = async () => {
+            if (serverReportDefaults) return serverReportDefaults;
+            try {
+                const res = await fetch('/api/serverreport/defaults');
+                serverReportDefaults = await res.json();
+            } catch (err) {
+                serverReportDefaults = { window_minutes: 120, model: 'gpt-3.5-turbo', provider_configured: false };
+            }
+            const windowEl = document.getElementById('server-report-window');
+            const modelEl = document.getElementById('server-report-model');
+            if (windowEl && serverReportDefaults.window_minutes) {
+                windowEl.value = String(serverReportDefaults.window_minutes);
+            }
+            if (modelEl) {
+                // Empty means "use the provider's configured model" - pre-filling
+                // another provider's model name would 404 at the API.
+                modelEl.value = serverReportDefaults.model || '';
+                modelEl.placeholder = serverReportDefaults.model
+                    ? serverReportDefaults.model
+                    : `${serverReportDefaults.provider_label || 'provider'} default model`;
+            }
+            if (serverReportEstimate && serverReportDefaults.provider_configured === false) {
+                serverReportEstimate.textContent = 'No AI provider is configured - set one up in Settings first.';
+                serverReportEstimate.classList.add('text-red-400');
+            } else if (serverReportEstimate) {
+                serverReportEstimate.textContent =
+                    `Up to ${serverReportDefaults.max_sources || 60} sources, ` +
+                    `~${((serverReportDefaults.max_tokens || 12000) / 1000).toFixed(0)}k token budget.`;
+            }
+            return serverReportDefaults;
+        };
+
+        const renderServerReportSteps = () => {
+            if (!serverReportSteps) return;
+            serverReportSteps.innerHTML = REPORT_STAGES.map((stage) => `
+                <li data-report-step="${stage}" class="ai-step">
+                    <span class="ai-step-icon">\u25cb</span><span>${REPORT_STAGE_LABELS[stage]}</span>
+                </li>`).join('');
+        };
+
+        const setServerReportStage = (stage, message, elapsed, extra) => {
+            const msgEl = document.getElementById('server-report-progress-message');
+            const clockEl = document.getElementById('server-report-progress-elapsed');
+            const barEl = document.getElementById('server-report-progress-bar');
+            const secs = Math.max(0, Math.round(Number(elapsed) || 0));
+            if (msgEl && message) msgEl.textContent = message;
+            if (clockEl) clockEl.textContent = `${secs}s`;
+
+            const idx = REPORT_STAGES.indexOf(stage);
+            serverReportSteps?.querySelectorAll('[data-report-step]').forEach((li) => {
+                const i = REPORT_STAGES.indexOf(li.dataset.reportStep);
+                const done = idx >= 0 && i < idx;
+                const active = i === idx;
+                li.classList.toggle('ai-step-done', done);
+                li.classList.toggle('ai-step-active', active);
+                const icon = li.querySelector('.ai-step-icon');
+                if (icon) icon.textContent = done ? '\u2713' : (active ? '\u25cf' : '\u25cb');
+            });
+
+            if (barEl) {
+                let pct = 8;
+                if (stage === 'prepare') pct = 12;
+                else if (stage === 'collect') {
+                    const done = Number(extra?.sources_done) || 0;
+                    const total = Number(extra?.sources_total) || 0;
+                    pct = total ? 15 + Math.round((done / total) * 35) : 22;
+                } else if (stage === 'normalise') pct = 55;
+                else if (stage === 'correlate') pct = 65;
+                else if (stage === 'summarise') pct = Math.min(92, 72 + secs * 0.5);
+                else if (stage === 'report') pct = 96;
+                barEl.style.width = pct + '%';
+            }
+        };
+
+        const appendServerReportLog = (text) => {
+            if (!serverReportLog || !text) return;
+            const line = document.createElement('div');
+            line.textContent = text;
+            serverReportLog.appendChild(line);
+            while (serverReportLog.childElementCount > 200) {
+                serverReportLog.removeChild(serverReportLog.firstChild);
+            }
+            serverReportLog.scrollTop = serverReportLog.scrollHeight;
+        };
+
+        const resetServerReportModal = () => {
+            serverReportError?.classList.add('hidden');
+            if (serverReportError) serverReportError.textContent = '';
+            if (serverReportLog) serverReportLog.innerHTML = '';
+            serverReportProgress?.classList.add('hidden');
+            serverReportResult?.classList.add('hidden');
+            serverReportForm?.classList.remove('hidden');
+            renderServerReportSteps();
+            serverReportRunning = false;
+            if (serverReportStart) {
+                serverReportStart.disabled = false;
+                serverReportStart.textContent = 'Start analysis';
+            }
+        };
+
+        const openServerReportModal = async () => {
+            if (!serverReportModal || !selectedHostId) return;
+            resetServerReportModal();
+            const hostName = hosts[selectedHostId]?.friendly_name || selectedHostId;
+            if (serverReportSubtitle) {
+                serverReportSubtitle.textContent =
+                    `Correlate every log source on ${hostName} into one report.`;
+            }
+            serverReportModal.classList.remove('hidden');
+            await loadServerReportDefaults();
+        };
+
+        if (analyseAllLogsBtn) {
+            analyseAllLogsBtn.addEventListener('click', () => { openServerReportModal(); });
+        }
+        document.getElementById('close-server-report-btn')?.addEventListener('click', () => {
+            if (serverReportRunning) return;  // don't orphan a running pipeline view
+            serverReportModal?.classList.add('hidden');
+        });
+        document.getElementById('server-report-cancel')?.addEventListener('click', () => {
+            serverReportModal?.classList.add('hidden');
+        });
+        document.getElementById('server-report-close-2')?.addEventListener('click', () => {
+            serverReportModal?.classList.add('hidden');
+        });
+
+        if (serverReportStart) {
+            serverReportStart.addEventListener('click', async () => {
+                if (!selectedHostId || serverReportRunning) return;
+                serverReportRunning = true;
+                serverReportStart.disabled = true;
+                serverReportStart.textContent = 'Analysing...';
+                serverReportError?.classList.add('hidden');
+
+                const requestBody = {
+                    host_key: selectedHostId,
+                    window_minutes: Number(document.getElementById('server-report-window')?.value) || 120,
+                    model: (document.getElementById('server-report-model')?.value || '').trim() || undefined,
+                    include_files: !!document.getElementById('server-report-files')?.checked,
+                    include_journal: !!document.getElementById('server-report-journal')?.checked,
+                    include_docker: !!document.getElementById('server-report-docker')?.checked,
+                    include_stopped: !!document.getElementById('server-report-stopped')?.checked
+                };
+
+                if (!requestBody.include_files && !requestBody.include_journal && !requestBody.include_docker) {
+                    serverReportError.textContent = 'Select at least one log source type.';
+                    serverReportError.classList.remove('hidden');
+                    serverReportRunning = false;
+                    serverReportStart.disabled = false;
+                    serverReportStart.textContent = 'Start analysis';
+                    return;
+                }
+
+                serverReportForm.classList.add('hidden');
+                serverReportResult?.classList.add('hidden');
+                serverReportProgress.classList.remove('hidden');
+                appendServerReportLog('Starting...');
+                setServerReportStage('prepare', 'Preparing...', 0);
+
+                try {
+                    await streamJsonEvents('/serverreport/stream', requestBody, (evt) => {
+                        if (!evt || !evt.type) return;
+                        if (evt.type === 'stage') {
+                            setServerReportStage(evt.stage, evt.message, evt.elapsed, evt);
+                            if (evt.message) appendServerReportLog(evt.message);
+                            return;
+                        }
+                        if (evt.type === 'error') {
+                            serverReportRunning = false;
+                            serverReportProgress.classList.add('hidden');
+                            serverReportForm.classList.remove('hidden');
+                            serverReportStart.disabled = false;
+                            serverReportStart.textContent = 'Start analysis';
+                            serverReportError.textContent = evt.message || 'The analysis failed.';
+                            serverReportError.classList.remove('hidden');
+                            return;
+                        }
+                        if (evt.type === 'result') {
+                            serverReportRunning = false;
+                            serverReportProgress.classList.add('hidden');
+                            serverReportResult.classList.remove('hidden');
+                            serverReportStart.disabled = false;
+                            serverReportStart.textContent = 'Start analysis';
+                            const verdict = String(evt.verdict || 'unknown').toUpperCase();
+                            const summary = document.getElementById('server-report-result-summary');
+                            if (summary) {
+                                summary.innerHTML = `
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs px-2 py-0.5 rounded border border-white/15 bg-white/10">${escapeHtml(verdict)}</span>
+                                        <span class="termix-muted text-xs">report #${escapeHtml(String(evt.report_id))}</span>
+                                    </div>
+                                    <div class="mt-2 termix-muted text-xs">
+                                        ${escapeHtml(String(evt.sources_ok))}/${escapeHtml(String(evt.sources_ok + evt.sources_failed))} sources with data &middot;
+                                        ${escapeHtml(evt.provider || '')}/${escapeHtml(evt.model || '')} &middot;
+                                        ${Number(evt.duration_ms || 0) / 1000}s
+                                        ${evt.tokens_in ? ' &middot; ~' + escapeHtml(String(evt.tokens_in)) + ' tokens in' : ''}
+                                    </div>`;
+                            }
+                            if (serverReportOpen && evt.url) serverReportOpen.href = evt.url;
+                        }
+                    });
+                } catch (err) {
+                    serverReportRunning = false;
+                    serverReportProgress.classList.add('hidden');
+                    serverReportForm.classList.remove('hidden');
+                    serverReportStart.disabled = false;
+                    serverReportStart.textContent = 'Start analysis';
+                    serverReportError.textContent = err.message || 'The analysis failed.';
+                    serverReportError.classList.remove('hidden');
+                }
+            });
+        }
+
+        window.refreshAnalyseAllLogsButton = refreshAnalyseAllLogsButton;
+
         // Cluster-wide "Scan Docker" action: probes every configured host for a
         // Docker API endpoint, then refreshes the per-host button gating.
         const dockerScanBtn = document.getElementById('docker-scan-btn');
@@ -3343,6 +3681,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Show the Docker button only when this host has a reachable endpoint
             refreshDockerButton(hostId);
+            // "Analyse All Logs" needs a configured AI provider (window lookup
+            // avoids a temporal-dead-zone hit if this runs before the block below).
+            if (window.refreshAnalyseAllLogsButton) window.refreshAnalyseAllLogsButton(hostId);
 
             // Default view: show host info in the main panel
             showHostInfoMain();

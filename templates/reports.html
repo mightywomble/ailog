@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Server reports</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .row-hover:hover { background: rgba(255,255,255,0.04); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 5px; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="max-w-6xl mx-auto p-4 sm:p-6">
+
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-xl font-semibold leading-tight">Server reports</h1>
+        <div class="text-xs text-slate-400 mt-1">
+          Correlated reports across every log source on a host. Most recent {{ reports|length }}.
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        {% if host_filter %}
+          <a href="/reports" class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">Clear filter</a>
+        {% endif %}
+        <a href="/" class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">Back</a>
+      </div>
+    </div>
+
+    {% if not reports %}
+      <div class="card rounded-lg p-8 text-center mt-5">
+        <p class="text-slate-300">No reports yet.</p>
+        <p class="text-slate-500 text-sm mt-2">
+          Pick a host, choose <strong>Pull Logs</strong>, then <strong>Analyse All Logs</strong> in the log list toolbar.
+        </p>
+      </div>
+    {% else %}
+      <div class="card rounded-lg mt-5 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-xs uppercase tracking-wide text-slate-400">
+              <tr class="border-b border-white/10">
+                <th class="text-left px-4 py-3">When</th>
+                <th class="text-left px-4 py-3">Host</th>
+                <th class="text-left px-4 py-3">Verdict</th>
+                <th class="text-left px-4 py-3">Window</th>
+                <th class="text-left px-4 py-3">Sources</th>
+                <th class="text-left px-4 py-3">Events</th>
+                <th class="text-left px-4 py-3">Model</th>
+                <th class="text-right px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in reports %}
+                {% set verdict = (r.verdict or 'unknown')|lower %}
+                {% set badge = {
+                  'failing': 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+                  'degraded': 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+                  'healthy': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                }.get(verdict, 'bg-slate-500/15 text-slate-300 border-slate-500/30') %}
+                <tr class="border-b border-white/5 row-hover">
+                  <td class="px-4 py-3 text-slate-400 whitespace-nowrap">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }}</td>
+                  <td class="px-4 py-3">
+                    <a class="text-indigo-300 hover:text-indigo-200" href="/reports/{{ r.id }}">{{ r.host_label or r.host_key }}</a>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span class="text-xs px-2 py-0.5 rounded border {{ badge }}">{{ verdict|upper }}</span>
+                  </td>
+                  <td class="px-4 py-3 text-slate-400 whitespace-nowrap">{{ r.window_minutes }}m</td>
+                  <td class="px-4 py-3 text-slate-400 whitespace-nowrap">
+                    {{ r.sources_ok }}/{{ r.sources_total }}
+                    {% if r.sources_failed %}<span class="text-amber-400">({{ r.sources_failed }} failed)</span>{% endif %}
+                  </td>
+                  <td class="px-4 py-3 text-slate-400 whitespace-nowrap">{{ '{:,}'.format(r.events_total or 0) }}</td>
+                  <td class="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{{ r.model or '' }}</td>
+                  <td class="px-4 py-3 text-right whitespace-nowrap">
+                    <a href="/reports/{{ r.id }}" class="text-indigo-300 hover:text-indigo-200 text-xs mr-3">View</a>
+                    <button type="button" data-report-id="{{ r.id }}"
+                            class="delete-report text-slate-500 hover:text-rose-300 text-xs">Delete</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <script>
+    document.querySelectorAll('.delete-report').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.reportId;
+        if (!confirm('Delete report #' + id + '?')) return;
+        btn.disabled = true;
+        try {
+          const res = await fetch('/api/reports/' + id, { method: 'DELETE' });
+          if (res.ok) {
+            btn.closest('tr').remove();
+          } else {
+            btn.textContent = 'Failed';
+            btn.disabled = false;
+          }
+        } catch (e) {
+          btn.textContent = 'Failed';
+          btn.disabled = false;
+        }
+      });
+    });
+  </script>
+</body>
+</html>
