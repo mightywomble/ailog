@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Log Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Markdown rendering for AI output (sanitised with DOMPurify) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <link rel="stylesheet" href="/static/lib/xterm/xterm.css">
     <script src="/static/lib/xterm/xterm.js"></script>
     <script src="/static/lib/xterm/xterm-addon-fit.js"></script>
@@ -662,6 +665,47 @@ document.addEventListener('DOMContentLoaded', () => {
     #top-progress-bar.progress-indeterminate { animation: none; width: 100% !important; opacity: 0.5; }
     .top-progress-spinner { animation: none; }
 }
+
+/* AI analysis modal: staged progress */
+.ai-step { display: flex; align-items: center; gap: 0.5rem; transition: color .2s ease; }
+.ai-step-icon { width: 1rem; text-align: center; }
+.ai-step-active { color: #a5b4fc; }
+.ai-step-done { color: #34d399; }
+
+/* AI analysis modal: markdown output */
+.ai-markdown { color: #e5e7eb; font-size: 0.9rem; line-height: 1.65; }
+.ai-markdown > *:first-child { margin-top: 0; }
+.ai-markdown > *:last-child { margin-bottom: 0; }
+.ai-markdown h1, .ai-markdown h2, .ai-markdown h3, .ai-markdown h4 {
+    color: #fff; font-weight: 600; line-height: 1.3; margin: 1.1em 0 0.5em;
+}
+.ai-markdown h1 { font-size: 1.3rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.3em; }
+.ai-markdown h2 { font-size: 1.15rem; }
+.ai-markdown h3 { font-size: 1rem; }
+.ai-markdown p { margin: 0.6em 0; }
+.ai-markdown ul, .ai-markdown ol { margin: 0.6em 0 0.6em 1.25rem; }
+.ai-markdown ul { list-style: disc; }
+.ai-markdown ol { list-style: decimal; }
+.ai-markdown li { margin: 0.25em 0; }
+.ai-markdown code {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.82em;
+    background: rgba(255,255,255,0.08); padding: 0.12em 0.35em; border-radius: 4px;
+}
+.ai-markdown pre {
+    background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 0.75rem 0.9rem; overflow-x: auto; margin: 0.8em 0;
+}
+.ai-markdown pre code { background: transparent; padding: 0; font-size: 0.8rem; }
+.ai-markdown blockquote {
+    border-left: 3px solid rgba(99,102,241,0.7); padding-left: 0.8rem;
+    color: #cbd5e1; margin: 0.8em 0;
+}
+.ai-markdown a { color: #93c5fd; text-decoration: underline; }
+.ai-markdown table { border-collapse: collapse; width: 100%; margin: 0.8em 0; font-size: 0.82rem; }
+.ai-markdown th, .ai-markdown td { border: 1px solid rgba(255,255,255,0.12); padding: 0.35rem 0.55rem; text-align: left; }
+.ai-markdown th { background: rgba(255,255,255,0.05); }
+.ai-markdown hr { border: 0; border-top: 1px solid rgba(255,255,255,0.12); margin: 1em 0; }
+.ai-markdown strong { color: #fff; }
 </style>
 </head>
 <body class="termix-text font-sans antialiased min-h-screen">
@@ -1798,6 +1842,136 @@ document.addEventListener('DOMContentLoaded', () => {
             /[&<>"']/g,
             (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
         );
+
+        // ---- AI output rendering -------------------------------------------------
+        // Markdown -> sanitised HTML. AI responses are influenced by log content,
+        // so never trust the model output as HTML.
+        const renderMarkdownInto = (el, text) => {
+            if (!el) return;
+            const src = String(text == null ? '' : text);
+            let html = null;
+            if (window.marked && window.DOMPurify) {
+                try {
+                    const parsed = window.marked.parse(src, { gfm: true, breaks: true });
+                    html = window.DOMPurify.sanitize(parsed, { USE_PROFILES: { html: true } });
+                } catch (_) {
+                    html = null;
+                }
+            }
+            if (html === null) {
+                // Fallback: plain text, still safe.
+                el.innerHTML = '<pre class="whitespace-pre-wrap text-sm"></pre>';
+                el.querySelector('pre').textContent = src || 'No content.';
+                return;
+            }
+            el.innerHTML = '<div class="ai-markdown">' + html + '</div>';
+        };
+
+        // ---- AI analysis staged progress -----------------------------------------
+        const AI_STAGE_ORDER = ['prepare', 'contact', 'waiting', 'format'];
+        const AI_STAGE_LABELS = {
+            prepare: 'Preparing log excerpt',
+            contact: 'Contacting AI provider',
+            waiting: 'Analysing logs',
+            format: 'Formatting result'
+        };
+
+        const renderAiAnalysisProgress = (container, providerLabel) => {
+            if (!container) return;
+            container.innerHTML = `
+                <div class="flex items-center gap-3 mb-3">
+                    <span class="top-progress-spinner" aria-hidden="true"></span>
+                    <span id="ai-progress-message" class="text-sm termix-text">Contacting ${escapeHtml(providerLabel || 'AI assistant')}...</span>
+                    <span id="ai-progress-elapsed" class="text-xs termix-muted ml-auto">0s</span>
+                </div>
+                <div class="w-full bg-white/10 rounded-full h-1.5 overflow-hidden mb-4">
+                    <div id="ai-progress-bar" class="bg-indigo-500 h-1.5 rounded-full transition-all duration-500" style="width: 6%"></div>
+                </div>
+                <ul class="space-y-1.5 text-xs termix-muted">
+                    ${AI_STAGE_ORDER.map((stage) => `
+                        <li data-ai-step="${stage}" class="ai-step">
+                            <span class="ai-step-icon">\u25cb</span><span>${AI_STAGE_LABELS[stage]}</span>
+                        </li>`).join('')}
+                </ul>`;
+        };
+
+        const setAiAnalysisStage = (stage, message, elapsed) => {
+            const msg = document.getElementById('ai-progress-message');
+            const bar = document.getElementById('ai-progress-bar');
+            const clock = document.getElementById('ai-progress-elapsed');
+            const secs = Math.max(0, Math.round(Number(elapsed) || 0));
+            if (msg && message) msg.textContent = message;
+            if (clock) clock.textContent = `${secs}s`;
+
+            const idx = AI_STAGE_ORDER.indexOf(stage);
+            document.querySelectorAll('#ai-analysis-content [data-ai-step]').forEach((li) => {
+                const i = AI_STAGE_ORDER.indexOf(li.dataset.aiStep);
+                const done = idx >= 0 && i < idx;
+                const active = i === idx;
+                li.classList.toggle('ai-step-done', done);
+                li.classList.toggle('ai-step-active', active);
+                const icon = li.querySelector('.ai-step-icon');
+                if (icon) icon.textContent = done ? '\u2713' : (active ? '\u25cf' : '\u25cb');
+            });
+
+            if (bar) {
+                let pct = 10;
+                if (stage === 'prepare') pct = 18;
+                else if (stage === 'contact') pct = 38;
+                else if (stage === 'waiting') pct = Math.min(90, 55 + secs * 1.2);
+                else if (stage === 'format') pct = 95;
+                bar.style.width = pct + '%';
+            }
+        };
+
+        // Consume a `text/event-stream` response produced by a POST request.
+        const streamJsonEvents = async (url, body, onEvent) => {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) {
+                let msg = `Request failed (${res.status})`;
+                try {
+                    const data = await res.json();
+                    if (data && data.error) msg = data.error;
+                } catch (_) {}
+                throw new Error(msg);
+            }
+            if (!res.body || typeof res.body.getReader !== 'function') {
+                throw new Error('Streaming is not supported by this browser.');
+            }
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            for (;;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let sep;
+                while ((sep = buffer.indexOf('\n\n')) >= 0) {
+                    const chunk = buffer.slice(0, sep);
+                    buffer = buffer.slice(sep + 2);
+                    const payload = chunk.split('\n')
+                        .filter((line) => line.startsWith('data:'))
+                        .map((line) => line.slice(5).trim())
+                        .join('\n');
+                    if (!payload) continue;   // comment / keepalive
+                    try {
+                        onEvent(JSON.parse(payload));
+                    } catch (_) {
+                        // Ignore malformed frames rather than aborting the analysis.
+                    }
+                }
+            }
+        };
+
+        // Expose to the page-level scripts (Suricata raw analysis reuses these).
+        window.escapeHtml = escapeHtml;
+        window.renderMarkdownInto = renderMarkdownInto;
+        window.renderAiAnalysisProgress = renderAiAnalysisProgress;
+        window.setAiAnalysisStage = setAiAnalysisStage;
 
         const dashboardView = document.getElementById('dashboard-view');
         const logsView = document.getElementById('logs-view');
@@ -5444,6 +5618,13 @@ const showHostInfoMain = async () => {
             }
         });
 
+// Single close handler for the AI modal (previously re-attached per analysis)
+(() => {
+    const modal = document.getElementById('ai-analysis-modal');
+    const closeBtn = document.getElementById('close-ai-modal-btn');
+    if (modal && closeBtn) closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+})();
+
 aiAnalyseBtn.addEventListener('click', async () => {
             if (!currentLogContent) {
                 window.showToast('No log content to analyse.', 'error');
@@ -5467,12 +5648,13 @@ aiAnalyseBtn.addEventListener('click', async () => {
             aiAnalyseBtn.textContent = 'Analysing...';
             aiAnalyseBtn.disabled = true;
             
-            // Show analysis in modal
+            // Show staged progress in the modal
             const aiAnalysisModal = document.getElementById('ai-analysis-modal');
             const aiAnalysisContent = document.getElementById('ai-analysis-content');
-            const closeAiModalBtn = document.getElementById('close-ai-modal-btn');
-            
-            aiAnalysisContent.innerHTML = '<p>Contacting AI assistant...</p>';
+            const providerLabels = { openai: 'OpenAI', ollama: 'Ollama', openrouter: 'OpenRouter' };
+            const providerLabel = providerLabels[provider] || provider;
+
+            renderAiAnalysisProgress(aiAnalysisContent, providerLabel);
             aiAnalysisModal.classList.remove('hidden');
 
             try {
@@ -5487,22 +5669,36 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 if (provider === 'openai') {
                     requestBody.api_key = localStorage.getItem('openai_api_key');
                 }
-                
-                const data = await window.fetchApi('/analyse', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestBody)
-                });
-                
-                if (data.discord_sent) window.showToast('Issue detected! Alert sent to Discord.', 'info');
 
-                aiAnalysisContent.innerHTML = data.analysis.replace(/\n/g, '<br>');
-                
-                closeAiModalBtn.addEventListener('click', () => {
-                    aiAnalysisModal.classList.add('hidden');
+                let result = null;
+                let streamError = null;
+
+                await streamJsonEvents('/analyse/stream', requestBody, (evt) => {
+                    if (!evt || !evt.type) return;
+                    if (evt.type === 'stage') {
+                        setAiAnalysisStage(evt.stage, evt.message, evt.elapsed);
+                    } else if (evt.type === 'result') {
+                        result = evt;
+                    } else if (evt.type === 'error') {
+                        streamError = new Error(evt.message || 'Analysis failed.');
+                    }
                 });
-                
-                window.showToast(`Analysis complete using ${provider.toUpperCase()}`);
+
+                if (streamError) throw streamError;
+                if (!result) throw new Error('No analysis was returned by the server.');
+
+                if (result.discord_sent) window.showToast('Issue detected! Alert sent to Discord.', 'info');
+
+                renderMarkdownInto(aiAnalysisContent, result.analysis);
+                const metaBits = [];
+                if (result.provider) metaBits.push(String(result.provider).toUpperCase());
+                if (result.model) metaBits.push(result.model);
+                if (result.elapsed) metaBits.push(`${result.elapsed}s`);
+                if (metaBits.length) {
+                    aiAnalysisContent.insertAdjacentHTML('afterbegin',
+                        `<div class="text-[11px] termix-muted mb-3">Analysed with ${escapeHtml(metaBits.join(' \u00b7 '))}</div>`);
+                }
+                window.showToast(`Analysis complete using ${(result.provider || provider).toUpperCase()}`);
             } catch (error) {
                 aiAnalysisContent.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${escapeHtml(error.message)}</p>`;
             } finally {
@@ -7233,10 +7429,19 @@ async function analyseSuricataRaw2() {
     if (btn) { btn.textContent = 'Analysing...'; btn.disabled = true; }
     const modal = document.getElementById('ai-analysis-modal');
     const content = document.getElementById('ai-analysis-content');
-    const closeBtn = document.getElementById('close-ai-modal-btn');
-    content.innerHTML = '<p>Contacting AI assistant...</p>';
     modal.classList.remove('hidden');
     const fileEl = document.getElementById('suricata-raw-file2');
+    const providerLabel = ({ openai: 'OpenAI', ollama: 'Ollama', openrouter: 'OpenRouter' })[provider] || provider;
+    if (window.renderAiAnalysisProgress) window.renderAiAnalysisProgress(content, providerLabel);
+    if (window.setAiAnalysisStage) window.setAiAnalysisStage('prepare', 'Preparing Suricata data...', 0);
+
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+        if (window.setAiAnalysisStage) {
+            window.setAiAnalysisStage('waiting', 'Waiting for model response...', Math.round((Date.now() - startedAt) / 1000));
+        }
+    }, 1000);
+
     try {
         const body = {
             log_content: _suricataRawContent2,
@@ -7244,17 +7449,22 @@ async function analyseSuricataRaw2() {
             provider: provider
         };
         if (provider === 'openai') body.api_key = localStorage.getItem('openai_api_key');
+        if (window.setAiAnalysisStage) window.setAiAnalysisStage('contact', `Contacting ${providerLabel}...`, 0);
         const data = await window.fetchApi('/suricata/analyse', {
             method: 'POST',
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify(body)
         });
-        content.innerHTML = (data.analysis || '').replace(/\n/g, '<br>');
-        closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+        clearInterval(timer);
+        if (window.setAiAnalysisStage) window.setAiAnalysisStage('format', 'Formatting result...', Math.round((Date.now() - startedAt) / 1000));
+        if (window.renderMarkdownInto) window.renderMarkdownInto(content, data.analysis);
+        else content.textContent = data.analysis || '';
         window.showToast('Analysis complete using ' + provider.toUpperCase());
     } catch(e) {
-        content.innerHTML = '<p class="text-red-400"><strong>Failed:</strong><br>' + e.message + '</p>';
+        clearInterval(timer);
+        content.innerHTML = '<p class="text-red-400"><strong>Failed:</strong><br>' + (window.escapeHtml ? window.escapeHtml(e.message) : e.message) + '</p>';
     } finally {
+        clearInterval(timer);
         if (btn) { btn.textContent = 'AI Analyse'; btn.disabled = false; }
     }
 }

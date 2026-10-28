@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-28 | v2.10.1 | AI analysis UX: live staged progress in the modal (preparing → contacting → analysing with elapsed clock → formatting) streamed from the new `/analyse/stream` SSE endpoint; results rendered as sanitised Markdown (marked + DOMPurify) in the AI and Suricata analyse modals | ✅ Complete |
 | 2026-10-28 | v2.10.0 | Docker monitoring: host-wide Docker API discovery (unix socket over SSH / TCP 2375 / TLS 2376), standalone `/docker/<host_key>` page (live CPU/RAM/network charts, containers with size + image tag, swarm cluster/node drill-down); Pull Logs now lists per-container logs with a **Docker logs only** filter; faster connect feedback (proxy-safe SSE, indeterminate progress bar, elapsed clock); security hardening (log path traversal blocked, log output XSS-escaped, Docker SDK pinned) | ✅ Complete |
 | 2026-06-24 | v2.9.17 | Hosts sidebar: sort by IP/name + manual drag reorder with grab handle + clearer drop target highlight; Rescan reliability: DB hosts without explicit ssh_key_id now fall back to default SSH key (matches SSH terminal/log pulls) | ✅ Complete |
 | 2026-05-25 | v2.9.16 | AI provider persistence: load from database on page init (survives hard refresh/pod restart); OpenRouter + Ollama model search filtering (real-time substring match on model list) | ✅ Complete |
@@ -83,6 +84,8 @@ This application is designed for use on a trusted, internal development network 
 * **Provider Support:** OpenAI, Ollama, and OpenRouter
 * **AI Search Settings:** Configurable analysis prompt + alert keyword/phrase list (DB-backed) used by manual analysis, Run Now, and scheduled runs
 * **On-Demand Analysis:** Manual log analysis with provider-specific validation and status indicators
+* **Live analysis progress:** the modal shows real stages — *preparing log excerpt → contacting provider → analysing (with a seconds clock) → formatting result* — streamed over SSE from `POST /analyse/stream`, so long model calls never look frozen
+* **Markdown results:** analyses are rendered as formatted Markdown (headings, lists, tables, code blocks) and sanitised with DOMPurify, with a safe plain-text fallback if the renderer is unavailable
 * **Scheduled Monitoring (Multi-Schedule):** Create multiple schedules, each with its own hosts, logs, and interval
 * **Queued Execution:** Scheduled runs and Run Now requests are queued and execute serially (no skipping)
 * **Run Now with Live Progress:** Server-Sent Events (SSE) streaming progress + heartbeat while the model is working
@@ -645,6 +648,24 @@ The application provides detailed startup logs showing:
 5. **Scheduling**: APScheduler for automated monitoring tasks
 
 ## 📝 Recent Updates
+
+### v2.10.1 - AI Analysis Progress & Markdown Output
+- ⏱ **Staged progress in the AI modal** (replaces the static "Contacting AI assistant...")
+  - New `POST /analyse/stream` SSE endpoint: the blocking provider call runs in a worker
+    thread (with its own app context) while the response emits stage events and a
+    heartbeat every 2 s
+  - Stages: *Preparing log excerpt → Contacting provider → Analysing logs (elapsed clock)
+    → Formatting result*, shown as a stepper (○ / ● / ✓) with a progress bar
+  - Configuration errors (missing key / unconfigured Ollama or OpenRouter) fail before
+    "contacting" and surface immediately
+  - Shared `_analysis_config()` / `_run_analysis()` / `_notify_if_alerting()` helpers;
+    `POST /analyse` keeps its original contract
+- 📝 **Markdown-rendered results**
+  - marked@12 + DOMPurify@3 (pinned CDN, sanitised) with a plain-text fallback
+  - Theme-aware styling for headings, lists, tables, code fences, blockquotes and links
+  - Provenance line: provider · model · elapsed seconds
+  - Applied to both the AI Analyse and Suricata Raw analyse modals; modal close handler
+    now bound once
 
 ### v2.10.0 - Docker Monitoring & Container Logs
 - 🐳 **Docker monitoring subsystem** (`dockermon/` blueprint)

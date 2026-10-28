@@ -1,6 +1,6 @@
 import subprocess
 import io
-from flask import Flask, render_template, jsonify, request, Response, stream_with_context, has_app_context
+from flask import Flask, render_template, jsonify, request, Response, stream_with_context, has_app_context, current_app
 from flask_sock import Sock
 import paramiko
 import shlex
@@ -2125,6 +2125,90 @@ def load_config():
 
     return cfg
 
+class AnalysisConfigError(Exception):
+    """Raised when a provider is not configured (maps to HTTP 400)."""
+
+
+ANALYSIS_PROVIDER_LABELS = {'openai': 'OpenAI', 'ollama': 'Ollama', 'openrouter': 'OpenRouter'}
+
+
+def _analysis_config(provider, data):
+    """Validate the selected provider's configuration.
+
+    Returns a dict with the credentials/model to use and raises
+    ``AnalysisConfigError`` when something is missing.
+    """
+    if provider == 'ollama':
+        config = load_config()
+        ollama_url = config.get('ollama_url')
+        ollama_model = config.get('ollama_model')
+        if not ollama_url or not ollama_model:
+            raise AnalysisConfigError('Ollama not configured. Please set up Ollama in Settings.')
+        return {'url': ollama_url, 'model': ollama_model}
+
+    if provider == 'openrouter':
+        config = load_config()
+        api_key = config.get('openrouter_api_key')
+        model = config.get('openrouter_model')
+        if not api_key or not model:
+            raise AnalysisConfigError('OpenRouter not configured. Please set up OpenRouter in Settings.')
+        return {'api_key': api_key, 'model': model}
+
+    api_key = data.get('api_key')
+    if not api_key:
+        raise AnalysisConfigError('OpenAI API key not provided.')
+    return {'api_key': api_key, 'model': 'gpt-3.5-turbo'}
+
+
+def _run_analysis(provider, data, log_content, log_name):
+    """Run one analysis against the selected provider.
+
+    Returns ``(analysis_text, meta)`` where meta carries the provider and model
+    that were used. Raises ``AnalysisConfigError`` for configuration problems.
+    """
+    cfg = _analysis_config(provider, data)
+
+    if provider == 'ollama':
+        analysis = analyse_with_ollama(log_content, log_name, cfg['url'], cfg['model'])
+        return analysis, {'provider': 'ollama', 'model': cfg['model']}
+
+    if provider == 'openrouter':
+        analysis = analyse_with_openrouter(log_content, log_name, cfg['api_key'], cfg['model'])
+        return analysis, {'provider': 'openrouter', 'model': cfg['model']}
+
+    api_key = cfg['api_key']
+
+    truncated_content = log_content
+    if len(log_content) > MAX_CHAR_COUNT:
+        truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+
+    client = openai.OpenAI(api_key=api_key)
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that analyses log files."},
+            {"role": "user", "content": f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"}
+        ]
+    )
+    return response.choices[0].message.content, {'provider': 'openai', 'model': 'gpt-3.5-turbo'}
+
+
+def _notify_if_alerting(webhook_url, log_name, log_content, analysis):
+    """Send a Discord alert when the analysis contains alert keywords."""
+    if not (webhook_url and analysis):
+        return False
+    try:
+        if not any(keyword.lower() in analysis.lower() for keyword in get_ai_alert_keywords()):
+            return False
+        data_start, data_end = extract_log_time_range(log_content)
+        send_discord_notification(webhook_url, log_name, 'local', analysis,
+                                  data_start=data_start, data_end=data_end)
+        return True
+    except Exception as e:
+        print(f'[WARN] Discord notification failed: {e}')
+        return False
+
+
 @app.route('/analyse', methods=['POST'])
 def analyse_log():
     data = request.get_json(silent=True) or {}
@@ -2137,49 +2221,119 @@ def analyse_log():
         return jsonify({'error': 'Missing log_content.'}), 400
 
     try:
-        if provider == 'ollama':
-            config = load_config()
-            ollama_url = config.get('ollama_url')
-            ollama_model = config.get('ollama_model')
-            if not ollama_url or not ollama_model:
-                return jsonify({'error': 'Ollama not configured. Please set up Ollama in Settings.'}), 400
-            analysis = analyse_with_ollama(log_content, log_name, ollama_url, ollama_model)
-        elif provider == 'openrouter':
-            config = load_config()
-            api_key = config.get('openrouter_api_key')
-            model = config.get('openrouter_model')
-            if not api_key or not model:
-                return jsonify({'error': 'OpenRouter not configured. Please set up OpenRouter in Settings.'}), 400
-            analysis = analyse_with_openrouter(log_content, log_name, api_key, model)
-        else:
-            api_key = data.get('api_key')
-            if not api_key:
-                return jsonify({'error': 'OpenAI API key not provided.'}), 400
-
-            truncated_content = log_content
-            if len(log_content) > MAX_CHAR_COUNT:
-                truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
-
-
-            client = openai.OpenAI(api_key=api_key)
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that analyses log files."},
-                    {"role": "user", "content": f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"}
-                ]
-            )
-            analysis = response.choices[0].message.content
-
-        discord_sent = False
-        data_start, data_end = extract_log_time_range(log_content)
-        if webhook_url and analysis and any(keyword.lower() in analysis.lower() for keyword in get_ai_alert_keywords()):
-            send_discord_notification(webhook_url, log_name, 'local', analysis, data_start=data_start, data_end=data_end)
-            discord_sent = True
-
+        analysis, _meta = _run_analysis(provider, data, log_content, log_name)
+        discord_sent = _notify_if_alerting(webhook_url, log_name, log_content, analysis)
         return jsonify({'analysis': analysis, 'discord_sent': discord_sent})
+    except AnalysisConfigError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
+
+
+@app.route('/analyse/stream', methods=['POST'])
+def analyse_log_stream():
+    """Same analysis as /analyse but streams staged progress via SSE.
+
+    The provider call is blocking, so it runs in a worker thread while the
+    response emits a heartbeat every couple of seconds; the browser therefore
+    sees real stages ("contacting", "analysing… 12s") instead of a frozen
+    "Contacting AI assistant..." message.
+    """
+    data = request.get_json(silent=True) or {}
+    log_content = data.get('log_content')
+    log_name = data.get('log_name') or 'log'
+    webhook_url = data.get('webhook_url')
+    provider = data.get('provider', 'openai')
+
+    if not log_content:
+        return jsonify({'error': 'Missing log_content.'}), 400
+
+    provider_label = ANALYSIS_PROVIDER_LABELS.get(provider, provider)
+
+    def generate():
+        def ev(payload):
+            return 'data: ' + json.dumps(payload) + '\n\n'
+
+        started = time.time()
+
+        def elapsed():
+            return round(time.time() - started, 1)
+
+        yield ': connected\n\n'
+        yield ev({'type': 'stage', 'stage': 'prepare',
+                  'message': 'Checking AI provider configuration...', 'elapsed': 0})
+
+        lines = log_content.count('\n') + 1 if log_content else 0
+        truncated = len(log_content) > MAX_CHAR_COUNT
+        yield ev({'type': 'stage', 'stage': 'prepare',
+                  'message': f'Preparing {lines:,} lines ({len(log_content) / 1024:.1f} KB)'
+                             + (' - truncating to the latest portion' if truncated else '') + '...',
+                  'elapsed': elapsed()})
+
+        # Fail fast on missing configuration so the browser doesn't show
+        # "contacting..." for a request that can never succeed.
+        try:
+            _analysis_config(provider, data)
+        except AnalysisConfigError as exc:
+            yield ev({'type': 'error', 'message': str(exc), 'elapsed': elapsed()})
+            return
+
+        box = queue.Queue()
+        # Worker threads do not inherit the request's Flask app context, and
+        # provider config lives in the database -> capture the app now.
+        try:
+            worker_app = current_app._get_current_object()
+        except RuntimeError:
+            worker_app = None
+
+        def work():
+            def run():
+                return _run_analysis(provider, data, log_content, log_name)
+            try:
+                if worker_app is not None:
+                    with worker_app.app_context():
+                        analysis, meta = run()
+                else:
+                    analysis, meta = run()
+                box.put(('ok', (analysis, meta)))
+            except AnalysisConfigError as exc:
+                box.put(('config_error', str(exc)))
+            except Exception as exc:  # noqa: BLE001 - surfaced to the browser
+                box.put(('error', str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+        yield ev({'type': 'stage', 'stage': 'contact',
+                  'message': f'Contacting {provider_label}...', 'elapsed': elapsed()})
+
+        while True:
+            try:
+                kind, payload = box.get(timeout=2.0)
+                break
+            except queue.Empty:
+                secs = int(time.time() - started)
+                yield ev({'type': 'stage', 'stage': 'waiting',
+                          'message': f'Waiting for model response... {secs}s', 'elapsed': secs})
+
+        if kind != 'ok':
+            message = payload
+            if kind == 'error':
+                message = f'An error occurred during AI Analysis: {message}'
+            yield ev({'type': 'error', 'message': message, 'elapsed': elapsed()})
+            return
+
+        analysis, meta = payload
+        yield ev({'type': 'stage', 'stage': 'format',
+                  'message': 'Formatting response...', 'elapsed': elapsed()})
+
+        discord_sent = _notify_if_alerting(webhook_url, log_name, log_content, analysis)
+
+        yield ev({'type': 'result', 'analysis': analysis, 'discord_sent': discord_sent,
+                  'provider': meta.get('provider'), 'model': meta.get('model'),
+                  'elapsed': elapsed()})
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream',
+                    headers=SOURCES_STREAM_HEADERS)
 
 
 @app.route('/suricata/analyse', methods=['POST'])
