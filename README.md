@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-28 | v2.12.0 | Report tuning: default model `openai/gpt-4o-mini`; **Executive Summary** and **How to Resolve** closing sections; a depth slider (Lite → Maximum) plus Auto; a sizing engine that measures the evidence pack and recommends depth, chunking and model; map-reduce chunking for packs too large for one request; "Check size & suggest" pre-flight that does not call the model | ✅ Complete |
 | 2026-10-28 | v2.11.0 | Server-wide correlated log reports: **Analyse All Logs** collects every file / journald / container source on a host into a uniform time window, normalises lines into signature clusters, correlates sources statistically (lift, bursts, silence gaps, container state), sends one compact evidence pack to the model and stores a report at `/reports/<id>` with a history list | ✅ Complete |
 | 2026-10-28 | v2.10.1 | AI analysis UX: live staged progress in the modal (preparing → contacting → analysing with elapsed clock → formatting) streamed from the new `/analyse/stream` SSE endpoint; results rendered as sanitised Markdown (marked + DOMPurify) in the AI and Suricata analyse modals | ✅ Complete |
 | 2026-10-28 | v2.10.0 | Docker monitoring: host-wide Docker API discovery (unix socket over SSH / TCP 2375 / TLS 2376), standalone `/docker/<host_key>` page (live CPU/RAM/network charts, containers with size + image tag, swarm cluster/node drill-down); Pull Logs now lists per-container logs with a **Docker logs only** filter; faster connect feedback (proxy-safe SSE, indeterminate progress bar, elapsed clock); security hardening (log path traversal blocked, log output XSS-escaped, Docker SDK pinned) | ✅ Complete |
@@ -100,6 +101,9 @@ This application is designed for use on a trusted, internal development network 
 * **Stored reports:** every run is saved (`log_reports`) and viewable at `/reports/<id>` with verdict banner, severity counts, incident timeline, correlation table, source coverage and a `.md` download; `/reports` lists history by host
 * **Model override:** per-run model selection (default `gpt-3.5-turbo`); the evidence pack is retained so a report can be re-summarised later without re-collecting
 * **On request only:** nothing is posted to Discord automatically — the report page has an explicit **Send to Discord** button
+* **Sized to fit:** a **depth slider** (Lite → Maximum) controls the evidence budget and output budget, with an **Auto** mode where the sizing engine measures the built evidence pack and picks the depth, decides whether chunking is needed, and warns when the chosen model's context is too small (offering a bigger one). The dialog can run a **Check size & suggest** pre-flight that collects and sizes the logs *without* calling the model, and the run that follows reuses that collection
+* **Chunked for big hosts:** packs larger than the model can hold are split on section boundaries, summarised pass-by-pass (map) and merged into one reduced pack (reduce), with progress and the pass count shown
+* **Closing sections:** every report ends with an **Executive Summary** (plain-English, non-specialist) and **How to Resolve** (numbered remediation steps marked immediate / soon / preventive, with verification)
 * **Honest about blind spots:** truncation, source caps, failed sources and logging gaps are all stated in the report
 
 ### 📈 **Real-Time Progress Tracking**
@@ -663,6 +667,44 @@ The application provides detailed startup logs showing:
 5. **Scheduling**: APScheduler for automated monitoring tasks
 
 ## 📝 Recent Updates
+
+### v2.12.0 - Report Sizing, Chunking and Closing Sections
+- 🧮 **`serverreport/sizing.py`** - measures the evidence pack and recommends a run profile
+  - Depth levels 1-5 (Lite / Standard / Detailed / Deep / Maximum) controlling the evidence
+    budget, the output budget and the chunking threshold
+  - Depth changes what is actually **sent** (`pack.PACK_LIMITS`): 15 / 28 / 45 / 90 / 180
+    clusters, 6-30 correlations, extra sample lines at depth 4+, wider coverage lists. On
+    db-11 the same window costs 1.7k tokens at Lite and 22.9k at Maximum
+  - An explicit depth always wins over Auto; Auto only fills the gap, and the rationale says
+    what it would have picked instead
+  - Auto mode sizes the host from the **standard (depth 3)** view plus cluster/event counts,
+    weighted up for noisy hosts and high correlation counts. (Measuring the deepest pack
+    would always recommend maximum depth, which defeats the purpose.)
+  - Model context awareness (`MODEL_CONTEXTS`, 75% safety margin) - if the pack exceeds the
+    model's window it suggests a model that can hold it
+  - Human-readable rationale returned to the UI, e.g. *"Evidence pack is ~90,000 tokens;
+    the model holds ~49,152 input tokens. That fits in 3 chunks..."*
+- 🧩 **Map/reduce chunking** (`pack.split_pack`, `llm.summarise_chunk`, `llm.merge_notes`)
+  - Splits are balanced by size and snapped to blank-line/section boundaries; the header
+    block is repeated in every part so each pass knows the host and window
+  - Each pass extracts `FINDINGS / CORRELATIONS / CONTAINERS / GAPS / NOTES`; the notes are
+    de-duplicated and merged into one pack for the final report call
+- 🎚 **Depth slider + pre-flight** in the Analyse All Logs dialog
+  - Auto (default) or manual 1-5, with a description of what each level includes
+  - **Check size & suggest** collects, normalises and correlates *without* calling the model,
+    returns source/event/cluster counts, the token estimate and a recommendation, and caches
+    the bundle so pressing Start does not collect the host twice
+  - Surfaces the recommendation (and any model suggestion, one click to apply) both before
+    and during a run
+- 📄 **Two new closing sections**
+  - `## Executive Summary` - final section, two or three plain-English sentences for a
+    non-specialist: what happened, how bad, whether to act now
+  - `## How to Resolve` - numbered remediation plan with concrete steps, the command or
+    config change where confident, and how to verify, tagged immediate / soon / preventive
+- ⚙️ **Default model** for reports is now `openai/gpt-4o-mini` (settings key
+  `report.default_model`); per-run override still supported
+- 🗄 Depth, chunk count, pack size and the recommendation are stored in the report's
+  coverage blob, so a report records how it was produced
 
 ### v2.11.0 - Server-Wide Correlated Log Reports
 - 🧠 **New `serverreport/` blueprint:** `collect` → `normalize` → `correlate` → `pack` → `llm` → `routes`

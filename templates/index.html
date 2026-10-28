@@ -1241,6 +1241,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-stopped" class="mr-2"> Include stopped containers</label>
                 </div>
 
+                <!-- Report size: Auto lets the sizing engine decide from the evidence itself -->
+                <div class="mt-4">
+                    <div class="flex items-center justify-between">
+                        <span class="termix-muted text-xs">Report size / depth</span>
+                        <label class="flex items-center text-xs termix-muted">
+                            <input type="checkbox" id="server-report-auto-depth" class="mr-1.5" checked>
+                            Auto (recommended)
+                        </label>
+                    </div>
+                    <input id="server-report-depth" type="range" min="1" max="5" step="1" value="3"
+                           class="w-full mt-1 accent-indigo-500" disabled>
+                    <div class="flex justify-between text-xs termix-muted mt-0.5">
+                        <span>Lite</span><span>Standard</span><span>Detailed</span><span>Deep</span><span>Maximum</span>
+                    </div>
+                    <div id="server-report-depth-hint" class="text-xs termix-muted mt-1"></div>
+                </div>
+
+                <div class="mt-3 flex items-center gap-2">
+                    <button id="server-report-size-check" type="button"
+                            class="bg-white/10 hover:bg-white/20 text-xs px-3 py-1.5 rounded-lg text-gray-200">
+                        Check size &amp; suggest
+                    </button>
+                    <span id="server-report-size-status" class="text-xs termix-muted"></span>
+                </div>
+
+                <div id="server-report-recommendation" class="hidden mt-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-200"></div>
+
                 <div id="server-report-estimate" class="mt-3 text-xs termix-muted"></div>
                 <div id="server-report-error" class="hidden mt-3 text-xs text-red-400"></div>
 
@@ -2407,8 +2434,40 @@ document.addEventListener('DOMContentLoaded', () => {
         const serverReportEstimate = document.getElementById('server-report-estimate');
         const serverReportSteps = document.getElementById('server-report-steps');
         const serverReportOpen = document.getElementById('server-report-open');
+        const serverReportDepth = document.getElementById('server-report-depth');
+        const serverReportAutoDepth = document.getElementById('server-report-auto-depth');
+        const serverReportDepthHint = document.getElementById('server-report-depth-hint');
+        const serverReportSizeCheck = document.getElementById('server-report-size-check');
+        const serverReportSizeStatus = document.getElementById('server-report-size-status');
+        const serverReportRecommendation = document.getElementById('server-report-recommendation');
         let serverReportDefaults = null;
         let serverReportRunning = false;
+        let serverReportLastRecommendation = null;
+        let serverReportDepthCosts = null;
+
+        const DEPTH_LABELS = { 1: 'Lite', 2: 'Standard', 3: 'Detailed', 4: 'Deep', 5: 'Maximum' };
+
+        const syncDepthControls = () => {
+            if (!serverReportDepth || !serverReportAutoDepth) return;
+            const auto = serverReportAutoDepth.checked;
+            serverReportDepth.disabled = auto;
+            serverReportDepth.classList.toggle('opacity-40', auto);
+            if (serverReportDepthHint) {
+                const level = String(serverReportDepth.value);
+                const meta = (serverReportDefaults?.depths || []).find((d) => String(d.depth) === level);
+                const desc = meta?.description || '';
+                const cost = (serverReportDepthCosts || []).find((d) => String(d.depth) === level);
+                const costText = cost ? ` (${Number(cost.tokens).toLocaleString()} evidence tokens)` : '';
+                serverReportDepthHint.textContent = auto
+                    ? 'Depth is chosen from the evidence size before the model is called.'
+                    : `${DEPTH_LABELS[level]}: ${desc}${costText}`;
+            }
+        };
+
+        const selectedDepth = () => {
+            if (serverReportAutoDepth?.checked) return 0;
+            return Number(serverReportDepth?.value) || 3;
+        };
 
         const refreshAnalyseAllLogsButton = async (hostId) => {
             if (!analyseAllLogsBtn) return;
@@ -2444,6 +2503,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? serverReportDefaults.model
                     : `${serverReportDefaults.provider_label || 'provider'} default model`;
             }
+            if (serverReportDepth && serverReportDefaults.depth) {
+                serverReportDepth.value = String(serverReportDefaults.depth);
+            }
+            syncDepthControls();
             if (serverReportEstimate && serverReportDefaults.provider_configured === false) {
                 serverReportEstimate.textContent = 'No AI provider is configured - set one up in Settings first.';
                 serverReportEstimate.classList.add('text-red-400');
@@ -2515,6 +2578,10 @@ document.addEventListener('DOMContentLoaded', () => {
             serverReportProgress?.classList.add('hidden');
             serverReportResult?.classList.add('hidden');
             serverReportForm?.classList.remove('hidden');
+            serverReportRecommendation?.classList.add('hidden');
+            if (serverReportSizeStatus) serverReportSizeStatus.textContent = '';
+            serverReportLastRecommendation = null;
+            serverReportDepthCosts = null;
             renderServerReportSteps();
             serverReportRunning = false;
             if (serverReportStart) {
@@ -2549,6 +2616,81 @@ document.addEventListener('DOMContentLoaded', () => {
             serverReportModal?.classList.add('hidden');
         });
 
+        serverReportAutoDepth?.addEventListener('change', syncDepthControls);
+        serverReportDepth?.addEventListener('input', syncDepthControls);
+
+        const currentScopeBody = () => ({
+            host_key: selectedHostId,
+            window_minutes: Number(document.getElementById('server-report-window')?.value) || 120,
+            model: (document.getElementById('server-report-model')?.value || '').trim() || undefined,
+            depth: selectedDepth(),
+            include_files: !!document.getElementById('server-report-files')?.checked,
+            include_journal: !!document.getElementById('server-report-journal')?.checked,
+            include_docker: !!document.getElementById('server-report-docker')?.checked,
+            include_stopped: !!document.getElementById('server-report-stopped')?.checked
+        });
+
+        const renderRecommendation = (payload) => {
+            if (!serverReportRecommendation) return;
+            const rec = payload.recommendation || {};
+            const lines = [
+                `<strong>Suggested: ${escapeHtml(rec.depth_label || 'Standard')} depth</strong>` +
+                ` &middot; ~${Number(rec.pack_tokens || payload.pack_tokens || 0).toLocaleString()} evidence tokens` +
+                (rec.chunks > 1 ? ` &middot; ${rec.chunks} chunk passes` : ' &middot; single pass'),
+                `${escapeHtml(String(payload.events || 0))} events &rarr; ${escapeHtml(String(payload.clusters || 0))} signatures, ` +
+                `${escapeHtml(String(payload.sources_ok || 0))}/${escapeHtml(String(payload.sources_total || 0))} sources with data`,
+            ];
+            (rec.rationale || []).forEach((line) => lines.push(escapeHtml(line)));
+            if (rec.suggest_model) {
+                lines.push(`<span class="text-amber-300">Model ${escapeHtml(rec.model || '')} may be too small for this pack ` +
+                           `(${escapeHtml(String(rec.usable_input_tokens || 0))} usable input tokens). ` +
+                           `Consider <button type="button" id="server-report-apply-model" class="underline">` +
+                           `${escapeHtml(rec.suggested_model || '')}</button>.</span>`);
+            }
+            serverReportRecommendation.innerHTML = lines.map((l) => `<div class="mt-0.5">${l}</div>`).join('');
+            serverReportRecommendation.classList.remove('hidden');
+
+            const applyModel = document.getElementById('server-report-apply-model');
+            if (applyModel) {
+                applyModel.addEventListener('click', () => {
+                    const modelEl = document.getElementById('server-report-model');
+                    if (modelEl) modelEl.value = rec.suggested_model || '';
+                    applyModel.outerHTML = `<span class="text-emerald-300">${escapeHtml(rec.suggested_model || '')} applied</span>`;
+                });
+            }
+        };
+
+        serverReportSizeCheck?.addEventListener('click', async () => {
+            if (!selectedHostId || serverReportRunning) return;
+            const body = currentScopeBody();
+            if (!body.include_files && !body.include_journal && !body.include_docker) {
+                if (serverReportSizeStatus) serverReportSizeStatus.textContent = 'Select at least one source type.';
+                return;
+            }
+            serverReportSizeCheck.disabled = true;
+            if (serverReportSizeStatus) serverReportSizeStatus.textContent = 'Collecting and sizing (no model call)...';
+            try {
+                const res = await fetch('/serverreport/preflight', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const payload = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(payload.error || `Request failed (${res.status})`);
+                serverReportLastRecommendation = payload.recommendation || null;
+                serverReportDepthCosts = payload.depth_costs || null;
+                syncDepthControls();
+                if (serverReportSizeStatus) {
+                    serverReportSizeStatus.textContent = 'Size check complete - the next run reuses this collection.';
+                }
+                renderRecommendation(payload);
+            } catch (err) {
+                if (serverReportSizeStatus) serverReportSizeStatus.textContent = err.message || 'Size check failed.';
+            } finally {
+                serverReportSizeCheck.disabled = false;
+            }
+        });
+
         if (serverReportStart) {
             serverReportStart.addEventListener('click', async () => {
                 if (!selectedHostId || serverReportRunning) return;
@@ -2557,15 +2699,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 serverReportStart.textContent = 'Analysing...';
                 serverReportError?.classList.add('hidden');
 
-                const requestBody = {
-                    host_key: selectedHostId,
-                    window_minutes: Number(document.getElementById('server-report-window')?.value) || 120,
-                    model: (document.getElementById('server-report-model')?.value || '').trim() || undefined,
-                    include_files: !!document.getElementById('server-report-files')?.checked,
-                    include_journal: !!document.getElementById('server-report-journal')?.checked,
-                    include_docker: !!document.getElementById('server-report-docker')?.checked,
-                    include_stopped: !!document.getElementById('server-report-stopped')?.checked
-                };
+                const requestBody = currentScopeBody();
 
                 if (!requestBody.include_files && !requestBody.include_journal && !requestBody.include_docker) {
                     serverReportError.textContent = 'Select at least one log source type.';
@@ -2588,6 +2722,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (evt.type === 'stage') {
                             setServerReportStage(evt.stage, evt.message, evt.elapsed, evt);
                             if (evt.message) appendServerReportLog(evt.message);
+                            if (evt.recommendation) renderRecommendation({
+                                recommendation: evt.recommendation,
+                                events: 0, clusters: 0, sources_ok: 0, sources_total: 0
+                            });
                             return;
                         }
                         if (evt.type === 'error') {
