@@ -15,6 +15,24 @@ MAX_GAPS = 8
 MAX_CORRELATIONS = 15
 SAMPLE_CHARS = 180
 
+# How much of the tail each depth includes. Depth has to change what is *sent*,
+# not just the budget: a bigger budget with a 45-cluster cap sends nothing more.
+PACK_LIMITS = {
+    1: {'clusters': 15, 'bursts': 5, 'gaps': 4, 'correlations': 6, 'samples': 0, 'coverage': 12},
+    2: {'clusters': 28, 'bursts': 8, 'gaps': 6, 'correlations': 10, 'samples': 1, 'coverage': 20},
+    3: {'clusters': 45, 'bursts': 12, 'gaps': 8, 'correlations': 15, 'samples': 1, 'coverage': 25},
+    4: {'clusters': 90, 'bursts': 18, 'gaps': 12, 'correlations': 20, 'samples': 2, 'coverage': 35},
+    5: {'clusters': 180, 'bursts': 30, 'gaps': 16, 'correlations': 30, 'samples': 2, 'coverage': 50},
+}
+
+
+def limits_for(depth):
+    try:
+        depth = int(depth)
+    except (TypeError, ValueError):
+        depth = 3
+    return PACK_LIMITS.get(depth, PACK_LIMITS[3])
+
 SEV_LABEL = {4: 'CRIT', 3: 'ERROR', 2: 'WARN', 1: 'INFO'}
 
 
@@ -46,8 +64,16 @@ def _coverage(norm):
     return ok, failed, quiet
 
 
-def build_pack(host_label, norm, corr, collect_meta, containers):
+def build_pack(host_label, norm, corr, collect_meta, containers, depth=None):
     """Render the evidence pack text."""
+    limits = limits_for(depth)
+    max_clusters = limits['clusters']
+    max_bursts = limits['bursts']
+    max_gaps = limits['gaps']
+    max_correlations = limits['correlations']
+    sample_count = limits['samples']
+    coverage_limit = limits['coverage']
+
     window = corr.get('window') or {}
     lines = []
 
@@ -65,6 +91,11 @@ def build_pack(host_label, norm, corr, collect_meta, containers):
     )
     if collect_meta.get('truncated'):
         lines.append('TRUNCATED: source cap or byte budget reached — this is a partial view.')
+    if depth:
+        lines.append(
+            f'DEPTH: level {int(depth)} — showing up to {max_clusters} clusters, '
+            f'{max_correlations} correlations, {max_bursts} bursts.'
+        )
 
     counts = norm.get('severity_counts') or {}
     lines.append(
@@ -94,13 +125,13 @@ def build_pack(host_label, norm, corr, collect_meta, containers):
         lines.append('')
         lines.append('--- TOP CLUSTERS (severity, frequency) ---')
         lines.append('source | sev | count | first_seen | signature')
-        for c in clusters[:MAX_CLUSTERS]:
+        for c in clusters[:max_clusters]:
             first = _iso(c.get('first_ts'))
             lines.append(
                 f"{c['label']} | {SEV_LABEL.get(c['sev'], 'INFO')} | {c['count']} | "
                 f"{first} | {_trim(c['sig'], 160)}"
             )
-            for sample in (c.get('samples') or [])[:1]:
+            for sample in (c.get('samples') or [])[:sample_count]:
                 lines.append(f"    e.g. {_trim(sample)}")
 
     # --- correlations -------------------------------------------------------
@@ -108,7 +139,7 @@ def build_pack(host_label, norm, corr, collect_meta, containers):
     if correlations:
         lines.append('')
         lines.append('--- CROSS-SOURCE CORRELATIONS (lift over chance) ---')
-        for p in correlations[:MAX_CORRELATIONS]:
+        for p in correlations[:max_correlations]:
             lag = p.get('lag_seconds')
             lag_txt = f"{lag:+.1f}s" if isinstance(lag, (int, float)) else 'n/a'
             lines.append(
@@ -122,7 +153,7 @@ def build_pack(host_label, norm, corr, collect_meta, containers):
     if bursts:
         lines.append('')
         lines.append('--- BURSTS (above each source\'s own baseline) ---')
-        for b in bursts[:MAX_BURSTS]:
+        for b in bursts[:max_bursts]:
             lines.append(
                 f"{_iso(b['ts'])} | {b['src'].split(':', 1)[-1]} | "
                 f"{b['count']} hits in one minute (baseline {b['median']:g}) | "
@@ -134,7 +165,7 @@ def build_pack(host_label, norm, corr, collect_meta, containers):
     if gaps:
         lines.append('')
         lines.append('--- SILENCE / GAPS ---')
-        for g in gaps[:MAX_GAPS]:
+        for g in gaps[:max_gaps]:
             if g['kind'] == 'stopped_early':
                 lines.append(
                     f"{g['src']} stopped logging {int(g['seconds'] // 60)}m before the window ended"
@@ -150,9 +181,9 @@ def build_pack(host_label, norm, corr, collect_meta, containers):
     lines.append('')
     lines.append('--- COVERAGE ---')
     if ok:
-        lines.append('with events: ' + ', '.join(ok[:25]))
+        lines.append('with events: ' + ', '.join(ok[:coverage_limit]))
     if quiet:
-        lines.append('no events in window: ' + ', '.join(quiet[:20]))
+        lines.append('no events in window: ' + ', '.join(quiet[:coverage_limit]))
     if failed:
         lines.append('collection errors: ' + ', '.join(failed[:15]))
     lines.append('note: sources under "no events in window" produced no output; this is not a fault.')
@@ -187,3 +218,97 @@ def fit_pack(text, max_tokens=MAX_PACK_TOKENS):
         + tail
     )
     return trimmed, True
+
+
+# ---------------------------------------------------------------------------
+# chunking (map/reduce for packs larger than the model can hold)
+# ---------------------------------------------------------------------------
+
+def split_pack(text, chunks):
+    """Split a pack into roughly equal chunks.
+
+    The header block (host, window, counts) is repeated in every chunk so each
+    pass knows what it is looking at. Split points are placed by cumulative
+    size and then snapped to a nearby blank line / section marker so a cluster
+    entry is not cut in half (snapping is best-effort - a pack with no
+    boundaries at all still gets even chunks).
+    """
+    import bisect
+
+    chunks = max(1, int(chunks or 1))
+    if chunks == 1 or not text:
+        return [text or '']
+
+    lines = text.splitlines()
+    header_end = next((i for i, l in enumerate(lines) if l.startswith('--- ')), min(len(lines), 12))
+    header_text = '\n'.join(lines[:header_end]).rstrip()
+    body = lines[header_end:]
+    if not body:
+        return [text]
+
+    def is_boundary(line):
+        return (not line.strip()) or line.startswith('--- ') or line.startswith('===')
+
+    cumulative = []
+    total = 0
+    for line in body:
+        total += len(line) + 1
+        cumulative.append(total)
+
+    cuts = []
+    for k in range(1, chunks):
+        goal = total * k / chunks
+        idx = min(len(body) - 1, bisect.bisect_left(cumulative, goal))
+        snapped = None
+        # Only snap within a few lines: hunting further afield collapses several
+        # cut points onto the same boundary and produces lopsided chunks.
+        for delta in range(0, 4):
+            for cand in (idx + delta, idx - delta):
+                if 0 < cand < len(body) and is_boundary(body[cand]):
+                    snapped = cand
+                    break
+            if snapped is not None:
+                break
+        cuts.append(snapped if snapped is not None else idx)
+
+    # Even chunks matter more than clean boundaries: drop duplicate cuts.
+    cuts = sorted(set(c for c in cuts if 0 < c < len(body)))
+    if not cuts:
+        return [text]
+
+    parts, prev = [], 0
+    for cut in cuts + [len(body)]:
+        segment = body[prev:cut]
+        if segment:
+            parts.append(segment)
+        prev = cut
+
+    out = []
+    for idx, part in enumerate(parts, start=1):
+        body_text = '\n'.join(part).strip()
+        out.append(
+            f'{header_text}\n\n[--- PART {idx} of {len(parts)} ---]\n\n'
+            f'{body_text}\n=== END EVIDENCE PACK ==='
+        )
+    return out
+
+
+def build_reduced_pack(host_label, digests, corr):
+    """Assemble the merged pack after per-chunk summarisation."""
+    window = (corr or {}).get('window') or {}
+    lines = [
+        '=== SERVER LOG EVIDENCE PACK (MERGED FROM CHUNK SUMMARIES) ===',
+        f"HOST: {host_label} | WINDOW: {window.get('start')} .. {window.get('end')}",
+        '',
+        'Each PART below is an extracted summary of one slice of the same window.',
+        'The slices were cut for context size only - they describe one server,',
+        'not separate servers, and events may be mentioned in more than one part.',
+        '',
+    ]
+    total = len(digests or [])
+    for idx, digest in enumerate(digests or [], start=1):
+        lines.append(f'--- PART {idx} of {total} ---')
+        lines.append((digest or '').strip())
+        lines.append('')
+    lines.append('=== END EVIDENCE PACK ===')
+    return '\n'.join(lines)

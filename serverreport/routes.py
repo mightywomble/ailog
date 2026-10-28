@@ -11,6 +11,7 @@ The pipeline is:
 """
 import datetime
 import json
+import math
 import queue
 import threading
 import time
@@ -19,7 +20,7 @@ from flask import (Blueprint, Response, current_app, jsonify, redirect,
                    render_template, request, stream_with_context, url_for)
 
 from database import LogReport, db
-from . import collect, correlate, llm, normalize, pack
+from . import collect, correlate, llm, normalize, pack, sizing
 
 reports_bp = Blueprint('serverreport', __name__)
 
@@ -29,8 +30,38 @@ STREAM_HEADERS = {
     'Connection': 'keep-alive',
 }
 
-DEFAULT_MODEL = 'gpt-3.5-turbo'
+DEFAULT_MODEL = 'openai/gpt-4o-mini'
 PROVIDER_LABELS = {'openai': 'OpenAI', 'ollama': 'Ollama', 'openrouter': 'OpenRouter'}
+
+# A size check and the run that follows it should not collect the host twice.
+# Bundles are single-use and short-lived.
+BUNDLE_TTL_SECONDS = 300
+_bundle_lock = threading.Lock()
+_bundles = {}
+
+
+def _bundle_key(host_key, window_minutes, include_files, include_journal, include_docker, include_stopped):
+    return (host_key, int(window_minutes), bool(include_files), bool(include_journal),
+            bool(include_docker), bool(include_stopped))
+
+
+def _bundle_put(key, payload):
+    with _bundle_lock:
+        now = time.time()
+        for stale in [k for k, v in _bundles.items() if now - v[0] > BUNDLE_TTL_SECONDS]:
+            _bundles.pop(stale, None)
+        _bundles[key] = (now, payload)
+
+
+def _bundle_take(key):
+    with _bundle_lock:
+        hit = _bundles.pop(key, None)
+    if not hit:
+        return None
+    age = time.time() - hit[0]
+    if age > BUNDLE_TTL_SECONDS:
+        return None
+    return hit[1]
 
 
 # ---------------------------------------------------------------------------
@@ -82,15 +113,35 @@ def _defaults():
     try:
         config = app.load_config()
         if provider == 'ollama':
+            # Ollama only has whatever is pulled locally.
             model = config.get('ollama_model')
-        elif provider == 'openrouter':
-            model = config.get('openrouter_model')
         else:
+            # Reports default to a large-context, low-cost model. The
+            # provider-level model setting still drives per-log analysis;
+            # settings key: report.default_model.
             model = app._setting_get('report.default_model', DEFAULT_MODEL) or DEFAULT_MODEL
     except Exception:
         model = DEFAULT_MODEL if provider == 'openai' else None
 
-    return {'window_minutes': window, 'model': model, 'provider': provider}
+    try:
+        # 0 = Auto: let the sizing engine choose from the evidence itself.
+        depth = int(app._setting_get('report.depth', sizing.AUTO_DEPTH) or 0)
+    except Exception:
+        depth = sizing.DEFAULT_DEPTH
+    if depth not in (0,) and depth not in sizing.DEPTHS:
+        depth = sizing.DEFAULT_DEPTH
+
+    return {
+        'window_minutes': window,
+        'model': model,
+        'provider': provider,
+        'depth': depth,
+        'depths': [
+            {'depth': d, 'key': p['key'], 'label': p['label'],
+             'description': p['description'], 'max_output_tokens': p['max_output_tokens']}
+            for d, p in sorted(sizing.DEPTHS.items())
+        ],
+    }
 
 
 def _naive_utc(dt):
@@ -99,6 +150,13 @@ def _naive_utc(dt):
     if dt.tzinfo is not None:
         dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
     return dt
+
+
+def pack_limits_label(depth):
+    try:
+        return sizing.DEPTHS[int(depth)]['label']
+    except Exception:
+        return str(depth)
 
 
 def _scope_note(include_files, include_journal, include_docker, include_stopped):
@@ -116,27 +174,33 @@ def _scope_note(include_files, include_journal, include_docker, include_stopped)
 # pipeline
 # ---------------------------------------------------------------------------
 
-def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
-                 include_files=True, include_journal=True, include_docker=True,
-                 include_stopped=False, emit=None, app=None):
-    """Run the full report pipeline and persist the result.
+def _status_of(item):
+    """Older/simpler collectors may only set ``ok``; treat a missing status as
+    ok-or-error rather than silently dropping the source."""
+    return item.get('status') or ('ok' if item.get('ok') else 'error')
 
-    Returns the saved ``LogReport``. ``emit`` receives progress dicts.
+
+def prepare_bundle(host_key, host_label, window_minutes, include_files, include_journal,
+                   include_docker, include_stopped, emit=None, app=None, note=None,
+                   use_cache=True):
+    """Collect, normalise and correlate. Model-free and reusable.
+
+    Shared by the size check and the report run so the host is only ever
+    collected once per user action.
     """
-    app_module = _app()
+    key = _bundle_key(host_key, window_minutes, include_files, include_journal,
+                      include_docker, include_stopped)
+    if use_cache:
+        cached = _bundle_take(key)
+        if cached is not None:
+            if note:
+                note('collect', 'Reusing the size-check snapshot (no second collection).')
+            return cached
 
-    def note(stage, message, **extra):
-        if emit:
-            payload = {'type': 'stage', 'stage': stage, 'message': message}
-            payload.update(extra)
-            try:
-                emit(payload)
-            except Exception:
-                pass
+    def _note(stage, message, **extra):
+        if note:
+            note(stage, message, **extra)
 
-    started = time.time()
-
-    note('collect', f'Enumerating and fetching sources for the last {window_minutes} minutes...')
     collected = collect.collect_host_logs(
         host_key,
         host_label=host_label,
@@ -155,15 +219,9 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
 
     window_start, window_end = collected['window_start'], collected['window_end']
     sources = collected['sources']
-
-    def _status(item):
-        # Older/simpler collectors may only set ``ok``; treat a missing status
-        # as ok-or-error rather than silently dropping the source.
-        return item.get('status') or ('ok' if item.get('ok') else 'error')
-
-    ok_sources = [s for s in sources if _status(s) == 'ok']
-    empty_sources = [s for s in sources if _status(s) == 'empty']
-    failed_sources = [s for s in sources if _status(s) == 'error']
+    ok_sources = [s for s in sources if _status_of(s) == 'ok']
+    empty_sources = [s for s in sources if _status_of(s) == 'empty']
+    failed_sources = [s for s in sources if _status_of(s) == 'error']
 
     if not ok_sources:
         detail = ''
@@ -175,26 +233,147 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
             + ' Check SSH/sudo access and that logs were written during the window.'
         )
 
-    note('normalise', f'Normalising {len(ok_sources)} source(s)...')
+    _note('normalise', f'Normalising {len(ok_sources)} source(s)...')
     norm = normalize.normalize_all(sources, window_start, window_end)
     events, clusters = norm['events'], norm['clusters']
-    note('normalise', f'{len(events):,} events reduced to {len(clusters):,} distinct signatures.',
-         clusters_total=len(clusters))
+    _note('normalise', f'{len(events):,} events reduced to {len(clusters):,} distinct signatures.',
+          clusters_total=len(clusters))
 
-    note('correlate', 'Checking cross-source correlations...')
+    _note('correlate', 'Checking cross-source correlations...')
     containers = []
     if include_docker:
         docker_sources = [s['source'] for s in sources if s['source']['kind'] == 'docker']
         containers = collect.container_states(host_key, docker_sources)
     corr = correlate.correlate(events, clusters, containers, window_start, window_end)
-    note('correlate',
-         f"{len(corr['correlations'])} correlation(s), {len(corr['bursts'])} burst(s), "
-         f"{len(corr['gaps'])} gap(s) found.",
-         correlations=len(corr['correlations']))
+    _note('correlate',
+          f"{len(corr['correlations'])} correlation(s), {len(corr['bursts'])} burst(s), "
+          f"{len(corr['gaps'])} gap(s) found.",
+          correlations=len(corr['correlations']))
 
+    return {
+        'collected': collected,
+        'norm': norm,
+        'corr': corr,
+        'containers': containers,
+        'window_start': window_start,
+        'window_end': window_end,
+        'ok_sources': ok_sources,
+        'empty_sources': empty_sources,
+        'failed_sources': failed_sources,
+    }
+
+
+def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
+                 include_files=True, include_journal=True, include_docker=True,
+                 include_stopped=False, depth=None, emit=None, app=None, use_cache=True):
+    """Run the full report pipeline and persist the result.
+
+    Flow: prepare (collect/normalise/correlate) -> build evidence -> size it ->
+    optionally chunk (map/reduce) -> one or more model calls -> store.
+
+    Returns a plain dict (the ORM instance is detached once the worker thread
+    finishes, so it must not escape).
+    """
+    app_module = _app()
+
+    def note(stage, message, **extra):
+        if emit:
+            payload = {'type': 'stage', 'stage': stage, 'message': message}
+            payload.update(extra)
+            try:
+                emit(payload)
+            except Exception:
+                pass
+
+    started = time.time()
+
+    bundle = prepare_bundle(
+        host_key, host_label, window_minutes, include_files, include_journal,
+        include_docker, include_stopped, emit=emit, app=app, note=note, use_cache=use_cache,
+    )
+
+    collected = bundle['collected']
+    norm = bundle['norm']
+    corr = bundle['corr']
+    containers = bundle['containers']
+    window_start, window_end = bundle['window_start'], bundle['window_end']
+    ok_sources = bundle['ok_sources']
+    empty_sources = bundle['empty_sources']
+    failed_sources = bundle['failed_sources']
+    sources = collected['sources']
+    events, clusters = norm['events'], norm['clusters']
+
+    # --- size it before spending anything on the model --------------------
     note('summarise', 'Building evidence pack...')
-    evidence = pack.build_pack(host_label, norm, corr, collected, containers)
-    evidence, fitted = pack.fit_pack(evidence)
+    # Size the host from the *standard* view (depth 3): measuring the deepest
+    # pack would always recommend maximum depth, which defeats the purpose.
+    baseline_pack = pack.build_pack(host_label, norm, corr, collected, containers, depth=3)
+    baseline_tokens = pack.estimate_tokens(baseline_pack)
+    max_pack = pack.build_pack(host_label, norm, corr, collected, containers, depth=5)
+    max_tokens = pack.estimate_tokens(max_pack)
+
+    recommendation = sizing.recommend({
+        'pack_tokens': baseline_tokens,
+        'events': len(events),
+        'clusters': len(clusters),
+        'sources': len(ok_sources),
+        'correlations': len(corr['correlations']),
+        'severity': norm['severity_counts'],
+        'model_filtered': model or 'the selected model',
+    }, model, requested_depth=depth or None)
+
+    profile = recommendation['profile']
+    chosen_depth = recommendation['depth']
+
+    # Depth decides what is *sent*, so build the pack at the chosen level.
+    evidence = pack.build_pack(host_label, norm, corr, collected, containers, depth=chosen_depth)
+    tokens = pack.estimate_tokens(evidence)
+
+    chunks_needed = 1
+    if tokens > profile['chunk_at']:
+        chunks_needed = max(2, int(math.ceil(tokens / max(1, profile['evidence_tokens']))))
+
+    note('summarise',
+         f"Evidence is ~{baseline_tokens:,} tokens at standard depth "
+         f"(up to ~{max_tokens:,} at maximum). Suggested: "
+         f"{recommendation['depth_label']} depth"
+         + (f", {chunks_needed} chunk pass(es)" if chunks_needed > 1 else '')
+         + (f", model {recommendation['suggested_model']}" if recommendation['suggest_model'] else '')
+         + '.',
+         recommendation={
+             'depth': chosen_depth,
+             'depth_label': recommendation['depth_label'],
+             'chunks': chunks_needed,
+             'pack_tokens': tokens,
+             'suggested_model': recommendation['suggested_model'],
+             'suggest_model': recommendation['suggest_model'],
+             'rationale': recommendation['rationale'],
+         })
+
+    chunks_used = 1
+    fitted = False
+
+    if chunks_needed > 1:
+        # Map: summarise each slice. Reduce: merge notes into one pack.
+        parts = pack.split_pack(evidence, chunks_needed)
+        chunks_used = len(parts)
+        note('summarise',
+             f'Pack is ~{tokens:,} tokens, beyond the {profile["label"]} budget; summarising '
+             f'in {chunks_used} passes then merging.')
+        digests = []
+        for idx, part in enumerate(parts, start=1):
+            note('summarise', f'Chunk {idx}/{chunks_used}: extracting findings...',
+                 chunk_index=idx, chunk_total=chunks_used)
+            digest, _meta = llm.summarise_chunk(
+                provider, app_module._analysis_config(provider, data, model=model),
+                host_label, part, idx, chunks_used,
+            )
+            digests.append(digest)
+        merged_notes = llm.merge_notes(digests)
+        evidence = pack.build_reduced_pack(host_label, [merged_notes], corr)
+    elif tokens > profile['evidence_tokens']:
+        evidence, fitted = pack.fit_pack(evidence, profile['evidence_tokens'])
+
     tokens_in = pack.estimate_tokens(evidence)
 
     note('summarise', f'Contacting {PROVIDER_LABELS.get(provider, provider)} '
@@ -202,6 +381,7 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
 
     cfg = app_module._analysis_config(provider, data, model=model)
     scope_note = _scope_note(include_files, include_journal, include_docker, include_stopped)
+    max_out = profile['max_output_tokens']
 
     def _generate(evidence_text, max_tokens):
         return llm.generate_report(
@@ -210,17 +390,17 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
         )
 
     try:
-        markdown, meta = _generate(evidence, 2500)
+        markdown, meta = _generate(evidence, max_out)
     except llm.EmptyReportError as first_exc:
         # Reasoning-heavy models can spend the whole completion budget on
         # reasoning and return nothing. Retry once with a smaller pack and a
         # larger cap rather than failing the run outright.
         note('summarise', 'Model returned no content; retrying with a trimmed evidence pack...')
-        trimmed, _ = pack.fit_pack(evidence, max_tokens=max(1000, int(pack.MAX_PACK_TOKENS * 0.55)))
+        trimmed, _ = pack.fit_pack(evidence, max_tokens=max(1000, int(profile['evidence_tokens'] * 0.55)))
         tokens_in = pack.estimate_tokens(trimmed)
         evidence = trimmed
         try:
-            markdown, meta = _generate(evidence, 4000)
+            markdown, meta = _generate(evidence, min(8000, int(max_out * 1.6) + 500))
         except Exception as exc:
             raise RuntimeError(f'Model call failed: {first_exc}; retry also failed: {exc}')
     except Exception as exc:
@@ -256,6 +436,19 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
             'truncated': bool(collected.get('truncated')),
             'pack_fitted': fitted,
             'missing_headings': meta.get('missing_headings') or [],
+            'depth': recommendation['depth'],
+            'depth_label': recommendation['depth_label'],
+            'depth_requested': depth or 0,
+            'chunks': chunks_used,
+            'pack_tokens': max_tokens,
+            'evidence_tokens': tokens_in,
+            'max_output_tokens': max_out,
+            'recommendation': {
+                'depth_label': recommendation['depth_label'],
+                'suggested_model': recommendation['suggested_model'],
+                'suggest_model': recommendation['suggest_model'],
+                'rationale': recommendation['rationale'],
+            },
         }),
         evidence_text=evidence,
         tokens_in=meta.get('tokens_in') or tokens_in,
@@ -302,6 +495,116 @@ def api_defaults():
     return jsonify(defaults)
 
 
+@reports_bp.route('/serverreport/preflight', methods=['POST'])
+def preflight():
+    """Size a run without calling the model.
+
+    Collects + normalises + correlates, builds the evidence pack, and returns
+    what it would cost and which depth/model we would choose. The collected
+    bundle is cached so pressing "Start" straight afterwards does not collect
+    the host a second time.
+    """
+    data = request.get_json(silent=True) or {}
+    host_key = (data.get('host_key') or '').strip()
+    if not host_key:
+        return jsonify({'error': 'Missing host_key.'}), 400
+
+    window_minutes = collect.clamp_window(data.get('window_minutes', _defaults()['window_minutes']))
+    provider = (data.get('provider') or '').strip() or _configured_provider()
+    defaults = _defaults()
+    if provider != defaults['provider']:
+        model = (data.get('model') or '').strip() or None
+    else:
+        model = (data.get('model') or '').strip() or defaults['model']
+    depth = data.get('depth', defaults['depth'])
+    try:
+        depth = int(depth or 0)
+    except (TypeError, ValueError):
+        depth = 0
+
+    include_files = bool(data.get('include_files', True))
+    include_journal = bool(data.get('include_journal', True))
+    include_docker = bool(data.get('include_docker', True))
+    include_stopped = bool(data.get('include_stopped', False))
+
+    host_label = _host_label(host_key)
+    # Collection fans out into worker threads, which do not inherit this
+    # request's app context - hand them the real app object.
+    try:
+        worker_app = current_app._get_current_object()
+    except RuntimeError:
+        worker_app = None
+
+    try:
+        bundle = prepare_bundle(
+            host_key, host_label, window_minutes, include_files, include_journal,
+            include_docker, include_stopped, app=worker_app, use_cache=True,
+        )
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+    norm = bundle['norm']
+    depth_costs = [
+        {'depth': d,
+         'label': pack_limits_label(d),
+         'tokens': pack.estimate_tokens(
+             pack.build_pack(host_label, norm, bundle['corr'], bundle['collected'],
+                             bundle['containers'], depth=d))}
+        for d in sorted(pack.PACK_LIMITS)
+    ]
+    cost_by_depth = {c['depth']: c['tokens'] for c in depth_costs}
+    baseline_tokens = cost_by_depth.get(3) or 0
+    full_tokens = cost_by_depth.get(5) or baseline_tokens
+    rec = sizing.recommend({
+        'pack_tokens': baseline_tokens,
+        'events': len(norm['events']),
+        'clusters': len(norm['clusters']),
+        'sources': len(bundle['ok_sources']),
+        'correlations': len(bundle['corr']['correlations']),
+        'severity': norm['severity_counts'],
+        'model_filtered': model or 'the selected model',
+    }, model, requested_depth=depth or None)
+
+    # Chunk count must reflect the depth actually chosen, not the baseline.
+    chosen_tokens = cost_by_depth.get(rec['depth'], baseline_tokens)
+    profile = rec['profile']
+    chunks = 1
+    if chosen_tokens > profile['chunk_at']:
+        chunks = max(2, int(math.ceil(chosen_tokens / max(1, profile['evidence_tokens']))))
+
+    _bundle_put(_bundle_key(host_key, window_minutes, include_files, include_journal,
+                            include_docker, include_stopped), bundle)
+
+    return jsonify({
+        'host_key': host_key,
+        'host_label': host_label,
+        'sources_total': len(bundle['collected']['sources']),
+        'sources_ok': len(bundle['ok_sources']),
+        'sources_empty': len(bundle['empty_sources']),
+        'sources_failed': len(bundle['failed_sources']),
+        'events': len(norm['events']),
+        'clusters': len(norm['clusters']),
+        'correlations': len(bundle['corr']['correlations']),
+        'severity': norm['severity_counts'],
+        'pack_tokens': baseline_tokens,
+        'pack_tokens_max_depth': full_tokens,
+        'depth_costs': depth_costs,
+        'recommendation': {
+            'depth': rec['depth'],
+            'depth_label': rec['depth_label'],
+            'depth_description': rec['depth_description'],
+            'chunks': chunks,
+            'chosen_tokens': chosen_tokens,
+            'model': rec['model'],
+            'model_context': rec['model_context'],
+            'usable_input_tokens': rec['usable_input_tokens'],
+            'suggested_model': rec['suggested_model'],
+            'suggest_model': rec['suggest_model'],
+            'rationale': rec['rationale'],
+        },
+    })
+
+
 @reports_bp.route('/serverreport/stream', methods=['POST'])
 def stream_report():
     data = request.get_json(silent=True) or {}
@@ -331,6 +634,12 @@ def stream_report():
         app_module._analysis_config(provider, data, model=model or None)
     except Exception as exc:
         return jsonify({'error': str(exc)}), 400
+
+    depth = data.get('depth', _defaults()['depth'])
+    try:
+        depth = int(depth or 0)
+    except (TypeError, ValueError):
+        depth = 0
 
     host_label = _host_label(host_key)
     include_files = bool(data.get('include_files', True))
@@ -368,8 +677,10 @@ def stream_report():
                     include_journal=include_journal,
                     include_docker=include_docker,
                     include_stopped=include_stopped,
+                    depth=depth,
                     emit=lambda p: box.put(('progress', p)),
                     app=worker_app,
+                    use_cache=True,
                 )
 
             try:

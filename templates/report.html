@@ -41,6 +41,7 @@
         <a href="/reports" class="inline-block mt-4 bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">All reports</a>
       </div>
     {% else %}
+      {% set coverage = report.coverage() %}
       {% set verdict = (report.verdict or 'unknown')|lower %}
       {% set verdict_classes = {
         'failing': 'border-rose-500/40 bg-rose-500/10 text-rose-200',
@@ -57,6 +58,9 @@
             {{ report.sources_ok }}/{{ report.sources_total }} sources with data &middot;
             {{ '{:,}'.format(report.events_total or 0) }} events &rarr; {{ report.clusters_total }} signatures &middot;
             {{ report.provider }} / {{ report.model }}
+            {% if coverage.get('depth_label') %} &middot; {{ coverage.get('depth_label') }} depth{% endif %}
+            {% if coverage.get('chunks', 1) and coverage.get('chunks') > 1 %} &middot; {{ coverage.get('chunks') }} chunk passes{% endif %}
+            {% if coverage.get('evidence_tokens') %} &middot; ~{{ '{:,}'.format(coverage.get('evidence_tokens')) }} evidence tokens{% endif %}
             {% if report.duration_ms %} &middot; {{ '%.1f'|format(report.duration_ms / 1000) }}s{% endif %}
             {% if report.tokens_in %} &middot; ~{{ '{:,}'.format(report.tokens_in) }} tokens in{% endif %}
             {% if report.tokens_out %} / {{ '{:,}'.format(report.tokens_out) }} out{% endif %}
@@ -88,7 +92,6 @@
         </div>
       </div>
 
-      {% set coverage = report.coverage() %}
       {% if coverage.get('truncated') or coverage.get('pack_fitted') or report.sources_failed %}
         <div class="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm px-4 py-3">
           <strong>Partial view.</strong>
