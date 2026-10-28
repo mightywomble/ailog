@@ -634,6 +634,34 @@ document.addEventListener('DOMContentLoaded', () => {
 .hosts-grab-handle { user-select: none; }
 .hosts-grab-handle:active { cursor: grabbing; }
 .hosts-drag-over { outline: 2px solid rgba(245, 158, 11, 0.9); outline-offset: 2px; }
+
+/* Top progress bar: indeterminate "working" state while connecting */
+@keyframes top-progress-sweep {
+    0%   { transform: translateX(-110%); }
+    100% { transform: translateX(310%); }
+}
+#top-progress-bar.progress-indeterminate {
+    width: 35% !important;
+    transition: none;
+    animation: top-progress-sweep 1.25s ease-in-out infinite;
+}
+/* Small spinner shown next to the progress label */
+.top-progress-spinner {
+    display: inline-block;
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 9999px;
+    border: 2px solid rgba(129, 140, 248, 0.3);
+    border-top-color: #818cf8;
+    animation: top-progress-spin 0.8s linear infinite;
+}
+@keyframes top-progress-spin {
+    to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+    #top-progress-bar.progress-indeterminate { animation: none; width: 100% !important; opacity: 0.5; }
+    .top-progress-spinner { animation: none; }
+}
 </style>
 </head>
 <body class="termix-text font-sans antialiased min-h-screen">
@@ -718,8 +746,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     <!-- Progress bar for journald services (10% height) -->
     <div id="top-progress-container" class="h-10 glass-container mx-4 p-2 flex items-center justify-between hidden">
+        <span id="top-progress-spinner" class="hidden top-progress-spinner shrink-0 mr-3" aria-hidden="true"></span>
         <p id="top-progress-message" class="text-xs termix-muted truncate">Fetching journald services...</p>
-        <div class="w-full bg-gray-300 rounded-full h-2 mx-4">
+        <div class="w-full bg-gray-300 rounded-full h-2 mx-4 overflow-hidden">
             <div id="top-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
         </div>
     </div>
@@ -742,6 +771,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <option value="name_desc">Name (Z-A)</option>
                 </select>
                 <button id="hosts-reset-order-btn" class="termix-btn text-xs px-2 py-1" type="button" title="Reset manual host order">Reset</button>
+                <button id="docker-scan-btn" class="termix-btn text-xs px-2 py-1" type="button" title="Scan all hosts for a Docker API endpoint">Scan Docker</button>
             </div>
             <div id="host-list-container" class="flex-1 overflow-y-auto space-y-2">
                 <!-- Host cards will be populated here -->
@@ -862,6 +892,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button id="logs-action-pull" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8 8 0 104.582 9m0 0H9" /></svg><span>Pull Logs</span></button>
                         <button id="logs-action-info" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" /></svg><span>Host Info</span></button>
                         <button id="logs-action-monitor" class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 13l3 3 7-7" /></svg><span>Monitoring</span></button>
+                        <button id="logs-action-docker" class="hidden bg-sky-600 hover:bg-sky-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 10V6a2 2 0 012-2h6a2 2 0 012 2v4M5 10v8a2 2 0 002 2h10a2 2 0 002-2v-8" /></svg><span>Docker</span></button>
                     </div>
                 </div>
             </div>
@@ -870,6 +901,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div id="logs-top-header" class="flex justify-between items-center mb-4">
                     <h2 id="log-table-title" class="text-lg font-semibold termix-text">Select a host to view logs</h2>
                     <div class="flex items-center space-x-2">
+                        <label class="flex items-center text-sm termix-muted" title="Show only Docker container logs">
+                            <input type="checkbox" id="docker-only-logs" class="mr-2">
+                            Docker logs only
+                        </label>
                         <label class="flex items-center text-sm termix-muted">
                             <input type="checkbox" id="show-empty-logs" class="mr-2" checked>
                             Show 0-byte logs
@@ -1757,6 +1792,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const logViewPanel = document.getElementById('log-view-panel');
 
         // Termix-style dashboard/logs views
+        // HTML-escape anything that came from a host (file names, container
+        // names, image refs) before it goes near innerHTML.
+        const escapeHtml = (value) => String(value == null ? '' : value).replace(
+            /[&<>"']/g,
+            (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+        );
+
         const dashboardView = document.getElementById('dashboard-view');
         const logsView = document.getElementById('logs-view');
         const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
@@ -1765,6 +1807,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const logsActionInfo = document.getElementById('logs-action-info');
         const logsActionMonitor = document.getElementById('logs-action-monitor');
         const logsActionSsh = document.getElementById('logs-action-ssh');
+        const logsActionDocker = document.getElementById('logs-action-docker');
         const sshTerminalContainer = document.getElementById('ssh-terminal-container');
         const sshTerminalBody = document.getElementById('ssh-terminal-body');
         const sshTerminalStatus = document.getElementById('ssh-terminal-status');
@@ -2038,6 +2081,83 @@ document.addEventListener('DOMContentLoaded', () => {
         if (logsActionInfo) logsActionInfo.addEventListener('click', () => showHostInfoMain());
         if (logsActionMonitor) logsActionMonitor.addEventListener('click', () => showHostMonitoringMain());
         if (logsActionSsh) logsActionSsh.addEventListener('click', () => openSshTerminal());
+
+        // ---- Docker monitoring gating -------------------------------------------------
+        // The Docker button is only shown for hosts with a reachable Docker endpoint
+        // (unix socket over SSH, plain TCP 2375 or TLS 2376).
+        let dockerReachableHosts = new Set();
+        let dockerEndpointsAt = 0;
+        let dockerEndpointsPromise = null;
+
+        const loadDockerEndpoints = (force = false) => {
+            const fresh = (Date.now() - dockerEndpointsAt) < 60000;
+            if (dockerEndpointsPromise && fresh && !force) return dockerEndpointsPromise;
+            dockerEndpointsPromise = (async () => {
+                try {
+                    const data = await window.fetchApi('/api/docker/endpoints');
+                    const next = new Set();
+                    (data?.endpoints || []).forEach(ep => {
+                        if (ep && ep.reachable) next.add(String(ep.host_key));
+                    });
+                    dockerReachableHosts = next;
+                    dockerEndpointsAt = Date.now();
+                } catch (err) {
+                    // Keep whatever we had; the button simply stays hidden.
+                }
+                return dockerReachableHosts;
+            })();
+            return dockerEndpointsPromise;
+        };
+
+        const refreshDockerButton = async (hostId) => {
+            if (!logsActionDocker) return;
+            logsActionDocker.classList.add('hidden');
+            if (!hostId) return;
+            const requested = String(hostId);
+            const reachable = await loadDockerEndpoints();
+            if (String(selectedHostId) !== requested) return;
+            if (reachable && reachable.has(requested)) {
+                logsActionDocker.classList.remove('hidden');
+            }
+        };
+
+        if (logsActionDocker) logsActionDocker.addEventListener('click', () => {
+            if (!selectedHostId) return;
+            window.location.href = '/docker/' + encodeURIComponent(selectedHostId);
+        });
+
+        // Cluster-wide "Scan Docker" action: probes every configured host for a
+        // Docker API endpoint, then refreshes the per-host button gating.
+        const dockerScanBtn = document.getElementById('docker-scan-btn');
+        if (dockerScanBtn) {
+            const scanLabel = dockerScanBtn.textContent;
+            const restoreScanLabel = (text, delay = 4000) => {
+                if (text) dockerScanBtn.textContent = text;
+                setTimeout(() => { dockerScanBtn.textContent = scanLabel; }, delay);
+            };
+            dockerScanBtn.addEventListener('click', async () => {
+                if (dockerScanBtn.disabled) return;
+                dockerScanBtn.disabled = true;
+                dockerScanBtn.textContent = 'Scanning…';
+                try {
+                    const res = await fetch('/api/docker/discover', {
+                        method: 'POST',
+                        headers: { 'Accept': 'application/json' }
+                    });
+                    const data = await res.json();
+                    dockerEndpointsAt = 0;
+                    dockerEndpointsPromise = null;
+                    await loadDockerEndpoints(true);
+                    if (selectedHostId) refreshDockerButton(selectedHostId);
+                    restoreScanLabel(`Found ${(data && data.found) || 0}`);
+                } catch (err) {
+                    console.error('Docker scan failed', err);
+                    restoreScanLabel('Scan failed');
+                } finally {
+                    dockerScanBtn.disabled = false;
+                }
+            });
+        }
 
         const setStatusDot = (el, ok) => {
             if (!el) return;
@@ -2531,7 +2651,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 setTimeout(() => progressContainer.classList.add('hidden'), 1500);
             } catch (error) {
-                sourceListContainer.innerHTML = `<li class="p-4 text-red-400">Failed to load table view: ${error.message}</li>`;
+                sourceListContainer.innerHTML = `<li class="p-4 text-red-400">Failed to load table view: ${escapeHtml(error.message)}</li>`;
                 progressContainer.classList.add('hidden');
             }
         };
@@ -2629,7 +2749,11 @@ document.addEventListener('DOMContentLoaded', () => {
             await updateAiAnalyseBtnVisibility(false);
 
             const hostParam = hostId === 'local' ? '' : `?host=${hostId}`;
-            const url = logType === 'file' ? `/log/${encodeURIComponent(logName)}${hostParam}` : `/journal/${encodeURIComponent(logName)}${hostParam}`;
+            const url = logType === 'file'
+                ? `/log/${encodeURIComponent(logName)}${hostParam}`
+                : (logType === 'docker'
+                    ? `/api/docker/log/${encodeURIComponent(logName)}${hostParam}`
+                    : `/journal/${encodeURIComponent(logName)}${hostParam}`);
 
             try {
                 const response = await fetch(url);
@@ -2638,13 +2762,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 currentLogContent = data.content;
                 logTitle.textContent = `${logName} on ${hostName}`;
-                logContent.innerHTML = `<pre class="text-sm termix-text font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
+                // Log lines are untrusted host output - use textContent, never innerHTML.
+                logContent.innerHTML = '<pre class="text-sm termix-text font-mono whitespace-pre-wrap"></pre>';
+                logContent.querySelector('pre').textContent = data.content || 'Log source is empty.';
                 
                 // Update button visibility based on content and AI config
                 await updateAiAnalyseBtnVisibility(!!data.content, data.will_be_truncated);
             } catch (error) {
                 logTitle.textContent = `Error loading ${logName}`;
-                logContent.innerHTML = `<div class="text-center text-red-400 mt-16">${error.message}</div>`;
+                logContent.innerHTML = `<div class="text-center text-red-400 mt-16">${escapeHtml(error.message)}</div>`;
                 window.showToast(error.message, 'error');
             }
         };
@@ -3040,6 +3166,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     card.classList.remove('termix-host-selected');
                 }
             });
+
+            // Show the Docker button only when this host has a reachable endpoint
+            refreshDockerButton(hostId);
 
             // Default view: show host info in the main panel
             showHostInfoMain();
@@ -3718,6 +3847,70 @@ const showHostInfoMain = async () => {
         };
 
 
+        // --- TOP PROGRESS BAR (connect feedback) -------------------------------
+        // While the sources stream is connecting there is nothing to measure, so
+        // the bar sweeps (indeterminate) and the label carries an elapsed clock.
+        // That makes slow SSH connections / proxy latency look like work in
+        // progress instead of a frozen "Initializing connection...".
+        let sourcesProgressTimer = null;
+        let sourcesProgressStartedAt = 0;
+        let sourcesProgressLabel = 'Initializing connection...';
+
+        const sourcesProgressEls = () => ({
+            container: document.getElementById('top-progress-container'),
+            bar: document.getElementById('top-progress-bar'),
+            message: document.getElementById('top-progress-message'),
+            spinner: document.getElementById('top-progress-spinner'),
+        });
+
+        const sourcesProgressTick = () => {
+            const { message } = sourcesProgressEls();
+            if (!message || !sourcesProgressStartedAt) return;
+            const elapsed = Math.max(0, Math.floor((Date.now() - sourcesProgressStartedAt) / 1000));
+            let label = sourcesProgressLabel;
+            // Escalate the wording while still waiting for the first event.
+            if (label === 'Initializing connection...') {
+                if (elapsed >= 8) label = 'Slow to respond - still trying...';
+                else if (elapsed >= 3) label = 'Waiting for host to respond...';
+            }
+            message.textContent = elapsed >= 1 ? `${label} \u00b7 ${elapsed}s` : label;
+        };
+
+        const stopSourcesProgressClock = () => {
+            if (sourcesProgressTimer) {
+                clearInterval(sourcesProgressTimer);
+                sourcesProgressTimer = null;
+            }
+        };
+
+        const startSourcesProgress = () => {
+            stopSourcesProgressClock();
+            const { container, bar, message, spinner } = sourcesProgressEls();
+            if (container) container.classList.remove('hidden');
+            if (bar) {
+                bar.classList.add('progress-indeterminate');
+                bar.style.width = '0%';
+            }
+            if (spinner) spinner.classList.remove('hidden');
+            sourcesProgressStartedAt = Date.now();
+            sourcesProgressLabel = 'Initializing connection...';
+            if (message) message.textContent = sourcesProgressLabel;
+            sourcesProgressTimer = setInterval(sourcesProgressTick, 1000);
+        };
+
+        const noteSourcesProgress = (label) => {
+            if (label) sourcesProgressLabel = label;
+            sourcesProgressTick();
+        };
+
+        const finishSourcesProgress = () => {
+            stopSourcesProgressClock();
+            sourcesProgressStartedAt = 0;
+            const { bar, spinner } = sourcesProgressEls();
+            if (bar) bar.classList.remove('progress-indeterminate');
+            if (spinner) spinner.classList.add('hidden');
+        };
+
         // --- CORE APP LOGIC ---
         const fetchSourcesForHost = (viewToken) => {
             const url = selectedHostId === 'local' ? '/sources/local' : `/sources/remote/${selectedHostId}`;
@@ -3734,39 +3927,55 @@ const showHostInfoMain = async () => {
             aiAnalyseBtn.classList.add('hidden');
             truncationWarning.classList.add('hidden');
             
-            // Use top progress bar instead of sidebar progress
+            // Top progress bar with indeterminate sweep + elapsed clock while connecting
+            startSourcesProgress();
             const topProgressContainer = document.getElementById('top-progress-container');
             const topProgressBar = document.getElementById('top-progress-bar');
             const topProgressMessage = document.getElementById('top-progress-message');
-            
-            topProgressContainer.classList.remove('hidden');
-            topProgressBar.style.width = '0%';
-            topProgressMessage.textContent = 'Initializing connection...';
-            
+
             let journalItems = [];
+            let sourceCount = 0;
+            let sawFirstEvent = false;
+
             currentEventSource = new EventSource(url);
 
             currentEventSource.onmessage = (event) => {
                 // If user navigated away (Host Info / SSH / Monitoring), ignore streamed updates.
                 if (viewToken !== logsMainViewToken || logsMainMode !== 'pull') {
+                    finishSourcesProgress();
+                    if (topProgressContainer) topProgressContainer.classList.add('hidden');
                     try { currentEventSource.close(); } catch (_) {}
                     return;
                 }
 
                 const data = JSON.parse(event.data);
+
+                if (!sawFirstEvent) {
+                    // First real message: stop sweeping, switch to measured progress.
+                    sawFirstEvent = true;
+                    if (topProgressBar) topProgressBar.classList.remove('progress-indeterminate');
+                }
+
                 switch(data.status) {
                     case 'progress':
-                        topProgressBar.style.width = `${data.progress}%`;
-                        topProgressMessage.textContent = data.message;
+                        if (topProgressBar) topProgressBar.style.width = `${data.progress}%`;
+                        noteSourcesProgress(data.message);
                         break;
                     case 'source':
+                        sourceCount += 1;
                         if (data.data.type === 'file') appendSourceToList(data.data);
                         else journalItems.push(data.data);
+                        // Journal units can arrive in the thousands - don't repaint
+                        // the label for every one of them.
+                        if (data.data.type !== 'journal') {
+                            noteSourcesProgress(`Found ${sourceCount} log sources...`);
+                        }
                         break;
                     case 'complete':
                         journalItems.forEach(appendSourceToList);
-                        topProgressBar.style.width = `100%`;
-                        topProgressMessage.textContent = 'Done!';
+                        finishSourcesProgress();
+                        if (topProgressBar) topProgressBar.style.width = `100%`;
+                        if (topProgressMessage) topProgressMessage.textContent = 'Done!';
                         if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
 
                         if (sourceListContainer.children.length === 0) {
@@ -3780,10 +3989,11 @@ const showHostInfoMain = async () => {
                         currentEventSource.close();
                         break;
                     case 'error':
+                        finishSourcesProgress();
                         window.showToast(data.message, 'error');
                         topProgressContainer.classList.add('hidden');
                         if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
-                        sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${data.message}</li>`;
+                        sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${escapeHtml(data.message)}</li>`;
                         currentEventSource.close();
                         break;
                 }
@@ -3791,6 +4001,7 @@ const showHostInfoMain = async () => {
 
             currentEventSource.onerror = (err) => {
                 console.error("EventSource failed:", err);
+                finishSourcesProgress();
                 window.showToast('Connection to server failed. Check if the backend is running.', 'error');
                 topProgressContainer.classList.add('hidden');
                 if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
@@ -3806,49 +4017,49 @@ const showHostInfoMain = async () => {
             li.dataset.size = source.size_bytes;
             li.dataset.modified = source.modified_epoch;
             
-            // Check if this is a 0-byte log and if they should be hidden
-            const showEmptyLogs = document.getElementById('show-empty-logs').checked;
-            const isEmptyLog = source.size_bytes === 0;
-            
+            // Docker container logs are never treated as "empty" - running
+            // containers legitimately report 0B of writable layer.
+            const isEmptyLog = source.type !== 'docker' && source.size_bytes === 0;
+            const isDocker = source.type === 'docker';
+            if (isDocker) li.dataset.containerId = source.container_id || '';
+
+            const icon = source.type === 'file'
+                ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 termix-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`
+                : (isDocker
+                    ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V7a2 2 0 00-2-2h-3V3H9v2H6a2 2 0 00-2 2v6m16 0l-2 6H6l-2-6m16 0H4" /></svg>`
+                    : `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 termix-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>`);
+
             li.innerHTML = `
                 <a href="#" class="log-link flex items-center w-full text-left p-3 rounded-lg border border-transparent hover:bg-white/5/70 focus:bg-indigo-600 focus:text-white transition-all">
-                    <div class="flex-shrink-0 mr-3">
-                        ${source.type === 'file' 
-                            ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 termix-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`
-                            : `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 termix-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>`}
-                    </div>
+                    <div class="flex-shrink-0 mr-3">${icon}</div>
                     <div class="flex-grow overflow-hidden">
-                        <span class="font-medium truncate block">${source.name}</span>
-                        <span class="text-xs termix-muted">${source.modified_formatted}</span>
+                        <span class="font-medium truncate block">${escapeHtml(source.name)}${isDocker ? ' <span class="text-[10px] uppercase tracking-wide text-sky-400/80 ml-1">docker</span>' : ''}</span>
+                        <span class="text-xs termix-muted">${escapeHtml(source.modified_formatted)}</span>
                     </div>
-                    <span class="text-xs font-mono termix-muted ml-2 flex-shrink-0">${source.size_formatted}</span>
+                    <span class="text-xs font-mono termix-muted ml-2 flex-shrink-0">${escapeHtml(source.size_formatted)}</span>
                 </a>
             `;
-            
-            // Hide the item if it's 0-byte and the toggle is unchecked
-            if (isEmptyLog && !showEmptyLogs) {
-                li.style.display = 'none';
-            }
-            
+
             sourceListContainer.appendChild(li);
+            applySourceFilters();
         };
         
-        // Function to filter existing logs based on the toggle
-        const filterLogsBySize = () => {
-            const showEmptyLogs = document.getElementById('show-empty-logs').checked;
-            const logItems = sourceListContainer.querySelectorAll('.source-item');
-            
-            logItems.forEach(item => {
-                const sizeBytes = parseInt(item.dataset.size);
-                const isEmptyLog = sizeBytes === 0;
-                
-                if (isEmptyLog && !showEmptyLogs) {
-                    item.style.display = 'none';
-                } else {
-                    item.style.display = '';
-                }
+        // Show/hide pulled sources based on the "0-byte" and "Docker only" toggles.
+        const applySourceFilters = () => {
+            const showEmptyEl = document.getElementById('show-empty-logs');
+            const dockerOnlyEl = document.getElementById('docker-only-logs');
+            const showEmptyLogs = showEmptyEl ? showEmptyEl.checked : true;
+            const dockerOnly = !!(dockerOnlyEl && dockerOnlyEl.checked);
+
+            sourceListContainer.querySelectorAll('.source-item').forEach(item => {
+                const isDocker = item.dataset.type === 'docker';
+                const sizeBytes = parseInt(item.dataset.size || '0', 10);
+                const isEmptyLog = !isDocker && sizeBytes === 0;
+                const hide = (isEmptyLog && !showEmptyLogs) || (dockerOnly && !isDocker);
+                item.style.display = hide ? 'none' : '';
             });
         };
+        const filterLogsBySize = applySourceFilters;
         
         // --- SETTINGS MANAGEMENT ---
         const updateProviderIndicator = () => {
@@ -5207,7 +5418,11 @@ const showHostInfoMain = async () => {
             await updateAiAnalyseBtnVisibility(false);
 
             const hostParam = selectedHost === 'local' ? '' : `?host=${selectedHost}`;
-            const url = type === 'file' ? `/log/${encodeURIComponent(currentLogName)}${hostParam}` : `/journal/${encodeURIComponent(currentLogName)}${hostParam}`;
+            const url = type === 'file'
+                ? `/log/${encodeURIComponent(currentLogName)}${hostParam}`
+                : (type === 'docker'
+                    ? `/api/docker/log/${encodeURIComponent(currentLogName)}${hostParam}`
+                    : `/journal/${encodeURIComponent(currentLogName)}${hostParam}`);
 
             try {
                 const response = await fetch(url);
@@ -5216,13 +5431,15 @@ const showHostInfoMain = async () => {
                 
                 currentLogContent = data.content;
                 logContentTitle.textContent = `${currentLogName} on ${selectedHostName}`;
-                logContentContainer.innerHTML = `<pre class="text-sm termix-text font-mono whitespace-pre-wrap">${data.content || 'Log source is empty.'}</pre>`;
+                // Log lines are untrusted host output - use textContent, never innerHTML.
+                logContentContainer.innerHTML = '<pre class="text-sm termix-text font-mono whitespace-pre-wrap"></pre>';
+                logContentContainer.querySelector('pre').textContent = data.content || 'Log source is empty.';
                 
                 // Update button visibility based on content and AI config
                 await updateAiAnalyseBtnVisibility(!!data.content, data.will_be_truncated);
             } catch (error) {
                 logContentTitle.textContent = `Error loading ${currentLogName}`;
-                logContentContainer.innerHTML = `<div class="text-center text-red-400 mt-16">${error.message}</div>`;
+                logContentContainer.innerHTML = `<div class="text-center text-red-400 mt-16">${escapeHtml(error.message)}</div>`;
                 window.showToast(error.message, 'error');
             }
         });
@@ -5287,7 +5504,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 
                 window.showToast(`Analysis complete using ${provider.toUpperCase()}`);
             } catch (error) {
-                aiAnalysisContent.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${error.message}</p>`;
+                aiAnalysisContent.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${escapeHtml(error.message)}</p>`;
             } finally {
                 aiAnalyseBtn.textContent = 'AI Analyse';
                 aiAnalyseBtn.disabled = false;
@@ -6198,7 +6415,9 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
             try {
                 const scope = searchScope.value === 'selected' && currentLogName ? 
-                    (currentLogType === 'file' ? `file:${currentLogName}` : `journal:${currentLogName}`) : 'all';
+                    (currentLogType === 'file'
+                        ? `file:${currentLogName}`
+                        : (currentLogType === 'docker' ? 'all' : `journal:${currentLogName}`)) : 'all';
                 
                 const hostFilter = searchScope.value === 'selected' && currentHostId ? [currentHostId] : [];
 
@@ -6325,9 +6544,11 @@ aiAnalyseBtn.addEventListener('click', async () => {
         // Replace the original function
         window.loadLogContent = enhancedLoadLogContent;
 
-        // Add event listener for the 0-byte logs toggle
+        // Add event listeners for the pulled-log filters
         const showEmptyLogsCheckbox = document.getElementById('show-empty-logs');
-        showEmptyLogsCheckbox.addEventListener('change', filterLogsBySize);
+        if (showEmptyLogsCheckbox) showEmptyLogsCheckbox.addEventListener('change', applySourceFilters);
+        const dockerOnlyLogsCheckbox = document.getElementById('docker-only-logs');
+        if (dockerOnlyLogsCheckbox) dockerOnlyLogsCheckbox.addEventListener('change', applySourceFilters);
 
         // expose key helpers for other scripts
         window.fetchApi = fetchApi;

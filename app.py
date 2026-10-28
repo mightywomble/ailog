@@ -24,7 +24,7 @@ import tempfile
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
 import shutil
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket, Monitor, MonitorCheck, HostDockerInventory
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket, Monitor, MonitorCheck, HostDockerInventory, DockerEndpoint
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services, execute_remote_command
 from utils.sshkey_crypto import encrypt_str, decrypt_str, is_configured as sshkey_crypto_configured, generate_master_key, SSHKeyCryptoError, compute_key_checksum, verify_key_checksum, normalize_ssh_key_text
 
@@ -35,6 +35,10 @@ sock = Sock(app)
 # Monitoring subsystem (modular bolt-on)
 from monitoring import monitoring_bp
 app.register_blueprint(monitoring_bp)
+
+# Docker monitoring subsystem (modular bolt-on)
+from dockermon import docker_bp
+app.register_blueprint(docker_bp)
 
 # --- DATABASE CONFIGURATION ---
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog.db')
@@ -599,10 +603,64 @@ def execute_command(hostname, command_str, timeout=10):
         # Raise an error that includes stderr so the UI can surface the real SSH reason.
         raise RuntimeError(f"SSH command failed (rc={e.returncode}): {stderr or '<no stderr>'}")
 
+def _docker_log_sources(hostname):
+    """Container log sources for a host (empty list when Docker is absent).
+
+    Uses one cheap ``docker ps`` call over the same transport as the rest of the
+    log viewer (SSH for remote hosts, local shell for ``local``). Containers are
+    exposed as ``type='docker'`` sources so the browser can offer them in the
+    pulled-log list.
+    """
+    fmt = '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Size}}'
+    command = (
+        'if sudo -n docker version >/dev/null 2>&1; then D="sudo -n docker"; '
+        'else D="docker"; fi; '
+        f"$D ps -a --no-trunc --size --format '{fmt}' 2>/dev/null"
+    )
+    try:
+        res = execute_command(hostname, command, timeout=15)
+    except Exception as e:
+        print(f"[docker] container listing failed on '{hostname}': {e}")
+        return []
+
+    try:
+        from dockermon.parse import parse_ps_line
+    except Exception:
+        return []
+
+    sources = []
+    for line in (res.stdout or '').splitlines():
+        if not line.strip():
+            continue
+        row = parse_ps_line(line)
+        if not row.get('id'):
+            continue
+        image = row.get('image') or ''
+        image_ref = image.split('@', 1)[0]
+        size_bytes = row.get('size') or 0
+        sources.append({
+            'type': 'docker',
+            'name': row.get('name') or row['id'][:12],
+            'container_id': row['id'],
+            'image': image_ref,
+            'state': row.get('state') or 'unknown',
+            'status': row.get('status') or '',
+            'size_bytes': size_bytes,
+            'size_formatted': format_bytes(size_bytes) if size_bytes else 'N/A',
+            'modified_epoch': 0,
+            'modified_formatted': f"{row.get('state') or 'unknown'} \u00b7 {image_ref or 'image'}",
+        })
+    return sources
+
+
 def get_log_sources_from_host_stream(hostname='local'):
     def generate_event(data):
         return f"data: {json.dumps(data)}\n\n"
     try:
+        # Send an immediate (comment) heartbeat so the browser opens the stream
+        # straight away even if the first SSH command takes a while.
+        yield ': connected\n\n'
+        yield 'retry: 5000\n\n'
         yield generate_event({'status': 'progress', 'message': 'Listing log files...', 'progress': 5})
         cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
         res_ls = execute_command(hostname, cmd_ls)
@@ -631,6 +689,15 @@ def get_log_sources_from_host_stream(hostname='local'):
                 yield generate_event({'status': 'source', 'data': source_data})
         except Exception as e:
             print(f"Could not fetch journald units from '{hostname}': {e}")
+
+        # Docker container logs (only when the host actually runs containers)
+        yield generate_event({'status': 'progress', 'message': 'Looking for Docker containers...', 'progress': 97})
+        try:
+            for source_data in _docker_log_sources(hostname):
+                yield generate_event({'status': 'source', 'data': source_data})
+        except Exception as e:
+            print(f"Could not list Docker containers on '{hostname}': {e}")
+
         yield generate_event({'status': 'complete', 'message': 'Done!'})
     except Exception as e:
         yield generate_event({'status': 'error', 'message': str(e)})
@@ -785,13 +852,24 @@ def index():
 def favicon():
     return '', 204  # No content response for favicon
 
+# SSE responses must not be buffered by reverse proxies (nginx proxy manager),
+# otherwise the browser shows nothing until the first buffer flush and the
+# progress bar appears frozen on "Initializing connection...".
+SOURCES_STREAM_HEADERS = {
+    'Cache-Control': 'no-cache, no-transform',
+    'X-Accel-Buffering': 'no',
+    'Connection': 'keep-alive',
+}
+
 @app.route('/sources/local')
 def get_local_sources():
-    return Response(stream_with_context(get_log_sources_from_host_stream('local')), mimetype='text/event-stream')
+    return Response(stream_with_context(get_log_sources_from_host_stream('local')),
+                    mimetype='text/event-stream', headers=SOURCES_STREAM_HEADERS)
 
 @app.route('/sources/remote/<hostname>')
 def get_remote_sources(hostname):
-    return Response(stream_with_context(get_log_sources_from_host_stream(hostname)), mimetype='text/event-stream')
+    return Response(stream_with_context(get_log_sources_from_host_stream(hostname)),
+                    mimetype='text/event-stream', headers=SOURCES_STREAM_HEADERS)
 
 # Cache for host sources to avoid repeated queries
 _host_sources_cache = {}
@@ -1270,6 +1348,21 @@ def fetch_sources_from_host_detailed(host_id, host_name, progress_callback, base
 
     return host_sources
 
+def _safe_log_path(filename):
+    """Resolve a path under LOG_DIRECTORY, refusing traversal outside it.
+
+    The filename arrives from the browser, so ``..`` segments or an absolute
+    path would otherwise let a caller read arbitrary files as root (the remote
+    command runs under sudo).
+    """
+    if not filename or '\x00' in filename or os.path.isabs(filename):
+        raise ValueError('invalid log path')
+    parts = [p for p in filename.replace('\\', '/').split('/') if p not in ('', '.')]
+    if any(p == '..' for p in parts):
+        raise ValueError('invalid log path')
+    return os.path.join(LOG_DIRECTORY, *parts)
+
+
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
     hostname = request.args.get('host', 'local')
@@ -1289,7 +1382,12 @@ def get_log_content(filename):
         print(f"[DEBUG /log] Using local/config host: {hostname}")
     
     try:
-        command_str = f"sudo zcat {shlex.quote(os.path.join(LOG_DIRECTORY, filename))} 2>/dev/null | tail -n 500" if filename.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(os.path.join(LOG_DIRECTORY, filename))}"
+        safe_path = _safe_log_path(filename)
+    except ValueError as e:
+        return jsonify({'error': f"Invalid log path '{filename}': {e}"}), 400
+
+    try:
+        command_str = f"sudo zcat {shlex.quote(safe_path)} 2>/dev/null | tail -n 500" if filename.endswith('.gz') else f"sudo tail -n 500 {shlex.quote(safe_path)}"
         result = execute_command(hostname, command_str)
         return jsonify({'content': result.stdout, 'will_be_truncated': len(result.stdout) > MAX_CHAR_COUNT})
     except Exception as e: 
@@ -1304,6 +1402,35 @@ def get_journal_content(unit):
         return jsonify({'content': result.stdout, 'will_be_truncated': len(result.stdout) > MAX_CHAR_COUNT})
     except Exception as e: 
         return jsonify({'error': f"Could not read journal for unit '{unit}' on '{hostname}': {e}"}), 500
+
+@app.route('/api/docker/log/<path:container>')
+def get_docker_log_content(container):
+    """Tail the last 500 log lines of a container.
+
+    On a swarm manager ``docker logs`` only works for containers scheduled on
+    that node, so we first resolve the swarm service label and use
+    ``docker service logs`` when present (sampled across the cluster), falling
+    back to plain ``docker logs``.
+    """
+    hostname = request.args.get('host', 'local')
+    # Container names/IDs are restricted by Docker itself; reject anything else
+    # so odd input never reaches the remote shell.
+    if not container or len(container) > 200 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.\-]*', container):
+        return jsonify({'error': 'Invalid container identifier'}), 400
+    q = shlex.quote(container)
+    label = '\'{{index .Config.Labels "com.docker.swarm.service.name"}}\''
+    command_str = (
+        'if sudo -n docker version >/dev/null 2>&1; then D="sudo -n docker"; '
+        'else D="docker"; fi; '
+        f'SVC=$($D inspect -f {label} {q} 2>/dev/null); '
+        'if [ -n "$SVC" ] && $D service logs --tail 500 --timestamps "$SVC" 2>&1; then exit 0; fi; '
+        f'$D logs --tail 500 --timestamps {q} 2>&1'
+    )
+    try:
+        result = execute_command(hostname, command_str, timeout=20)
+        return jsonify({'content': result.stdout, 'will_be_truncated': len(result.stdout) > MAX_CHAR_COUNT})
+    except Exception as e:
+        return jsonify({'error': f"Could not read Docker logs for '{container}' on '{hostname}': {e}"}), 500
 
 # --- HOST MANAGEMENT ROUTES ---
 @app.route('/hosts', methods=['GET'])
@@ -2729,6 +2856,25 @@ def _monitoring_runner_job():
     except Exception as e:
         print(f'[WARN] Monitoring runner failed: {e}')
 
+def _docker_endpoint_refresh_job():
+    """Periodically re-probe every configured host for a Docker API endpoint."""
+    try:
+        from dockermon.endpoints import all_host_keys
+        from dockermon.routes import _scan_one
+        with app.app_context():
+            keys = all_host_keys()
+        # Probe in parallel: each host costs two SSH round trips, so scanning
+        # 16 hosts serially would take longer than the interval.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_scan_one, key, app): key for key in keys}
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as e:
+                    print(f'[WARN] Docker endpoint refresh failed for {futures[fut]}: {e}')
+    except Exception as e:
+        print(f'[WARN] Docker endpoint refresh job failed: {e}')
+
 def startup_scheduler():
     """Start APScheduler and sync jobs from DB schedules."""
     with app.app_context():
@@ -2746,6 +2892,25 @@ def startup_scheduler():
             )
         except Exception as e:
             print(f'[WARN] Monitoring scheduler job not started: {e}')
+
+        # Docker endpoint refresh (re-probes configured hosts for a Docker API).
+        # Cadence is configurable: AILOG_DOCKER_REFRESH_SECONDS (default 300s).
+        try:
+            try:
+                docker_refresh_seconds = max(30, int(os.environ.get('AILOG_DOCKER_REFRESH_SECONDS', '300')))
+            except (TypeError, ValueError):
+                docker_refresh_seconds = 300
+            scheduler.add_job(
+                _docker_endpoint_refresh_job,
+                trigger='interval',
+                seconds=docker_refresh_seconds,
+                id='docker_endpoint_refresh',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        except Exception as e:
+            print(f'[WARN] Docker endpoint refresh job not started: {e}')
 
         try:
             _ensure_default_schedule_migrated()

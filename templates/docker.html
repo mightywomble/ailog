@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Docker - {{ host.friendly_name or host.name or host_key }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .chart-box { position: relative; height: 150px; }
+    .row-hover:hover { background: rgba(255,255,255,0.04); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 5px; }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="max-w-7xl mx-auto p-4 sm:p-6">
+
+    <!-- header -->
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-sky-600/20 border border-sky-500/30 flex items-center justify-center">
+          <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 10V6h4v4m-4 0v10h10V10M3 10l2-4h4l2 4"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-semibold leading-tight">Docker &mdash; {{ host.friendly_name or host.name or host_key }}</h1>
+          <div class="text-xs text-slate-400">
+            <span id="host-ip">{{ host.ip or '' }}</span>
+            <span id="engine-version" class="ml-2"></span>
+            <span id="node-name" class="ml-2"></span>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="live-dot" class="inline-flex items-center gap-2 text-xs text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500" id="live-dot-inner"></span>
+          <span id="live-text">connecting</span>
+        </span>
+        <button id="btn-refresh" type="button"
+                class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">Refresh</button>
+        <a class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg" href="/">Back</a>
+      </div>
+    </div>
+
+    <div id="error-banner" class="hidden mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm px-4 py-3"></div>
+
+    <!-- swarm cluster view -->
+    <section id="swarm-section" class="mt-5 hidden">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Swarm cluster</h2>
+        <span id="swarm-summary" class="text-xs text-slate-400"></span>
+      </div>
+      <div id="node-chips" class="mt-2 flex flex-wrap gap-2"></div>
+    </section>
+
+    <!-- row 1: live graphs -->
+    <section class="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="card rounded-xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-medium text-slate-300">CPU</h3>
+          <span id="cpu-value" class="text-lg font-semibold tabular-nums text-sky-400">&mdash;</span>
+        </div>
+        <div class="chart-box"><canvas id="chart-cpu"></canvas></div>
+        <div id="cpu-sub" class="mt-1 text-xs text-slate-500">&nbsp;</div>
+      </div>
+      <div class="card rounded-xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-medium text-slate-300">Memory</h3>
+          <span id="mem-value" class="text-lg font-semibold tabular-nums text-violet-400">&mdash;</span>
+        </div>
+        <div class="chart-box"><canvas id="chart-mem"></canvas></div>
+        <div id="mem-sub" class="mt-1 text-xs text-slate-500">&nbsp;</div>
+      </div>
+      <div class="card rounded-xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-medium text-slate-300">Network</h3>
+          <span class="text-xs text-slate-400 tabular-nums">
+            <span class="text-emerald-400" id="net-rx">&darr; 0 B/s</span>
+            <span class="text-amber-400 ml-2" id="net-tx">&uarr; 0 B/s</span>
+          </span>
+        </div>
+        <div class="chart-box"><canvas id="chart-net"></canvas></div>
+        <div id="net-sub" class="mt-1 text-xs text-slate-500">&nbsp;</div>
+      </div>
+    </section>
+
+    <!-- row 2: containers -->
+    <section class="mt-5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">
+          Containers <span id="container-count" class="text-slate-500 normal-case"></span>
+        </h2>
+        <div class="flex items-center gap-2">
+          <input id="container-filter" type="text" placeholder="filter name / image / stack"
+                 class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-sky-500/60" />
+          <label class="text-xs text-slate-400 flex items-center gap-1">
+            <input id="show-stopped" type="checkbox" class="accent-sky-500" checked /> stopped
+          </label>
+        </div>
+      </div>
+      <div id="container-list" class="mt-3 space-y-2"></div>
+      <div id="container-empty" class="hidden mt-6 text-center text-sm text-slate-500">No containers match.</div>
+    </section>
+
+    <div class="mt-8 text-center text-[11px] text-slate-600">
+      Live statistics only (no history is stored) &middot; polling every 2s &middot; {{ host_key }}
+    </div>
+  </div>
+
+<script>
+(function () {
+  const HOST_KEY = {{ host_key|tojson }};
+  const API = '/api/docker/hosts/' + encodeURIComponent(HOST_KEY);
+  const MAX_POINTS = 60;
+  const POLL_MS = 2000;
+  const CONTAINER_POLL_MS = 5000;
+
+  const state = {
+    stats: null,
+    containers: [],
+    nodes: [],
+    selectedNode: null,
+    expanded: new Set(),
+    details: {},
+    filter: '',
+    showStopped: true,
+    timer: null,
+    containerTimer: null,
+    failures: 0,
+  };
+
+  // ---------------------------------------------------------------- helpers
+  function humanBytes(n) {
+    n = Number(n || 0);
+    if (!isFinite(n) || n <= 0) return '0 B';
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (n >= 100 ? n.toFixed(0) : n.toFixed(1)) + ' ' + units[i];
+  }
+  function humanRate(n) { return humanBytes(n) + '/s'; }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+  async function getJSON(url) {
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    let body = null;
+    try { body = await res.json(); } catch (e) { body = null; }
+    if (!res.ok || !body || body.success === false) {
+      const msg = (body && body.error) || ('HTTP ' + res.status);
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    return body;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-banner');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+  function clearError() {
+    document.getElementById('error-banner').classList.add('hidden');
+  }
+  function setLive(ok, text) {
+    const dot = document.getElementById('live-dot-inner');
+    dot.className = 'w-2 h-2 rounded-full ' + (ok ? 'bg-emerald-500' : (text === 'connecting' ? 'bg-slate-500' : 'bg-rose-500'));
+    document.getElementById('live-text').textContent = text;
+  }
+
+  // ---------------------------------------------------------------- charts
+  const baseScales = {
+    x: { display: false },
+    y: {
+      beginAtZero: true,
+      grid: { color: 'rgba(255,255,255,0.06)' },
+      ticks: { color: 'rgba(148,163,184,0.8)', font: { size: 10 }, maxTicksLimit: 4 },
+      border: { display: false },
+    },
+  };
+  const baseOptions = (max, unit) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { intersect: false, mode: 'index' },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: 'rgba(2,6,23,0.95)',
+        borderColor: 'rgba(255,255,255,0.1)',
+        borderWidth: 1,
+        callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + Number(ctx.parsed.y).toFixed(1) + unit },
+      },
+    },
+    scales: { ...baseScales, y: { ...baseScales.y, suggestedMax: max } },
+    elements: { point: { radius: 0 }, line: { borderWidth: 2, tension: 0.25 } },
+  });
+
+  function makeChart(canvasId, datasets, max, unit) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    return new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets },
+      options: baseOptions(max, unit),
+    });
+  }
+  function pushPoint(chart, values) {
+    const labels = chart.data.labels;
+    labels.push('');
+    chart.data.datasets.forEach((ds, i) => ds.data.push(values[i]));
+    if (labels.length > MAX_POINTS) {
+      labels.shift();
+      chart.data.datasets.forEach(ds => ds.data.shift());
+    }
+    chart.update('none');
+  }
+
+  const cpuChart = makeChart('chart-cpu', [{
+    label: 'CPU %', data: [], borderColor: 'rgba(56,189,248,1)',
+    backgroundColor: 'rgba(56,189,248,0.15)', fill: true,
+  }], 100, '%');
+
+  const memChart = makeChart('chart-mem', [{
+    label: 'RAM %', data: [], borderColor: 'rgba(167,139,250,1)',
+    backgroundColor: 'rgba(167,139,250,0.15)', fill: true,
+  }], 100, '%');
+
+  const netChart = makeChart('chart-net', [
+    { label: 'rx', data: [], borderColor: 'rgba(52,211,153,1)', backgroundColor: 'rgba(52,211,153,0.12)', fill: true },
+    { label: 'tx', data: [], borderColor: 'rgba(251,191,36,1)', backgroundColor: 'rgba(251,191,36,0.12)', fill: true },
+  ], 1024, ' B/s');
+
+  // ---------------------------------------------------------------- stats
+  function renderStats(s) {
+    state.stats = s;
+    document.getElementById('engine-version').textContent = s.engine_version ? ('engine ' + s.engine_version) : '';
+    document.getElementById('node-name').textContent = s.node_name ? ('node ' + s.node_name) : '';
+
+    const cpu = s.cpu_percent;
+    document.getElementById('cpu-value').textContent = (cpu == null) ? '\u2014' : Number(cpu).toFixed(1) + '%';
+    document.getElementById('cpu-sub').textContent =
+      (s.cpu_cores_used != null ? Number(s.cpu_cores_used).toFixed(2) : '0') + ' of ' +
+      (s.cpu_cores || 0) + ' cores used';
+
+    const memPct = s.mem_percent;
+    document.getElementById('mem-value').textContent = (memPct == null) ? '\u2014' : Number(memPct).toFixed(1) + '%';
+    document.getElementById('mem-sub').textContent = humanBytes(s.mem_used) + ' / ' + humanBytes(s.mem_total);
+
+    document.getElementById('net-rx').textContent = '\u2193 ' + humanRate(s.net_rx_bps);
+    document.getElementById('net-tx').textContent = '\u2191 ' + humanRate(s.net_tx_bps);
+    document.getElementById('net-sub').textContent =
+      'total \u2193 ' + humanBytes(s.net_rx) + '  \u2191 ' + humanBytes(s.net_tx) +
+      '  \u00b7  ' + (s.containers_running || 0) + '/' + (s.containers_total || 0) + ' running';
+
+    pushPoint(cpuChart, [Number(cpu || 0)]);
+    pushPoint(memChart, [Number(memPct || 0)]);
+    pushPoint(netChart, [Number(s.net_rx_bps || 0), Number(s.net_tx_bps || 0)]);
+
+    // dynamic network axis ceiling
+    const peak = Math.max(Number(s.net_rx_bps || 0), Number(s.net_tx_bps || 0), 1024);
+    netChart.options.scales.y.suggestedMax = peak * 1.4;
+    netChart.options.plugins.tooltip.callbacks.label =
+      ctx => ' ' + ctx.dataset.label + ': ' + humanRate(ctx.parsed.y);
+
+    if (s.swarm && !state.nodes.length) loadNodes();
+    document.getElementById('swarm-section').classList.toggle('hidden', !s.swarm);
+  }
+
+  // ---------------------------------------------------------------- swarm nodes
+  async function loadNodes() {
+    try {
+      const body = await getJSON(API + '/nodes');
+      state.nodes = body.nodes || [];
+      renderNodes();
+    } catch (e) {
+      // swarm metadata is optional; don't spam the banner
+    }
+  }
+
+  function renderNodes() {
+    const wrap = document.getElementById('node-chips');
+    const nodes = state.nodes;
+    const managers = nodes.filter(n => (n.role || '').toLowerCase() === 'manager').length;
+    const leaders = nodes.filter(n => n.state === 'ready').length;
+    document.getElementById('swarm-summary').textContent =
+      nodes.length + ' nodes \u00b7 ' + managers + ' managers \u00b7 ' + leaders + ' ready';
+
+    const chip = (label, active, onclick, sub) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'text-left px-3 py-2 rounded-lg border transition-colors ' +
+        (active ? 'bg-sky-600/25 border-sky-500/50 text-sky-200'
+                : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10');
+      b.innerHTML = '<div class="text-sm font-medium">' + esc(label) + '</div>' +
+        (sub ? '<div class="text-[11px] text-slate-400">' + esc(sub) + '</div>' : '');
+      b.addEventListener('click', onclick);
+      return b;
+    };
+
+    wrap.innerHTML = '';
+    wrap.appendChild(chip('All nodes', state.selectedNode === null, () => {
+      state.selectedNode = null;
+      renderNodes();
+      renderContainers();
+    }, 'cluster-wide'));
+
+    nodes.forEach(n => {
+      const sub = [n.role, n.state, n.addr].filter(Boolean).join(' \u00b7 ');
+      wrap.appendChild(chip(n.hostname || n.id, state.selectedNode === n.id, () => {
+        state.selectedNode = (state.selectedNode === n.id) ? null : n.id;
+        renderNodes();
+        renderContainers();
+      }, sub));
+    });
+  }
+
+  // ---------------------------------------------------------------- containers
+  function formatAge(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (!t) return '';
+    const sec = Math.max(0, (Date.now() - t) / 1000);
+    if (sec < 60) return Math.floor(sec) + 's';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+    return Math.floor(sec / 86400) + 'd';
+  }
+
+  function visibleContainers() {
+    const f = state.filter.trim().toLowerCase();
+    return state.containers.filter(c => {
+      if (!state.showStopped && (c.state || '').toLowerCase() !== 'running') return false;
+      if (state.selectedNode && c.node_id !== state.selectedNode) return false;
+      if (!f) return true;
+      return [c.name, c.image, c.image_tag, c.stack, c.service, c.short_id]
+        .filter(Boolean).some(v => String(v).toLowerCase().includes(f));
+    });
+  }
+
+  const stateColor = (s) => {
+    s = (s || '').toLowerCase();
+    if (s === 'running') return 'text-emerald-400';
+    if (s === 'exited' || s === 'dead') return 'text-rose-400';
+    if (s === 'paused') return 'text-amber-400';
+    if (s === 'restarting') return 'text-amber-300';
+    return 'text-slate-400';
+  };
+
+  function usageBar(pct, colorClass) {
+    const p = Number(pct || 0);
+    return '<div class="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden">' +
+      '<div class="h-full ' + colorClass + '" style="width:' + Math.min(100, p).toFixed(1) + '%"></div></div>';
+  }
+
+  function renderContainers() {
+    const list = document.getElementById('container-list');
+    const rows = visibleContainers();
+    document.getElementById('container-count').textContent =
+      '(' + rows.length + (rows.length !== state.containers.length ? ' of ' + state.containers.length : '') + ')';
+    document.getElementById('container-empty').classList.toggle('hidden', rows.length > 0);
+
+    const scrollTop = list.scrollTop;
+    list.innerHTML = '';
+
+    rows.forEach(c => {
+      const expanded = state.expanded.has(c.id);
+      const el = document.createElement('div');
+      el.className = 'card rounded-xl overflow-hidden';
+
+      const stackBadge = c.stack
+        ? '<span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25">' + esc(c.stack) + '</span>'
+        : '';
+      const cpu = c.cpu_percent;
+      const mem = c.mem_used;
+
+      el.innerHTML =
+        '<button type="button" class="row-hover w-full text-left px-4 py-3 flex items-center gap-3 transition-colors" data-toggle="' + esc(c.id) + '">' +
+          '<svg class="w-4 h-4 text-slate-500 transition-transform ' + (expanded ? 'rotate-90' : '') + '" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>' +
+          '<div class="min-w-0 flex-1">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="truncate text-sm font-medium text-slate-100">' + esc(c.name || c.short_id) + '</span>' +
+              stackBadge +
+              '<span class="text-[11px] ' + stateColor(c.state) + '">' + esc(c.state || '') + '</span>' +
+            '</div>' +
+            '<div class="mt-0.5 text-[11px] text-slate-500 truncate">' +
+              esc(c.image || '') + (c.image_tag ? ':' + esc(c.image_tag) : '') +
+              (c.service ? ' \u00b7 ' + esc(c.service) : '') +
+              (c.status ? ' \u00b7 ' + esc(c.status) : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="hidden sm:flex flex-col items-end gap-1 text-[11px] tabular-nums text-slate-400 w-40 shrink-0">' +
+            '<div class="flex items-center gap-2"><span class="w-10 text-right">' +
+              (cpu == null ? '\u2013' : Number(cpu).toFixed(1) + '%') + '</span>' +
+              usageBar(cpu, 'bg-sky-500') + '</div>' +
+            '<div class="flex items-center gap-2"><span class="w-10 text-right">' +
+              (mem == null ? '\u2013' : humanBytes(mem)) + '</span>' +
+              usageBar(c.mem_percent, 'bg-violet-500') + '</div>' +
+          '</div>' +
+        '</button>' +
+        '<div class="detail hidden border-t border-white/5 bg-black/20 px-4 py-3 text-xs" data-detail="' + esc(c.id) + '"></div>';
+
+      list.appendChild(el);
+
+      el.querySelector('[data-toggle]').addEventListener('click', () => toggleContainer(c.id));
+      if (expanded) {
+        const box = el.querySelector('[data-detail]');
+        box.classList.remove('hidden');
+        fillDetail(box, c.id, true);
+      }
+    });
+    list.scrollTop = scrollTop;
+  }
+
+  async function toggleContainer(id) {
+    if (state.expanded.has(id)) {
+      state.expanded.delete(id);
+      renderContainers();
+      return;
+    }
+    state.expanded.add(id);
+    renderContainers();
+    const box = document.querySelector('[data-detail="' + CSS.escape(id) + '"]');
+    if (box) fillDetail(box, id, false);
+  }
+
+  function detailSkeleton() {
+    return '<div class="text-slate-500 flex items-center gap-2">' +
+      '<svg class="w-3.5 h-3.5 spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">' +
+      '<path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>' +
+      'loading container details\u2026</div>';
+  }
+
+  async function fillDetail(box, id, cachedOk) {
+    if (cachedOk && state.details[id]) { box.innerHTML = renderDetail(state.details[id]); return; }
+    box.innerHTML = detailSkeleton();
+    try {
+      const body = await getJSON(API + '/containers/' + encodeURIComponent(id));
+      state.details[id] = body.container;
+      box.innerHTML = renderDetail(body.container);
+    } catch (e) {
+      box.innerHTML = '<div class="text-rose-400">Could not load container details: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  function kv(label, value, cls) {
+    return '<div><dt class="text-[10px] uppercase tracking-wide text-slate-500">' + esc(label) + '</dt>' +
+      '<dd class="text-slate-200 mt-0.5 ' + (cls || '') + '">' + (value == null || value === '' ? '\u2014' : value) + '</dd></div>';
+  }
+
+  function renderDetail(c) {
+    const st = c.state || {};
+    const img = c.image || {};
+    const statusCls = stateColor(st.status);
+    const health = st.health
+      ? '<span class="ml-2 text-[10px] px-1.5 py-0.5 rounded border ' +
+        (st.health === 'healthy' ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
+          : st.health === 'unhealthy' ? 'border-rose-500/40 text-rose-300 bg-rose-500/10'
+          : 'border-amber-500/40 text-amber-300 bg-amber-500/10') + '">' + esc(st.health) + '</span>'
+      : '';
+
+    const tags = (img.tags && img.tags.length ? img.tags : img.repo_tags) || [];
+    const tagsHtml = tags.length
+      ? tags.map(t => '<span class="inline-block mr-1 mb-1 px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-200 border border-sky-500/25 font-mono text-[11px]">' + esc(t) + '</span>').join('')
+      : '<span class="text-slate-500">untagged</span>';
+    const digests = (img.repo_digests || []).map(d =>
+      '<div class="font-mono text-[10px] text-slate-500 break-all">' + esc(d) + '</div>').join('');
+
+    const portList = Array.isArray(c.ports)
+      ? c.ports
+      : (typeof c.ports === 'string' && c.ports.trim() ? c.ports.split(',').map(s => s.trim()).filter(Boolean) : []);
+    const ports = portList.length
+      ? portList.map(p => '<div class="font-mono text-[11px] text-slate-300">' + esc(p) + '</div>').join('')
+      : '<span class="text-slate-500">none published</span>';
+
+    const mounts = (c.mounts && c.mounts.length)
+      ? c.mounts.map(m => '<div class="font-mono text-[11px] text-slate-300 truncate">' +
+          esc(m.source || '') + ' \u2192 ' + esc(m.destination || '') +
+          '<span class="text-slate-500"> (' + esc(m.type || '') + (m.mode ? ', ' + esc(m.mode) : '') + ')</span></div>').join('')
+      : '<span class="text-slate-500">none</span>';
+
+    const started = st.started_at ? esc(st.started_at) + (st.started_at !== '0001-01-01T00:00:00Z' ? ' <span class="text-slate-500">(' + formatAge(st.started_at) + ' ago)</span>' : '') : '\u2014';
+
+    return '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">' +
+      // state
+      '<div>' +
+        '<h4 class="text-[11px] uppercase tracking-wide text-slate-400 mb-2">Container state</h4>' +
+        '<dl class="grid grid-cols-2 gap-x-4 gap-y-2">' +
+          kv('Status', '<span class="' + statusCls + '">' + esc(st.status || '') + '</span>' + health) +
+          kv('Started', started) +
+          kv('Restarts', esc(c.restart_count)) +
+          kv('Exit code', esc(st.exit_code)) +
+          kv('OOM killed', st.oom_killed ? '<span class="text-rose-400">yes</span>' : 'no') +
+          kv('Container size (rw)', '<span class="tabular-nums">' + humanBytes(c.size_rw) + '</span>') +
+          kv('Image size (rootfs)', '<span class="tabular-nums">' + humanBytes(c.size_rootfs) + '</span>') +
+          kv('Env vars', esc(c.env_count)) +
+        '</dl>' +
+        (st.error ? '<div class="mt-2 text-rose-400 break-all">' + esc(st.error) + '</div>' : '') +
+        '<div class="mt-3"><h4 class="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Ports</h4>' + ports + '</div>' +
+      '</div>' +
+      // image
+      '<div>' +
+        '<h4 class="text-[11px] uppercase tracking-wide text-slate-400 mb-2">Image</h4>' +
+        '<dl class="grid grid-cols-2 gap-x-4 gap-y-2">' +
+          kv('Reference', '<span class="font-mono text-[11px] break-all">' + esc(c.image_name || img.id || '') + '</span>') +
+          kv('Image size', '<span class="tabular-nums">' + humanBytes(img.size) + '</span>') +
+          kv('Created', img.created ? esc(String(img.created).slice(0, 19).replace('T', ' ')) : '\u2014') +
+          kv('Image ID', '<span class="font-mono text-[10px]">' + esc((img.id || '').replace('sha256:', '').slice(0, 12)) + '</span>') +
+        '</dl>' +
+        '<div class="mt-3"><h4 class="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Tags / version</h4>' + tagsHtml + '</div>' +
+        (digests ? '<div class="mt-2"><h4 class="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Digests</h4>' + digests + '</div>' : '') +
+        '<div class="mt-3"><h4 class="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Mounts</h4>' + mounts + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // ---------------------------------------------------------------- polling
+  async function pollStats() {
+    try {
+      const body = await getJSON(API + '/stats');
+      renderStats(body.stats);
+      state.failures = 0;
+      clearError();
+      setLive(true, 'live');
+    } catch (e) {
+      state.failures++;
+      setLive(false, state.failures > 1 ? 'offline' : 'retrying');
+      if (state.failures <= 2) showError(e.message);
+    }
+  }
+
+  async function pollContainers() {
+    try {
+      const body = await getJSON(API + '/containers');
+      const prevIds = state.containers.map(c => c.id).join(',');
+      state.containers = body.containers || [];
+      // drop expansions/details for containers that vanished
+      const ids = new Set(state.containers.map(c => c.id));
+      state.expanded.forEach(id => { if (!ids.has(id)) state.expanded.delete(id); });
+      Object.keys(state.details).forEach(id => { if (!ids.has(id)) delete state.details[id]; });
+      renderContainers();
+      if (prevIds !== state.containers.map(c => c.id).join(',')) { /* structure changed */ }
+    } catch (e) {
+      // stats poll owns the error banner
+    }
+  }
+
+  function schedule(fn, ms, key) {
+    const tick = async () => {
+      await fn();
+      state[key] = setTimeout(tick, ms);
+    };
+    state[key] = setTimeout(tick, ms);
+  }
+
+  function stop() {
+    if (state.timer) clearTimeout(state.timer);
+    if (state.containerTimer) clearTimeout(state.containerTimer);
+  }
+
+  // ---------------------------------------------------------------- wiring
+  document.getElementById('container-filter').addEventListener('input', (ev) => {
+    state.filter = ev.target.value;
+    renderContainers();
+  });
+  document.getElementById('show-stopped').addEventListener('change', (ev) => {
+    state.showStopped = ev.target.checked;
+    renderContainers();
+  });
+  document.getElementById('btn-refresh').addEventListener('click', async () => {
+    state.details = {};
+    await Promise.all([pollStats(), pollContainers(), loadNodes()]);
+  });
+  window.addEventListener('beforeunload', stop);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { stop(); } else { stop(); pollStats(); pollContainers(); schedule(pollStats, POLL_MS, 'timer'); schedule(pollContainers, CONTAINER_POLL_MS, 'containerTimer'); }
+  });
+
+  (async function boot() {
+    setLive(false, 'connecting');
+    await pollStats();
+    await pollContainers();
+    schedule(pollStats, POLL_MS, 'timer');
+    schedule(pollContainers, CONTAINER_POLL_MS, 'containerTimer');
+  })();
+})();
+</script>
+</body>
+</html>

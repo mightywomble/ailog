@@ -534,3 +534,48 @@ class HostDockerInventory(db.Model):
             'captured_at': self.captured_at.isoformat() if self.captured_at else None,
             'inventory': self.inventory(),
         }
+
+
+class DockerEndpoint(db.Model):
+    """A discovered Docker Engine API endpoint for an ailog host.
+
+    Additive table - created automatically by ``db.create_all()``.
+    """
+    __tablename__ = 'docker_endpoints'
+
+    id = db.Column(db.Integer, primary_key=True)
+    host_key = db.Column(db.String(128), nullable=False, unique=True, index=True)
+    friendly_name = db.Column(db.String(255))
+    ip_address = db.Column(db.String(255))
+    mode = db.Column(db.String(32))  # 'socket' | 'tcp' | 'tcp+tls'
+    port = db.Column(db.Integer)
+    server_version = db.Column(db.String(64))
+    is_reachable = db.Column(db.Boolean, default=False, nullable=False)
+    discovered_by = db.Column(db.String(32))
+    engine_json = db.Column(db.Text)
+    last_checked_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def engine(self):
+        try:
+            return json.loads(self.engine_json or '{}')
+        except Exception:
+            return {}
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'host_key': self.host_key,
+            'friendly_name': self.friendly_name,
+            'ip_address': self.ip_address,
+            'mode': self.mode,
+            'port': self.port,
+            'server_version': self.server_version,
+            'is_reachable': bool(self.is_reachable),
+            'discovered_by': self.discovered_by,
+            'engine': self.engine(),
+            'last_checked_at': self.last_checked_at.isoformat() if self.last_checked_at else None,
+            'last_error': self.last_error,
+        }

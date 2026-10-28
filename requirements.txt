@@ -30,6 +30,9 @@ Flask-SQLAlchemy==3.1.1
 # SSH key encryption
 cryptography==42.0.8
 
+# Docker Engine API (CPU/RAM/network stats, container inspect, swarm)
+docker>=7.1.0,<8.0
+
 # SSH terminal (WebSocket + SSH)
 flask-sock==0.7.0
 paramiko==3.4.1

@@ -1,11 +1,12 @@
 # AI Log Viewer - Multi-Host Log Analysis Platform
 
-A comprehensive, modern web application for viewing and analyzing system logs from `/var/log` and `journalctl` across both **local** and **remote** servers. This advanced platform combines real-time log viewing, powerful search capabilities, AI-powered analysis, and proactive alerting in a sleek, responsive interface designed for developers and system administrators.
+A comprehensive, modern web application for viewing and analyzing system logs from `/var/log`, `journalctl` and **Docker containers** across both **local** and **remote** servers, with live Docker/Swarm monitoring. This advanced platform combines real-time log viewing, powerful search capabilities, AI-powered analysis, and proactive alerting in a sleek, responsive interface designed for developers and system administrators.
 
 ## 📋 Version History
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-28 | v2.10.0 | Docker monitoring: host-wide Docker API discovery (unix socket over SSH / TCP 2375 / TLS 2376), standalone `/docker/<host_key>` page (live CPU/RAM/network charts, containers with size + image tag, swarm cluster/node drill-down); Pull Logs now lists per-container logs with a **Docker logs only** filter; faster connect feedback (proxy-safe SSE, indeterminate progress bar, elapsed clock); security hardening (log path traversal blocked, log output XSS-escaped, Docker SDK pinned) | ✅ Complete |
 | 2026-06-24 | v2.9.17 | Hosts sidebar: sort by IP/name + manual drag reorder with grab handle + clearer drop target highlight; Rescan reliability: DB hosts without explicit ssh_key_id now fall back to default SSH key (matches SSH terminal/log pulls) | ✅ Complete |
 | 2026-05-25 | v2.9.16 | AI provider persistence: load from database on page init (survives hard refresh/pod restart); OpenRouter + Ollama model search filtering (real-time substring match on model list) | ✅ Complete |
 | 2026-05-25 | v2.9.15 | OpenRouter AI provider integration: API key test → model discovery → selection workflow; fixed /openrouter/config to allow saving key before model; UI auto-loads models after key validation | ✅ Complete |
@@ -48,9 +49,11 @@ This application is designed for use on a trusted, internal development network 
 * **Back button:** The Logs view has a Back button to return to the dashboard without reloading.
 
 ### 📊 **Unified Log Management**
-* **Multi-Source Access:** View traditional syslog files from `/var/log` and systemd journal entries in a unified interface
+* **Multi-Source Access:** View traditional syslog files from `/var/log`, systemd journal entries **and Docker container logs** in a unified interface
 * **Cross-Platform Compatibility:** Works seamlessly across Linux distributions with systemd support
 * **Automatic Decompression:** Handles `.gz` compressed log archives transparently
+* **Docker logs in the Pull Logs list:** if the selected host runs containers, each container is listed as a log source (`docker` badge). Selecting one tails the last 500 lines with timestamps; on a Swarm manager AILog resolves the service label and uses `docker service logs`, so containers scheduled on other nodes still work.
+* **List filters:** “Docker logs only” shows just container sources, “Show 0-byte logs” hides empty files — the two combine.
 
 ### 🌐 **Multi-Host Architecture**
 * **Host Management Dashboard:** Intuitive interface for managing local and remote servers
@@ -59,6 +62,15 @@ This application is designed for use on a trusted, internal development network 
 * **Dynamic Host Switching:** Seamlessly switch between configured servers with real-time log loading
 * **Connection Status Monitoring:** Visual indicators show host connectivity status
 * **SSH Terminal:** Click the green **SSH** button to open an interactive terminal to the selected host (UI inspired by the Termix project on GitHub)
+
+### 🐳 **Docker Monitoring**
+* **Automatic discovery:** every configured host is probed for a Docker Engine endpoint — unix socket over SSH (preferred, no exposed port needed), plain TCP `2375`, or TLS `2376`. Hosts without Docker are skipped cleanly.
+* **Docker button:** appears in the Logs toolbar only for hosts with a reachable endpoint; opens a **standalone page** at `/docker/<host_key>` (not a modal).
+* **Live charts:** CPU, RAM and network (rx/tx bytes per second) polled every 2 s with a 60-point rolling window. Nothing is persisted — live statistics only.
+* **Containers:** name, state/health, stack/service, writable + rootfs size, image reference and version tag, ports and mounts. Click a container to expand its details.
+* **Swarm view:** cluster nodes with role/state, plus per-node drill-down that filters the container list.
+* **Refresh cadence:** background re-probe every `AILOG_DOCKER_REFRESH_SECONDS` (default `300`, minimum `30`) or on demand with the **Scan Docker** button in the hosts sidebar.
+* **Docker on the target host:** the `docker` CLI must be installed; AILog runs `sudo -n docker …` and falls back to `docker …` (docker group membership also works).
 
 ### 🔍 **Advanced Search Capabilities**
 * **Global Search:** Search across all logs from all configured hosts simultaneously
@@ -77,6 +89,9 @@ This application is designed for use on a trusted, internal development network 
 * **Smart Alerting:** Discord notifications when alert keywords are detected; otherwise a summary message can be sent
 
 ### 📈 **Real-Time Progress Tracking**
+* **Instant connect feedback:** SSE responses for log discovery disable proxy buffering (`X-Accel-Buffering: no`) and send an immediate `: connected` heartbeat, so the first update lands in tens of milliseconds instead of after an nginx buffer flush
+* **Indeterminate bar + spinner:** while no measurable progress exists the bar sweeps and a spinner is shown, switching to a normal percentage bar on the first event
+* **Elapsed clock:** the label ticks seconds and escalates (“Initializing connection…” → “Waiting for host to respond…” → “Slow to respond - still trying…”), then tracks real progress (“Listing log files…”, “Found N log sources…”)
 
 ### 🎨 **UI Theme**
 * Termix-style dark theme throughout: dark panel surfaces, subtle borders, consistent spacing, and typography.
@@ -97,6 +112,12 @@ This application is designed for use on a trusted, internal development network 
 * **SSH Key Authentication:** Passwordless SSH access with proper key-based security
 * **Granular Sudo Permissions:** Minimal required permissions for enhanced security
 * **Network Isolation:** Designed for trusted internal networks only
+* **Log output is rendered as text:** `/var/log` and container log contents are inserted with `textContent`, so a log line containing HTML/JS cannot execute in the browser
+* **Path traversal blocked:** `/log/<file>` rejects absolute paths and any `..` segment, so the endpoint can only read below `/var/log`
+* **Container identifiers validated:** `/api/docker/log/<container>` only accepts Docker-legal name characters (and is `shlex`-quoted) before reaching the remote shell
+* **No authentication by design:** every Docker endpoint (`/docker/<host_key>`, `/api/docker/*`) inherits the app's unauthenticated trusted-network model. Anyone who can reach the UI can read container logs and swarm metadata — keep the app off the public internet and restrict access at the proxy.
+* **TLS Docker endpoints:** discovery accepts self-signed certificates (`verify=False` unless a CA is supplied). Only enable TLS endpoints you trust on the network path.
+* **Dependency pinning:** the Docker SDK is pinned (`docker>=7.1.0,<8.0`) to avoid surprise breaking/major-version changes on image rebuild.
 
 ### 🔌 Tailscale egress for SSH (Kubernetes deployments)
 If your target hosts are only reachable over Tailscale, the AILog pod needs tailnet routing to connect to `100.x` addresses. The Helm chart now supports an optional Tailscale **egress sidecar** (tun mode) that provides outbound tailnet/subnet access from the pod. See the Helm chart README for configuration details.
@@ -309,6 +330,12 @@ For the application to read logs, the user running it needs passwordless `sudo` 
     david ALL=(ALL) NOPASSWD: /usr/bin/ls -p /var/log, /usr/bin/stat -c %s %Y /var/log/*, /usr/bin/tail -n 500 /var/log/*, /usr/bin/zcat /var/log/*.gz, /usr/bin/journalctl --field _SYSTEMD_UNIT, /usr/bin/journalctl -u * -n 500 --no-pager
     ```
 
+    For the Docker monitoring/container-log features (optional, only on hosts that run Docker), also allow the read-only Docker commands — or add the user to the `docker` group instead:
+
+    ```
+    david ALL=(ALL) NOPASSWD: /usr/bin/docker version --format *, /usr/bin/docker info --format *, /usr/bin/docker ps -a --no-trunc --size --format *, /usr/bin/docker stats --no-stream --no-trunc --format *, /usr/bin/docker node ls --format *, /usr/bin/docker inspect *, /usr/bin/docker logs --tail 500 *, /usr/bin/docker service logs --tail 500 *, /usr/bin/docker image inspect *
+    ```
+
 3.  Save and exit the editor (`Ctrl+X`, then `Y`, then `Enter`).
 
 #### Step 5: Set Up the Systemd Service
@@ -359,7 +386,35 @@ Check the status of the service to ensure it's active.
 ```bash
 sudo systemctl status ailog
 ```
-You should see output indicating the service is `active (running)`.
+You should see output indicating that the service is `active (running)`.
+
+### Docker Swarm deployment (homelab)
+
+AILog also runs on the homelab Docker Swarm (manager: swarm1) via the
+[homelab_docker_build](https://git.safehomelan.com/david/homelab_docker_build) +
+[homelab_docker_deploy](https://git.safehomelan.com/david/homelab_docker_deploy)
+pipelines: the published image `docker.io/mightywomble/ailog:latest` is mirrored
+into the private zot registry (`zot.safehomelan.com/ailog:latest`) and deployed
+by the `stacks/ailog/stack.yml` stack file.
+
+- **URL:** `http://<any swarm node LAN or Tailscale IP>:5001` (swarm routing
+  mesh), e.g. `http://100.79.189.118:5001`
+- **Login:** none — the app is unauthenticated by design; trusted internal
+  network only (see the security warning above)
+- **Data:** the SQLite db persists on the shared NFS
+  (`/opt/docker/data/ailog` → `/var/lib/ailog`) so the service can reschedule
+  to any node; `DATABASE_URL=sqlite:////var/lib/ailog/ailog.db`
+- SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
+  outbound SSH to LAN/tailnet hosts works via node networking
+
+Plain Docker host equivalent:
+
+```bash
+docker run -d --name ailog -p 5001:5001 \
+  -v ailog-data:/var/lib/ailog \
+  -e DATABASE_URL=sqlite:////var/lib/ailog/ailog.db \
+  mightywomble/ailog:latest
+```
 
 ## 🧭 Device Onboarding Wizard & Host Info
 
@@ -590,6 +645,30 @@ The application provides detailed startup logs showing:
 5. **Scheduling**: APScheduler for automated monitoring tasks
 
 ## 📝 Recent Updates
+
+### v2.10.0 - Docker Monitoring & Container Logs
+- 🐳 **Docker monitoring subsystem** (`dockermon/` blueprint)
+  - Discovery over three transports: unix socket via SSH (default), TCP `2375`, TLS `2376`
+  - Standalone page `/docker/<host_key>` with live CPU / RAM / network charts (2 s, 60-point window)
+  - Container list with state/health, writable + rootfs size, image reference and version tag, ports, mounts
+  - Swarm cluster node list with per-node drill-down
+  - Background re-probe job (`AILOG_DOCKER_REFRESH_SECONDS`, default 300 s) plus a **Scan Docker** button
+  - Persisted endpoint state in the additive `docker_endpoints` table
+- 🧾 **Container logs in Pull Logs**
+  - Each container is listed as a log source with a `docker` badge and `state · image:tag` subtitle
+  - Opens the last 500 lines with timestamps; Swarm managers resolve the service label and use `docker service logs` so cross-node tasks work
+  - New **Docker logs only** filter, combining with the existing 0-byte filter
+- ⏱ **Faster connect feedback**
+  - SSE routes disable proxy buffering and emit an immediate `: connected` heartbeat (first byte in ~40 ms through nginx)
+  - Indeterminate sweeping bar + spinner until the first measurable event
+  - Elapsed clock with escalating copy while connecting
+- 🔒 **Security hardening**
+  - `/log/<path>` now rejects absolute paths and `..` segments (was able to read files outside `/var/log` as root)
+  - Log output is inserted with `textContent` instead of `innerHTML` (log-injection XSS)
+  - Host-derived strings (file/container names, image refs) are HTML-escaped before rendering
+  - `/api/docker/log/<container>` validates the identifier against Docker's name grammar
+  - Docker SDK pinned to `>=7.1.0,<8.0`
+- 🧪 Verified live against 16 hosts (10 with Docker): discovery, stats, containers, container detail, swarm nodes, and container logs over both SSH-CLI and Swarm-service paths
 
 ### v2.3.0 - Settings Modal Redesign & UX Improvements
 - 🎨 **Sidebar Navigation**: Redesigned settings modal with intuitive sidebar menu
