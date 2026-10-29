@@ -21,7 +21,7 @@ from flask import (Blueprint, Response, current_app, jsonify, redirect,
 
 from database import LogReport, db
 from . import diff as rdiff
-from . import collect, correlate, llm, normalize, pack, sizing
+from . import collect, correlate, llm, normalize, pack, severity, sizing
 
 reports_bp = Blueprint('serverreport', __name__)
 
@@ -41,9 +41,14 @@ _bundle_lock = threading.Lock()
 _bundles = {}
 
 
-def _bundle_key(host_key, window_minutes, include_files, include_journal, include_docker, include_stopped):
+def _bundle_key(host_key, window_minutes, include_files, include_journal, include_docker,
+                include_stopped, sev_levels=None):
+    # The severity selection is part of the identity: reusing a cached
+    # "errors only" snapshot for an unfiltered run (or vice versa) would make
+    # the report describe data the user did not ask for.
     return (host_key, int(window_minutes), bool(include_files), bool(include_journal),
-            bool(include_docker), bool(include_stopped))
+            bool(include_docker), bool(include_stopped),
+            tuple(sorted(sev_levels or ())))
 
 
 def _bundle_put(key, payload):
@@ -160,7 +165,8 @@ def pack_limits_label(depth):
         return str(depth)
 
 
-def _scope_note(include_files, include_journal, include_docker, include_stopped):
+def _scope_note(include_files, include_journal, include_docker, include_stopped,
+                sev_levels=None):
     parts = []
     if include_files:
         parts.append('files')
@@ -168,7 +174,43 @@ def _scope_note(include_files, include_journal, include_docker, include_stopped)
         parts.append('journald')
     if include_docker:
         parts.append('docker container logs' + ('' if include_stopped else ', running only'))
-    return ', '.join(parts) or 'nothing selected'
+    note = ', '.join(parts) or 'nothing selected'
+    levels = frozenset(sev_levels or ())
+    if levels:
+        note += f" · severity filter: {severity.describe(levels)} only"
+    return note
+
+
+def sev_levels_for(values):
+    """Map ``severity.parse`` names onto the normaliser's ``SEV_*`` constants."""
+    from .normalize import SEV_CRIT, SEV_ERROR, SEV_WARN
+    mapping = {'crit': SEV_CRIT, 'error': SEV_ERROR, 'warn': SEV_WARN}
+    return frozenset(mapping[name] for name in (values or ()) if name in mapping)
+
+
+def _stored_filter(collected, norm):
+    """The severity-filter block persisted in ``coverage_json``.
+
+    Merges what the collector did on the host (journal priority / grep) with
+    what the normaliser actually dropped, so a stored report can always explain
+    why its event counts look the way they do.
+    """
+    block = dict((norm or {}).get('severity_filter') or {})
+    src = (collected or {}).get('severity_filter') or {}
+    if src.get('source_prefilter'):
+        block['source_prefilter'] = src['source_prefilter']
+    levels = block.get('levels') or []
+    block.setdefault('active', bool(levels))
+    block.setdefault('levels', [])
+    block['label'] = severity.describe(levels)
+    return block
+
+
+def sev_names_for(levels):
+    """Inverse of :func:`sev_levels_for`: ``SEV_*`` constants -> names."""
+    from .normalize import SEV_CRIT, SEV_ERROR, SEV_WARN
+    mapping = {SEV_CRIT: 'crit', SEV_ERROR: 'error', SEV_WARN: 'warn'}
+    return frozenset(mapping[lvl] for lvl in (levels or ()) if lvl in mapping)
 
 
 # ---------------------------------------------------------------------------
@@ -183,14 +225,17 @@ def _status_of(item):
 
 def prepare_bundle(host_key, host_label, window_minutes, include_files, include_journal,
                    include_docker, include_stopped, emit=None, app=None, note=None,
-                   use_cache=True):
+                   use_cache=True, severities=None):
     """Collect, normalise and correlate. Model-free and reusable.
 
     Shared by the size check and the report run so the host is only ever
-    collected once per user action.
+    collected once per user action. ``severities`` is a ``severity.parse``
+    result; it is applied on the host *and* at normalisation.
     """
+    sel = frozenset(severities or ())
+    sev_levels = sev_levels_for(sel)
     key = _bundle_key(host_key, window_minutes, include_files, include_journal,
-                      include_docker, include_stopped)
+                      include_docker, include_stopped, sel)
     if use_cache:
         cached = _bundle_take(key)
         if cached is not None:
@@ -210,6 +255,7 @@ def prepare_bundle(host_key, host_label, window_minutes, include_files, include_
         include_journal=include_journal,
         include_docker=include_docker,
         include_stopped=include_stopped,
+        severities=sel,
         app=app,
         progress=lambda p: emit({'type': 'stage', 'stage': 'collect',
                                  'message': p.get('message', ''), **{
@@ -235,8 +281,13 @@ def prepare_bundle(host_key, host_label, window_minutes, include_files, include_
         )
 
     _note('normalise', f'Normalising {len(ok_sources)} source(s)...')
-    norm = normalize.normalize_all(sources, window_start, window_end)
+    norm = normalize.normalize_all(sources, window_start, window_end, sev_levels=sev_levels)
     events, clusters = norm['events'], norm['clusters']
+    if sel:
+        _note('normalise',
+              f"Severity filter ({severity.describe(sel)}): "
+              f"{norm['severity_filter']['events_kept']:,} relevant events, "
+              f"{norm['severity_filter']['events_filtered']:,} dropped from context lines.")
     _note('normalise', f'{len(events):,} events reduced to {len(clusters):,} distinct signatures.',
           clusters_total=len(clusters))
 
@@ -252,6 +303,7 @@ def prepare_bundle(host_key, host_label, window_minutes, include_files, include_
           correlations=len(corr['correlations']))
 
     return {
+        'severities': sel,
         'collected': collected,
         'norm': norm,
         'corr': corr,
@@ -266,7 +318,8 @@ def prepare_bundle(host_key, host_label, window_minutes, include_files, include_
 
 def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
                  include_files=True, include_journal=True, include_docker=True,
-                 include_stopped=False, depth=None, emit=None, app=None, use_cache=True):
+                 include_stopped=False, depth=None, emit=None, app=None, use_cache=True,
+                 severities=None):
     """Run the full report pipeline and persist the result.
 
     Flow: prepare (collect/normalise/correlate) -> build evidence -> size it ->
@@ -291,6 +344,7 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
     bundle = prepare_bundle(
         host_key, host_label, window_minutes, include_files, include_journal,
         include_docker, include_stopped, emit=emit, app=app, note=note, use_cache=use_cache,
+        severities=severities,
     )
 
     collected = bundle['collected']
@@ -381,7 +435,8 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
                       f'({model}) with ~{tokens_in:,} tokens of evidence...')
 
     cfg = app_module._analysis_config(provider, data, model=model)
-    scope_note = _scope_note(include_files, include_journal, include_docker, include_stopped)
+    scope_note = _scope_note(include_files, include_journal, include_docker,
+                             include_stopped, bundle.get('severities'))
     max_out = profile['max_output_tokens']
 
     def _generate(evidence_text, max_tokens):
@@ -441,6 +496,7 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
             'gaps': corr['gaps'],
             'bursts': corr['bursts'],
             'truncated': bool(collected.get('truncated')),
+            'severity_filter': _stored_filter(collected, norm),
             'pack_fitted': fitted,
             'missing_headings': meta.get('missing_headings') or [],
             'depth': recommendation['depth'],
@@ -541,6 +597,7 @@ def preflight():
     include_journal = bool(data.get('include_journal', True))
     include_docker = bool(data.get('include_docker', True))
     include_stopped = bool(data.get('include_stopped', False))
+    sev_sel = severity.parse(data.get('severities'))
 
     host_label = _host_label(host_key)
     # Collection fans out into worker threads, which do not inherit this
@@ -554,6 +611,7 @@ def preflight():
         bundle = prepare_bundle(
             host_key, host_label, window_minutes, include_files, include_journal,
             include_docker, include_stopped, app=worker_app, use_cache=True,
+            severities=sev_sel,
         )
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
@@ -588,7 +646,7 @@ def preflight():
         chunks = max(2, int(math.ceil(chosen_tokens / max(1, profile['evidence_tokens']))))
 
     _bundle_put(_bundle_key(host_key, window_minutes, include_files, include_journal,
-                            include_docker, include_stopped), bundle)
+                            include_docker, include_stopped, sev_sel), bundle)
 
     return jsonify({
         'host_key': host_key,
@@ -601,6 +659,9 @@ def preflight():
         'clusters': len(norm['clusters']),
         'correlations': len(bundle['corr']['correlations']),
         'severity': norm['severity_counts'],
+        'filter': _stored_filter(bundle['collected'], norm),
+        'scope_note': _scope_note(include_files, include_journal, include_docker,
+                                  include_stopped, sev_sel),
         'pack_tokens': baseline_tokens,
         'pack_tokens_max_depth': full_tokens,
         'depth_costs': depth_costs,
@@ -656,6 +717,7 @@ def stream_report():
     except (TypeError, ValueError):
         depth = 0
 
+    sev_sel = severity.parse(data.get('severities'))
     host_label = _host_label(host_key)
     include_files = bool(data.get('include_files', True))
     include_journal = bool(data.get('include_journal', True))
@@ -675,7 +737,7 @@ def stream_report():
         yield 'retry: 5000\n\n'
         yield ev({'type': 'stage', 'stage': 'prepare', 'elapsed': 0,
                   'message': f'Preparing report for {host_label} '
-                             f'({_scope_note(include_files, include_journal, include_docker, include_stopped)})...'})
+                             f'({_scope_note(include_files, include_journal, include_docker, include_stopped, sev_sel)})...'})
 
         box = queue.Queue()
 
@@ -696,6 +758,7 @@ def stream_report():
                     emit=lambda p: box.put(('progress', p)),
                     app=worker_app,
                     use_cache=True,
+                    severities=sev_sel,
                 )
 
             try:

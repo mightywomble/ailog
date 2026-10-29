@@ -8,6 +8,8 @@ the number of log lines.
 """
 import os
 
+from . import severity
+
 MAX_PACK_TOKENS = int(os.environ.get('AILOG_REPORT_MAX_TOKENS', '12000') or 12000)
 MAX_CLUSTERS = 45
 MAX_BURSTS = 12
@@ -103,6 +105,28 @@ def build_pack(host_label, norm, corr, collect_meta, containers, depth=None):
         f"crit {counts.get('crit', 0)} error {counts.get('error', 0)} "
         f"warn {counts.get('warn', 0)} info {counts.get('info', 0)}"
     )
+
+    # The model must know the view is filtered, or it will read the missing
+    # INFO lines as "nothing else happened" and invent a coverage gap.
+    filt = norm.get('severity_filter') or {}
+    if filt.get('active'):
+        levels = filt.get('levels') or []
+        detail = []
+        if filt.get('events_kept') is not None:
+            detail.append(f"{filt['events_kept']:,} relevant events kept")
+        if filt.get('events_filtered'):
+            detail.append(f"{filt['events_filtered']:,} context lines dropped")
+        suffix = f" ({', '.join(detail)})" if detail else ''
+        lines.append(f"FILTER: severity = {severity.describe(levels)} only{suffix}")
+        pre = filt.get('source_prefilter') or {}
+        if pre:
+            lines.append('FILTER AT SOURCE: ' + '; '.join(
+                f'{kind} {how}' for kind, how in sorted(pre.items())))
+        lines.append(
+            'FILTER NOTE: the operator asked for this severity subset. Lines outside it were '
+            'discarded before analysis; their absence is NOT evidence that a source is healthy, '
+            'and correlation baselines are computed on the filtered subset only.'
+        )
 
     # --- containers ---------------------------------------------------------
     if containers:

@@ -16,6 +16,8 @@ import shlex
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from . import severity
+
 # --- limits -----------------------------------------------------------------
 DEFAULT_WINDOW_MINUTES = 120
 ALLOWED_WINDOWS = (15, 30, 60, 120, 360, 1440)
@@ -31,11 +33,29 @@ MAX_SOURCES = int(os.environ.get('AILOG_REPORT_MAX_SOURCES', '120') or 120)
 KIND_SHARES = {'file': 0.45, 'journal': 0.30, 'docker': 0.25}
 MAX_BYTES = int(os.environ.get('AILOG_REPORT_MAX_BYTES', str(24 * 1024 * 1024)) or 24 * 1024 * 1024)
 MAX_JOURNAL_UNITS = 60
+
+# Units that can never carry a useful report and only ever produce noise. The
+# report's own `sudo journalctl -u emergency.service` command is logged by sudo
+# into auth.log, and the word "emergency" then classifies as CRIT — the filter
+# would be reporting on itself.
+JOURNAL_UNIT_DENY = frozenset({'emergency.service', 'rescue.service'})
 FILE_LINE_CAP = 4000
 JOURNAL_LINE_CAP = 5000
 DOCKER_LINE_CAP = 5000
 COLLECT_WORKERS = 6
 SOURCE_TIMEOUT = 45
+
+# Severity filtering runs at the source, so a filtered run can afford to scan a
+# much wider tail: the bytes that survive the grep are only the matches. Without
+# this, selecting "errors only" on a quiet log would return the last 4000 lines
+# *of which* maybe none are errors, instead of the last 4000 errors.
+FILE_SCAN_CAP = int(os.environ.get('AILOG_REPORT_FILE_SCAN_CAP', '12000') or 12000)
+JOURNAL_SCAN_CAP = int(os.environ.get('AILOG_REPORT_JOURNAL_SCAN_CAP', '20000') or 20000)
+DOCKER_SCAN_CAP = int(os.environ.get('AILOG_REPORT_DOCKER_SCAN_CAP', '20000') or 20000)
+
+# Lines of trailing context kept after a severity match: the line *after* a
+# Python traceback header or a systemd "failed" line is where the cause lives.
+SEVERITY_CONTEXT_LINES = int(os.environ.get('AILOG_REPORT_SEVERITY_CONTEXT', '3') or 3)
 
 # One report run per host at a time: a double click must not stack 50 SSH
 # sessions across the same box.
@@ -113,6 +133,17 @@ def _discover_files(host_key):
     return entries, None
 
 
+def _usable_units(stdout):
+    """Parse a unit listing and drop units that cannot inform a report."""
+    units = []
+    for raw in (stdout or '').splitlines():
+        unit = raw.strip()
+        if not unit or unit in JOURNAL_UNIT_DENY:
+            continue
+        units.append(unit)
+    return units[:MAX_JOURNAL_UNITS]
+
+
 def _discover_journal_units(host_key):
     """List systemd units, cheaply.
 
@@ -129,9 +160,9 @@ def _discover_journal_units(host_key):
     )
     try:
         res = app.execute_command(host_key, systemctl_cmd, timeout=15)
-        units = [u.strip() for u in (res.stdout or '').splitlines() if u.strip()]
+        units = _usable_units(res.stdout)
         if units:
-            return units[:MAX_JOURNAL_UNITS], None
+            return units, None
     except Exception as exc:
         print(f'[report] systemctl unit listing failed on {host_key}: {exc}')
 
@@ -146,8 +177,7 @@ def _discover_journal_units(host_key):
         print(f'[report] journal discovery failed on {host_key}: {exc}')
         return [], str(exc)
 
-    units = [u.strip() for u in (res.stdout or '').splitlines() if u.strip()]
-    return units[:MAX_JOURNAL_UNITS], None
+    return _usable_units(res.stdout), None
 
 
 def _discover_docker(host_key):
@@ -252,46 +282,113 @@ def list_sources(host_key, include_files=True, include_journal=True, include_doc
 # per-source fetch
 # ---------------------------------------------------------------------------
 
-def build_command(source, window_start, window_end):
-    """Build the shell command that fetches one source inside the window."""
+def _prefilter_for(levels):
+    """What the source-side filter actually did, for the report coverage."""
+    levels = frozenset(levels or ())
+    if not levels:
+        return {}
+    priority, exact = severity.journal_priority(levels)
+    return {
+        'journal': 'journalctl --priority=' + str(priority) + ('' if exact else ' + grep'),
+        'file': f'grep -iE + tail -n {FILE_SCAN_CAP}',
+        'docker': 'grep -iE (container logs have no severity metadata)',
+    }
+
+
+def _grep_filter(levels):
+    """The shared ``| grep`` tail that keeps only the selected severities.
+
+    ``-a`` because /var/log files can contain a stray NUL and grep would
+    otherwise call the whole file binary and print nothing. Context lines
+    (``-A``) keep the body of a traceback or a multi-line failure, and the final
+    ``tail`` keeps the *newest* matches when there are more than the cap.
+    """
+    pattern = severity.grep_pattern(levels)
+    if not pattern:
+        return ''
+    # --no-group-separator: grep's own "--" lines between context groups would
+    # otherwise reach the normaliser as timestamp-less junk events.
+    # -i is not optional: classify_severity matches case-insensitively, so a
+    # case-sensitive grep here would silently drop "ERROR:"/"Failed" lines that
+    # the authoritative filter would have kept.
+    return (f" | grep -aiE -A {SEVERITY_CONTEXT_LINES} --no-group-separator "
+            f"{shlex.quote(pattern)} | tail -n {{cap}}")
+
+
+def build_command(source, window_start, window_end, sev_levels=None):
+    """Build the shell command that fetches one source inside the window.
+
+    ``sev_levels`` is a frozenset from ``severity.parse`` (empty = no filter).
+    Filtering happens here, on the host, so filtered-out lines never cross the
+    SSH channel — that is the whole point of the feature. ``normalize`` applies
+    the same filter again authoritatively, because a grep over raw text is a
+    heuristic and the classifier is not.
+    """
     since = _rfc3339(window_start)
     kind = source['kind']
+    levels = frozenset(sev_levels or ())
+    filtering = bool(levels)
 
     if kind == 'file':
         path = shlex.quote(source['path'])
+        cap = FILE_LINE_CAP
+        scan = FILE_SCAN_CAP if filtering else FILE_LINE_CAP
         if str(source['name']).endswith('.gz'):
-            return f'sudo zcat {path} 2>/dev/null | tail -n {FILE_LINE_CAP}'
-        return f'sudo tail -n {FILE_LINE_CAP} {path} 2>/dev/null'
+            head = f'sudo zcat {path} 2>/dev/null | tail -n {scan}'
+        else:
+            head = f'sudo tail -n {scan} {path} 2>/dev/null'
+        if not filtering:
+            return head
+        return head + _grep_filter(levels).format(cap=cap)
 
     if kind == 'journal':
         unit = shlex.quote(source['unit'])
-        return (
+        cap = JOURNAL_LINE_CAP
+        scan = JOURNAL_SCAN_CAP if filtering else JOURNAL_LINE_CAP
+        priority, exact = severity.journal_priority(levels)
+        priority_arg = f' --priority={priority}' if filtering and priority is not None else ''
+        base = (
             f'sudo journalctl -u {unit} --since {shlex.quote(since)} '
-            f'-n {JOURNAL_LINE_CAP} --no-pager -o short-iso 2>/dev/null'
+            f'-n {scan} --no-pager -o short-iso{priority_arg} 2>/dev/null'
         )
+        if not filtering:
+            return base
+        # --priority=N is native and free: the journal does the filtering on the
+        # host, so no filtered line ever reaches the pipe. It is only exact when
+        # the selection is "N and above", so the inexact cases get a grep too.
+        if exact:
+            return base
+        return base + _grep_filter(levels).format(cap=cap)
 
     if kind == 'docker':
         container = shlex.quote(source['name'])
         label = '\'{{index .Config.Labels "com.docker.swarm.service.name"}}\''
+        cap = DOCKER_LINE_CAP
+        scan = DOCKER_SCAN_CAP if filtering else DOCKER_LINE_CAP
         # On a swarm manager `docker logs` only sees local tasks, so resolve the
-        # service label first and prefer `docker service logs`.
-        return (
+        # service label first and prefer `docker service logs`. Container logs
+        # carry no severity metadata, so only grep can filter them.
+        body = (
             'if sudo -n docker version >/dev/null 2>&1; then D="sudo -n docker"; '
             'else D="docker"; fi; '
             f'SVC=$($D inspect -f {label} {container} 2>/dev/null); '
             f'if [ -n "$SVC" ]; then $D service logs --since {shlex.quote(since)} '
-            f'--timestamps --tail {DOCKER_LINE_CAP} "$SVC" 2>&1; '
+            f'--timestamps --tail {scan} "$SVC" 2>&1; '
             f'else $D logs --since {shlex.quote(since)} --timestamps '
-            f'--tail {DOCKER_LINE_CAP} {container} 2>&1; fi'
+            f'--tail {scan} {container} 2>&1; fi'
         )
+        if not filtering:
+            return body
+        # The docker branch is a compound `if`; group it so one pipe applies.
+        return '{ ' + body + '; }' + _grep_filter(levels).format(cap=cap)
 
     raise ValueError(f'unknown source kind: {kind}')
 
 
-def collect_one(host_key, source, window_start, window_end, budget=None):
+def collect_one(host_key, source, window_start, window_end, budget=None, sev_levels=None):
     """Fetch a single source. Never raises: failures are recorded in the result."""
     app = _app()
-    cmd = build_command(source, window_start, window_end)
+    cmd = build_command(source, window_start, window_end, sev_levels=sev_levels)
     timeout = SOURCE_TIMEOUT
     if source['kind'] == 'docker':
         timeout = SOURCE_TIMEOUT + 20
@@ -443,14 +540,19 @@ def select_sources(sources, max_sources, shares=None):
 def collect_host_logs(host_key, host_label=None, window_minutes=DEFAULT_WINDOW_MINUTES,
                       include_files=True, include_journal=True, include_docker=True,
                       include_stopped=False, max_sources=None, progress=None, app=None,
-                      lock=None):
+                      lock=None, severities=None):
     """Collect every in-scope source for one host inside the time window.
 
     ``progress`` is called with dict payloads so the SSE route can stream them.
     ``app`` must be the real Flask app object (``current_app._get_current_object()``)
     because worker threads do not inherit a request context.
+
+    ``severities`` is any value ``severity.parse`` understands (list of names,
+    comma string, or ``None``/``'all'`` for no filter). Filtering happens on the
+    host, so filtered-out lines cost no bandwidth and no byte budget.
     """
     minutes = clamp_window(window_minutes)
+    sev_levels = severity.parse(severities)
     window_start, window_end = window_bounds(minutes)
     max_sources = max_sources or MAX_SOURCES
 
@@ -472,6 +574,7 @@ def collect_host_logs(host_key, host_label=None, window_minutes=DEFAULT_WINDOW_M
         'skipped': [],
         'truncated': False,
         'duration_ms': 0,
+        'severity_filter': severity.summary(sev_levels, prefilter=_prefilter_for(sev_levels)),
     }
 
     started = datetime.datetime.now(datetime.timezone.utc)
@@ -487,6 +590,11 @@ def collect_host_logs(host_key, host_label=None, window_minutes=DEFAULT_WINDOW_M
         progress=lambda msg: emit({'phase': 'discover', 'message': msg}),
     )
     result['errors'].extend(errors)
+
+    if sev_levels:
+        emit({'phase': 'discover',
+              'message': f"Severity filter: {severity.describe(sev_levels)} only "
+                         f"(applied on the host before transfer)."})
 
     if len(sources) > max_sources:
         sources, dropped = select_sources(sources, max_sources)
@@ -515,7 +623,8 @@ def collect_host_logs(host_key, host_label=None, window_minutes=DEFAULT_WINDOW_M
     try:
         with ThreadPoolExecutor(max_workers=COLLECT_WORKERS) as pool:
             futures = {
-                pool.submit(_collect_in_context, app, host_key, src, window_start, window_end, budget): src
+                pool.submit(_collect_in_context, app, host_key, src, window_start,
+                            window_end, budget, sev_levels): src
                 for src in sources
             }
             done = 0
@@ -547,15 +656,16 @@ def collect_host_logs(host_key, host_label=None, window_minutes=DEFAULT_WINDOW_M
     return result
 
 
-def _collect_in_context(app, host_key, source, window_start, window_end, budget):
+def _collect_in_context(app, host_key, source, window_start, window_end, budget,
+                        sev_levels=None):
     """Run ``collect_one`` with an application context pushed.
 
     ``app`` may be None when called from a script/test harness.
     """
     if app is None:
-        return collect_one(host_key, source, window_start, window_end, budget)
+        return collect_one(host_key, source, window_start, window_end, budget, sev_levels)
     with app.app_context():
-        return collect_one(host_key, source, window_start, window_end, budget)
+        return collect_one(host_key, source, window_start, window_end, budget, sev_levels)
 
 
 # ---------------------------------------------------------------------------

@@ -65,6 +65,15 @@
             {% if report.tokens_in %} &middot; ~{{ '{:,}'.format(report.tokens_in) }} tokens in{% endif %}
             {% if report.tokens_out %} / {{ '{:,}'.format(report.tokens_out) }} out{% endif %}
           </div>
+          {% set sev_filter = coverage.get('severity_filter') or {} %}
+          {% if sev_filter.get('active') %}
+          <div class="inline-flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 text-xs text-indigo-200">
+            <span class="font-medium">Severity filter: {{ sev_filter.get('label') }}</span>
+            {% if sev_filter.get('events_kept') is not none %}<span>&middot; {{ '{:,}'.format(sev_filter.get('events_kept')) }} relevant events</span>{% endif %}
+            {% if sev_filter.get('events_filtered') %}<span>&middot; {{ '{:,}'.format(sev_filter.get('events_filtered')) }} context lines dropped</span>{% endif %}
+            <span class="text-indigo-300/70">&middot; applied on the host before transfer</span>
+          </div>
+          {% endif %}
         </div>
         <div class="flex items-center gap-2">
           <button id="btn-discord" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-sm px-3 py-2 rounded-lg">Send to Discord</button>

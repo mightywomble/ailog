@@ -517,6 +517,11 @@ export function init() {
         const serverReportSizeCheck = document.getElementById('server-report-size-check');
         const serverReportSizeStatus = document.getElementById('server-report-size-status');
         const serverReportRecommendation = document.getElementById('server-report-recommendation');
+        const serverReportSevAll = document.getElementById('server-report-sev-all');
+        const serverReportSevCrit = document.getElementById('server-report-sev-crit');
+        const serverReportSevError = document.getElementById('server-report-sev-error');
+        const serverReportSevWarn = document.getElementById('server-report-sev-warn');
+        const serverReportSevHint = document.getElementById('server-report-sev-hint');
         let serverReportDefaults = null;
         let serverReportRunning = false;
         let serverReportLastRecommendation = null;
@@ -557,6 +562,53 @@ export function init() {
             } catch (err) {
                 // No AI provider configured: button stays hidden.
             }
+        };
+
+        const SEVERITY_INPUTS = () => [
+            ['crit', serverReportSevCrit],
+            ['error', serverReportSevError],
+            ['warn', serverReportSevWarn]
+        ];
+
+        // "All" is exclusive: it is the classic unfiltered report. Unticking it
+        // with nothing else selected would mean "nothing", so we fall back to
+        // All rather than silently producing an empty report.
+        const selectedSeverities = () => {
+            const levels = SEVERITY_INPUTS()
+                .filter(([, el]) => el && el.checked && !(serverReportSevAll && serverReportSevAll.checked))
+                .map(([name]) => name);
+            return levels;
+        };
+
+        const syncSeverityControls = (changed) => {
+            if (!serverReportSevAll) return;
+            if (changed === 'all') {
+                if (serverReportSevAll.checked) {
+                    SEVERITY_INPUTS().forEach(([, el]) => { if (el) el.checked = false; });
+                } else if (!SEVERITY_INPUTS().some(([, el]) => el && el.checked)) {
+                    serverReportSevAll.checked = true;
+                }
+            } else {
+                if (SEVERITY_INPUTS().some(([, el]) => el && el.checked)) {
+                    serverReportSevAll.checked = false;
+                } else {
+                    serverReportSevAll.checked = true;
+                }
+            }
+            const levels = selectedSeverities();
+            const labels = { crit: 'Critical', error: 'Errors', warn: 'Warnings' };
+            if (serverReportSevHint) {
+                serverReportSevHint.textContent = levels.length
+                    ? levels.map((l) => labels[l]).join(' + ') + ' only'
+                    : 'All severities';
+                serverReportSevHint.classList.toggle('text-indigo-300', levels.length > 0);
+            }
+        };
+
+        const wireSeverityControls = () => {
+            serverReportSevAll?.addEventListener('change', () => syncSeverityControls('all'));
+            SEVERITY_INPUTS().forEach(([, el]) => el?.addEventListener('change', () => syncSeverityControls('level')));
+            syncSeverityControls('level');
         };
 
         const loadServerReportDefaults = async () => {
@@ -695,6 +747,7 @@ export function init() {
 
         serverReportAutoDepth?.addEventListener('change', syncDepthControls);
         serverReportDepth?.addEventListener('input', syncDepthControls);
+        wireSeverityControls();
 
         const currentScopeBody = () => ({
             host_key: selectedHostId,
@@ -704,7 +757,10 @@ export function init() {
             include_files: !!document.getElementById('server-report-files')?.checked,
             include_journal: !!document.getElementById('server-report-journal')?.checked,
             include_docker: !!document.getElementById('server-report-docker')?.checked,
-            include_stopped: !!document.getElementById('server-report-stopped')?.checked
+            include_stopped: !!document.getElementById('server-report-stopped')?.checked,
+            // Omitted when "All" is selected so the request stays byte-identical
+            // to the pre-filter behaviour (and hits the same bundle cache key).
+            severities: selectedSeverities()
         });
 
         const renderRecommendation = (payload) => {
@@ -717,6 +773,13 @@ export function init() {
                 `${escapeHtml(String(payload.events || 0))} events &rarr; ${escapeHtml(String(payload.clusters || 0))} signatures, ` +
                 `${escapeHtml(String(payload.sources_ok || 0))}/${escapeHtml(String(payload.sources_total || 0))} sources with data`,
             ];
+            const filt = payload.filter || {};
+            if (filt.active) {
+                lines.push(`<span class="text-indigo-300">Severity filter: ${escapeHtml(filt.label || '')}</span>` +
+                    ` &middot; ${escapeHtml(String(filt.events_kept || 0))} relevant events` +
+                    (filt.events_filtered ? ` &middot; ${escapeHtml(String(filt.events_filtered))} context lines dropped` : '') +
+                    ' &middot; filtered on the host before transfer');
+            }
             (rec.rationale || []).forEach((line) => lines.push(escapeHtml(line)));
             if (rec.suggest_model) {
                 lines.push(`<span class="text-amber-300">Model ${escapeHtml(rec.model || '')} may be too small for this pack ` +
