@@ -177,7 +177,6 @@ export function init() {
         const logsSelectedHostTitle = document.getElementById('logs-selected-host-title');
         const logsActionPull = document.getElementById('logs-action-pull');
         const logsActionInfo = document.getElementById('logs-action-info');
-        const logsActionMonitor = document.getElementById('logs-action-monitor');
         const logsActionSsh = document.getElementById('logs-action-ssh');
         const logsActionDocker = document.getElementById('logs-action-docker');
         const sshTerminalContainer = document.getElementById('ssh-terminal-container');
@@ -189,8 +188,8 @@ export function init() {
         const dashboardTotalSchedulesEl = document.getElementById('dashboard-total-schedules');
         const dashboardDbStatusEl = document.getElementById('dashboard-db-status');
         const dashboardOpenSettingsBtn = document.getElementById('dashboard-open-settings');
+        const dashboardOpenMonitoringBtn = document.getElementById('dashboard-open-monitoring');
         const dashboardRescanBtn = document.getElementById('dashboard-rescan');
-        const dashboardAddDevicesBtn = document.getElementById('dashboard-add-devices');
         const dashboardExportSshBtn = document.getElementById('dashboard-export-ssh');
         
         const hostListContainer = document.getElementById('host-list-container');
@@ -451,15 +450,13 @@ export function init() {
 
         if (logsActionPull) logsActionPull.addEventListener('click', () => pullLogsForSelectedHost());
         if (logsActionInfo) logsActionInfo.addEventListener('click', () => showHostInfoMain());
-        // The Monitoring button opens the live metrics page (netdata-style cards)
-        // in a dialog: /metrics?embed=1 in an iframe, same chrome as Docker.
-        if (logsActionMonitor) logsActionMonitor.addEventListener('click', () => {
-            const label = dockerHostLabels[String(selectedHostId || '')]
-                || document.getElementById('logs-selected-host-title')?.textContent?.trim()
-                || '';
-            if (typeof window.openMetricsModal === 'function') window.openMetricsModal(label);
+        // Monitoring lives on the dashboard toolbar and covers *every* server, so it
+        // needs no selected host: /metrics?embed=1 in the shared dialog chrome.
+        const openMonitoring = () => {
+            if (typeof window.openMetricsModal === 'function') window.openMetricsModal('');
             else window.open('/metrics', '_blank', 'noopener');
-        });
+        };
+        if (dashboardOpenMonitoringBtn) dashboardOpenMonitoringBtn.addEventListener('click', openMonitoring);
         if (logsActionSsh) logsActionSsh.addEventListener('click', () => openSshTerminal());
 
         // ---- Docker monitoring gating -------------------------------------------------
@@ -3437,10 +3434,6 @@ const showHostInfoMain = async () => {
         // Dashboard quick actions
         if (dashboardOpenSettingsBtn) dashboardOpenSettingsBtn.addEventListener('click', () => settingsBtn.click());
         if (dashboardRescanBtn && rescanAllBtn) dashboardRescanBtn.addEventListener('click', () => rescanAllBtn.click());
-        if (dashboardAddDevicesBtn) dashboardAddDevicesBtn.addEventListener('click', () => {
-            const addDevicesBtn = document.getElementById('add-devices-btn');
-            if (addDevicesBtn) addDevicesBtn.click();
-        });
         if (dashboardExportSshBtn && createSshConfigBtn) dashboardExportSshBtn.addEventListener('click', () => createSshConfigBtn.click());
 
         if (backToDashboardBtn) backToDashboardBtn.addEventListener('click', () => {
