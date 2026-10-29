@@ -1,0 +1,47 @@
+{% set embedded = request.args.get('embed') == '1' %}
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monitoring</title>
+  <link rel="stylesheet" href="/static/css/metrics.css" />
+</head>
+<body class="bg-slate-950 text-slate-100 {% if not embedded %}min-h-screen{% endif %}">
+  <div class="m-wrap {% if embedded %}m-wrap-embedded{% endif %}">
+    <header class="m-head">
+      <div class="m-head-left">
+        {% if not embedded %}
+        <a id="btn-back" href="/" class="m-back">← Back</a>
+        {% endif %}
+        <div>
+          <h1 class="m-title">Monitoring</h1>
+          <div class="m-subtitle">
+            <span id="m-live" class="m-live"><span class="m-live-dot"></span>live</span>
+            <span id="m-summary">Loading servers…</span>
+          </div>
+        </div>
+      </div>
+      <div class="m-head-right">
+        <label class="m-field">
+          <span>Every</span>
+          <select id="m-interval">
+            <option value="2000" selected>2s</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+          </select>
+        </label>
+        <button id="m-pause" type="button" class="m-btn">Pause</button>
+      </div>
+    </header>
+
+    <div id="m-grid" class="m-grid" aria-live="polite"></div>
+
+    <div id="m-empty" class="m-empty hidden">
+      No hosts yet. Add a host from the dashboard to see live metrics.
+    </div>
+  </div>
+
+  <script type="module" src="/static/js/metrics-page.js"></script>
+</body>
+</html>

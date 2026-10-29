@@ -1,4 +1,5 @@
-// Iframe-backed dialogs: Docker monitoring and the server report history.
+// Iframe-backed dialogs: Docker monitoring, live monitoring (metrics) and the
+// server report history.
 //
 // Both are full documents (`/docker/<host>`, `/reports`) with Chart.js
 // instances, polling loops and their own tables, so they are embedded rather
@@ -66,6 +67,21 @@
         closeFrame('reportsModal', 'reportsModalFrame');
     };
 
+    // Live monitoring: the netdata-style card grid. It polls every 2s, so the
+    // frame is blanked on close rather than left running hidden.
+    window.openMetricsModal = function (label) {
+        openFrame('metricsModal', 'metricsModalFrame', 'metricsModalTitle',
+                  '/metrics?embed=1', label, 'Monitoring');
+    };
+    window.closeMetricsModal = function () {
+        closeFrame('metricsModal', 'metricsModalFrame');
+    };
+    window.metricsModalIsOpen = function () {
+        return typeof window.isAppModalOpen === 'function'
+            ? window.isAppModalOpen('metricsModal')
+            : false;
+    };
+
     document.addEventListener('DOMContentLoaded', () => {
         // Belt and braces: the shared data-modal-close handler covers these,
         // but the explicit listeners keep each page's close behaviour local
@@ -74,14 +90,19 @@
             ?.addEventListener('click', window.closeDockerModal);
         document.getElementById('reportsModalClose')
             ?.addEventListener('click', window.closeReportsModal);
+        document.getElementById('metricsModalClose')
+            ?.addEventListener('click', window.closeMetricsModal);
 
         // The modal's own close (Escape / backdrop / shared handler) must also
         // unload the frame, which only these listeners know how to do.
-        ['dockerModal', 'reportsModal'].forEach((id) => {
+        const FRAMES = {
+            dockerModal: 'dockerModalFrame',
+            reportsModal: 'reportsModalFrame',
+            metricsModal: 'metricsModalFrame',
+        };
+        Object.keys(FRAMES).forEach((id) => {
             document.getElementById(id)?.addEventListener('appmodal:close', () => {
-                const frame = id === 'dockerModal'
-                    ? document.getElementById('dockerModalFrame')
-                    : document.getElementById('reportsModalFrame');
+                const frame = document.getElementById(FRAMES[id]);
                 if (frame && frame.getAttribute('src') !== 'about:blank') {
                     frame.setAttribute('src', 'about:blank');
                 }
