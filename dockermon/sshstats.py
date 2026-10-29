@@ -13,12 +13,14 @@ SSH round trips (and therefore the latency) to a minimum.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import threading
 import time
 
 from . import endpoints as ep
 from .parse import (
+    parse_df_root,
     parse_kv_json_lines,
     parse_meminfo,
     parse_netdev,
@@ -26,6 +28,8 @@ from .parse import (
     parse_proc_stat,
     parse_ps_line,
     parse_stats_line,
+    parse_sysdf,
+    rate,
 )
 
 # host_key -> (timestamp, monotonic-ish wall clock, rx, tx, cpu_total, cpu_idle)
@@ -39,6 +43,8 @@ M_NODES = '===AILOG_NODES==='
 M_STAT = '===AILOG_STAT==='
 M_MEM = '===AILOG_MEM==='
 M_NET = '===AILOG_NET==='
+M_DF = '===AILOG_DF==='
+M_SYSDF = '===AILOG_SYSDF==='
 
 PS_FORMAT = (
     '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Size}}\t'
@@ -67,6 +73,8 @@ _SNAPSHOT_CMD = '; '.join([
     'cat /proc/meminfo',
     'echo ' + M_NET,
     'cat /proc/net/dev',
+    'echo ' + M_DF,
+    'df -B1 /',
 ])
 
 
@@ -84,7 +92,8 @@ def run(user, ip, ssh_key_id=None, command: str = '', timeout: int = 25):
 def _split(output: str) -> dict[str, str]:
     """Split combined stdout on our marker lines."""
     markers = {M_INFO: 'info', M_PS: 'ps', M_STATS: 'stats',
-               M_NODES: 'nodes', M_STAT: 'stat', M_MEM: 'mem', M_NET: 'net'}
+               M_NODES: 'nodes', M_STAT: 'stat', M_MEM: 'mem', M_NET: 'net',
+               M_DF: 'df', M_SYSDF: 'sysdf'}
     blocks: dict[str, list[str]] = {v: [] for v in markers.values()}
     current = None
     for line in output.splitlines():
@@ -234,6 +243,7 @@ def snapshot(host_key, user, ip, ssh_key_id=None, timeout: int = 25):
     proc = parse_proc_stat(blocks.get('stat', ''))
     mem = parse_meminfo(blocks.get('mem', ''))
     netdev = parse_netdev(blocks.get('net', ''))
+    disk_total, disk_used = parse_df_root(blocks.get('df', ''))
 
     rx_bps, tx_bps, cpu_pct = _host_rates(
         host_key, netdev.get('rx') or 0, netdev.get('tx') or 0,
@@ -261,6 +271,10 @@ def snapshot(host_key, user, ip, ssh_key_id=None, timeout: int = 25):
         'net_tx': netdev.get('tx') or 0,
         'net_rx_bps': rx_bps,
         'net_tx_bps': tx_bps,
+        'disk_used': disk_used,
+        'disk_total': disk_total,
+        'disk_percent': (round(100.0 * disk_used / disk_total, 2)
+                         if disk_total else None),
         'containers_total': len(containers),
         'containers_running': len(running),
         'swarm': bool(swarm.get('LocalNodeState') == 'active'),
@@ -404,4 +418,182 @@ def container_detail(host_key, user, ip, container_id, ssh_key_id=None, timeout:
         'mounts': mounts,
         'labels': config.get('Labels') or {},
         'env_count': len(config.get('Env') or []),
+    }
+
+
+# --------------------------------------------------------------------------
+# swarm: per-node collection + node address resolution
+# --------------------------------------------------------------------------
+
+_NODE_SWARM_CMD = '; '.join([
+    'echo ' + M_PS,
+    "docker_cmd ps -a --size --no-trunc --format '" + PS_FORMAT + "'",
+    'echo ' + M_STATS,
+    "docker_cmd stats --no-stream --no-trunc --format '{{json .}}'",
+    'echo ' + M_SYSDF,
+    "docker_cmd system df --format '{{json .}}'",
+    'echo ' + M_DF,
+    'df -B1 /',
+    'echo ' + M_STAT,
+    'cat /proc/stat',
+    'echo ' + M_MEM,
+    'cat /proc/meminfo',
+    'echo ' + M_NET,
+    'cat /proc/net/dev',
+])
+
+_NODE_ADDR_CMD = "docker_cmd node inspect --format '{{.Status.Addr}}' "
+
+
+def _cpu_cores(proc_stat_text: str) -> int:
+    return sum(1 for line in (proc_stat_text or '').splitlines()
+               if re.match(r'^cpu\d+\s', line)) or 0
+
+
+_ctr_lock = threading.Lock()
+# container_id -> (timestamp, net_rx, net_tx) cumulative counters
+_ctr_cache: dict[str, tuple[float, int, int]] = {}
+
+
+def _container_rates(rows, usage_by_id, now):
+    """Rewrite ``net_rx``/``net_tx`` on each row as bytes/second.
+
+    ``docker stats`` reports cumulative counters, so the first poll for a
+    container has no rate and reports 0. Counters for containers that have
+    gone away are pruned so the cache cannot grow without bound.
+    """
+    live = set()
+    updates = {}
+    with _ctr_lock:
+        for row in rows:
+            cid = row.get('id') or ''
+            if not cid:
+                continue
+            live.add(cid)
+            usage = usage_by_id.get(cid[:12]) or usage_by_id.get(cid)
+            net = (usage or {}).get('net_bytes') or (None, None)
+            rx, tx = net
+            if rx is None or tx is None:
+                continue
+            prev = _ctr_cache.get(cid)
+            if prev:
+                elapsed = now - prev[0]
+                row['net_rx'] = rate(prev[1], rx, elapsed) or 0.0
+                row['net_tx'] = rate(prev[2], tx, elapsed) or 0.0
+            else:
+                row['net_rx'] = 0.0
+                row['net_tx'] = 0.0
+            row['net_rx_total'] = rx
+            row['net_tx_total'] = tx
+            updates[cid] = (now, rx, tx)
+        _ctr_cache.update(updates)
+        if len(_ctr_cache) > max(200, 3 * len(live)):
+            for cid in [c for c in _ctr_cache if c not in live]:
+                _ctr_cache.pop(cid, None)
+    return rows
+
+
+_SYSDF_CMD = "docker_cmd system df --format '{{json .}}'"
+
+
+def disk_usage(user, ip, ssh_key_id=None, timeout: int = 15):
+    """`docker system df` on one host -> {images/containers/volumes/build_cache}."""
+    ok, out = run(user, ip, ssh_key_id, _SYSDF_CMD, timeout=timeout)
+    if not ok:
+        return {}
+    from .parse import parse_kv_json_lines
+    out_df = {}
+    for obj in parse_kv_json_lines(out):
+        key, value = parse_sysdf(obj)
+        if key:
+            out_df[key] = value
+    return out_df
+
+
+def node_addr(user, ip, ssh_key_id=None, node_id='', timeout: int = 10):
+    """Ask the manager for a node's advertised address (``Status.Addr``)."""
+    if not node_id:
+        return ''
+    ok, out = run(user, ip, ssh_key_id,
+                  _NODE_ADDR_CMD + shlex.quote(str(node_id)), timeout=timeout)
+    if not ok:
+        return ''
+    lines = [line.strip() for line in (out or '').splitlines() if line.strip()]
+    return lines[-1] if lines else ''
+
+
+def swarm_node_snapshot(host_key, hostname, user, ip, ssh_key_id=None,
+                        timeout: int = 25):
+    """Collect one swarm node: containers + usage + disk + host counters.
+
+    ``host_key``/``hostname`` only key the rate cache, so the same node keeps
+    its previous counters across polls.
+    """
+    ok, out = run(user, ip, ssh_key_id, _NODE_SWARM_CMD, timeout=timeout)
+    if not ok:
+        raise RuntimeError(out or 'SSH command failed')
+
+    blocks = _split(out)
+
+    usage_by_id = {}
+    for obj in parse_kv_json_lines(blocks.get('stats', '')):
+        parsed = parse_stats_line(obj)
+        if parsed.get('id'):
+            usage_by_id[parsed['id'][:12]] = parsed
+            usage_by_id[parsed['id']] = parsed
+
+    containers = []
+    for line in (blocks.get('ps') or '').splitlines():
+        if not line.strip():
+            continue
+        parsed = parse_ps_line(line)
+        if not parsed.get('id'):
+            continue
+        usage = usage_by_id.get(parsed['id'][:12]) or usage_by_id.get(parsed['id'])
+        row = _container_row(parsed, usage)
+        row['node'] = hostname
+        containers.append(row)
+    _container_rates(containers, usage_by_id, time.time())
+
+    sysdf = {}
+    for obj in parse_kv_json_lines(blocks.get('sysdf', '')):
+        key, value = parse_sysdf(obj)
+        if key:
+            sysdf[key] = value
+
+    proc = parse_proc_stat(blocks.get('stat', ''))
+    mem = parse_meminfo(blocks.get('mem', ''))
+    netdev = parse_netdev(blocks.get('net', ''))
+    disk_total, disk_used = parse_df_root(blocks.get('df', ''))
+
+    rate_key = '%s/%s' % (host_key, hostname or ip)
+    rx_bps, tx_bps, cpu_pct = _host_rates(
+        rate_key, netdev.get('rx') or 0, netdev.get('tx') or 0,
+        proc.get('total') or 0, proc.get('idle') or 0,
+    )
+
+    mem_total = mem.get('total') or 0
+    mem_used = mem.get('used') or 0
+    running = [c for c in containers
+               if (c.get('state') or '').lower() == 'running']
+
+    return {
+        'containers': containers,
+        'docker_df': sysdf,
+        'metrics': {
+            'cpu_pct': cpu_pct,
+            'cores': _cpu_cores(blocks.get('stat', '')),
+            'mem_used': mem_used,
+            'mem_total': mem_total,
+            'mem_pct': _ram_pct(mem_used, mem_total),
+            'disk_used': disk_used,
+            'disk_total': disk_total,
+            'disk_pct': (round(100.0 * disk_used / disk_total, 2)
+                         if disk_total else None),
+            'net_rx_bps': rx_bps,
+            'net_tx_bps': tx_bps,
+            'containers_total': len(containers),
+            'containers_running': len(running),
+        },
+        'ts': time.time(),
     }

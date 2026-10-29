@@ -5700,6 +5700,15 @@ if __name__ == '__main__':
     scheduler.start()
     startup_scheduler()
     atexit.register(lambda: scheduler.shutdown())
+
+    # Docker history sampler: keeps a rolling in-memory window per Docker host
+    # so the /docker/<host_key> charts survive a page reload.
+    try:
+        from dockermon import history as docker_history
+        docker_history.start_sampler(app)
+        atexit.register(docker_history.stop_sampler)
+    except Exception:
+        app.logger.exception('could not start the docker history sampler')
     
     # Start Flask app
     app.run(host='0.0.0.0', port=5001, debug=False)

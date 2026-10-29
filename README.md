@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-28 | v2.13.0 | Docker monitoring grows up: a rolling **in-memory history** sampler so `/docker/<host_key>` charts survive a reload (plus a disk card), an **Apps** view that groups containers per stack/service across the cluster, a **Cluster** view with swarm-wide totals, per-node cards with sparklines and `docker system df`, all rendered as tabs on the existing Docker page | ✅ Complete |
 | 2026-10-28 | v2.12.1 | Docs: server-report usage walkthrough with depth guidance, report tuning settings/env table, endpoint reference, report-specific sudoers entries, blueprint and report-pipeline architecture notes | ✅ Complete |
 | 2026-10-28 | v2.12.0 | Report tuning: default model `openai/gpt-4o-mini`; **Executive Summary** and **How to Resolve** closing sections; a depth slider (Lite → Maximum) plus Auto; a sizing engine that measures the evidence pack and recommends depth, chunking and model; map-reduce chunking for packs too large for one request; "Check size & suggest" pre-flight that does not call the model | ✅ Complete |
 | 2026-10-28 | v2.11.0 | Server-wide correlated log reports: **Analyse All Logs** collects every file / journald / container source on a host into a uniform time window, normalises lines into signature clusters, correlates sources statistically (lift, bursts, silence gaps, container state), sends one compact evidence pack to the model and stores a report at `/reports/<id>` with a history list | ✅ Complete |
@@ -70,9 +71,12 @@ This application is designed for use on a trusted, internal development network 
 ### 🐳 **Docker Monitoring**
 * **Automatic discovery:** every configured host is probed for a Docker Engine endpoint — unix socket over SSH (preferred, no exposed port needed), plain TCP `2375`, or TLS `2376`. Hosts without Docker are skipped cleanly.
 * **Docker button:** appears in the Logs toolbar only for hosts with a reachable endpoint; opens a **standalone page** at `/docker/<host_key>` (not a modal).
-* **Live charts:** CPU, RAM and network (rx/tx bytes per second) polled every 2 s with a 60-point rolling window. Nothing is persisted — live statistics only.
+* **Live charts:** CPU, RAM, network (rx/tx bytes per second) and root-filesystem usage, polled every 2 s. The cards **seed from a rolling in-memory history** (one sample every 15 s for 60 minutes by default) so a refresh no longer throws the graph away. History lives in process memory only — it is gone on restart by design, and nothing is written to the database.
 * **Containers:** name, state/health, stack/service, writable + rootfs size, image reference and version tag, ports and mounts. Click a container to expand its details.
 * **Swarm view:** cluster nodes with role/state, plus per-node drill-down that filters the container list.
+* **Apps tab:** containers grouped by stack (compose project / swarm stack) → service → container, with per-app CPU/RAM totals, node spread, live sparklines and an expandable container list. Works on a plain host too — unstacked containers fall into one `(standalone)` group.
+* **Cluster tab (swarm only):** swarm-wide CPU/RAM/disk/network totals and per-node cards with role, address, container count, utilisation bars, CPU sparklines and `docker system df` (images / containers / volumes / build cache, with reclaimable space). Nodes that cannot be reached are shown as offline with the SSH error instead of being silently dropped from the totals.
+* **Cost model:** one combined SSH command per node (`docker ps --size` + `docker stats --no-stream` + `docker system df` + `/proc` + `df -B1 /`), fanned out across nodes in parallel and cached for 10 s, so a 5-node cluster refresh is ~6 round trips rather than ~24.
 * **Refresh cadence:** background re-probe every `AILOG_DOCKER_REFRESH_SECONDS` (default `300`, minimum `30`) or on demand with the **Scan Docker** button in the hosts sidebar.
 * **Docker on the target host:** the `docker` CLI must be installed; AILog runs `sudo -n docker …` and falls back to `docker …` (docker group membership also works).
 
@@ -118,6 +122,15 @@ Tuning, in **Settings** (DB-backed) or as environment variables:
 | – | `AILOG_REPORT_MAX_BYTES` | `25165824` (24 MB) | total log text collected per run |
 | – | `AILOG_REPORT_MAX_TOKENS` | `12000` | ceiling for the `fit_pack` trim path |
 | – | `AILOG_DOCKER_REFRESH_SECONDS` | `300` | Docker endpoint re-discovery cadence |
+| `docker.history_interval` | `AILOG_DOCKER_POLL_SECONDS` | `15` | seconds between history samples per Docker host |
+| `docker.history_minutes` | `AILOG_DOCKER_HISTORY_MINUTES` | `60` | rolling history window kept in memory |
+| – | `AILOG_DOCKER_SWARM_TTL` | `10` | seconds a swarm cluster view is cached |
+| – | `AILOG_DOCKER_NODE_TIMEOUT` | `25` | SSH timeout per swarm node |
+
+Docker monitoring endpoints: `GET /docker/<host_key>`, `GET /api/docker/endpoints`,
+`POST /api/docker/discover`, `GET /api/docker/hosts/<k>/{,stats,containers,nodes,history,swarm}`,
+`GET /api/docker/hosts/<k>/history/stream` (SSE), `POST /api/docker/hosts/<k>/swarm/refresh`,
+`POST /api/docker/history/clear`.
 
 Endpoints: `POST /serverreport/stream` (SSE), `POST /serverreport/preflight`,
 `GET /api/serverreport/defaults`, `GET /reports`, `GET /reports/<id>`,
@@ -373,8 +386,11 @@ For the application to read logs, the user running it needs passwordless `sudo` 
     For the Docker monitoring/container-log features (optional, only on hosts that run Docker), also allow the read-only Docker commands — or add the user to the `docker` group instead:
 
     ```
-    david ALL=(ALL) NOPASSWD: /usr/bin/docker version --format *, /usr/bin/docker info --format *, /usr/bin/docker ps -a --no-trunc --size --format *, /usr/bin/docker stats --no-stream --no-trunc --format *, /usr/bin/docker node ls --format *, /usr/bin/docker inspect *, /usr/bin/docker logs --tail 500 *, /usr/bin/docker service logs --tail 500 *, /usr/bin/docker image inspect *
+    david ALL=(ALL) NOPASSWD: /usr/bin/docker version --format *, /usr/bin/docker info --format *, /usr/bin/docker ps -a --no-trunc --size --format *, /usr/bin/docker stats --no-stream --no-trunc --format *, /usr/bin/docker node ls --format *, /usr/bin/docker node inspect *, /usr/bin/docker system df --format *, /usr/bin/docker inspect *, /usr/bin/docker logs --tail 500 *, /usr/bin/docker service logs --tail 500 *, /usr/bin/docker image inspect *
     ```
+
+    `docker node inspect` and `docker system df` are what the Docker page's **Cluster** tab uses to
+    find each node's address and to report per-node disk usage. `df -B1 /` is read without sudo.
 
     **Server reports** (Analyse All Logs) need a few wider read-only commands than the log viewer
     uses, because it reads a time window rather than the last 500 lines:
@@ -618,6 +634,32 @@ The interface features a clean, modern design with:
 - **🔧 Journal entries**: systemd journal units via `journalctl`
 - **📦 Compressed logs**: Automatic `.gz` decompression
 
+#### Docker Page (Overview / Apps / Cluster)
+The **Docker** button in the Logs toolbar opens `/docker/<host_key>` for hosts with a reachable
+Docker endpoint. The page has three tabs:
+
+| Tab | Shows | Use it for |
+|---|---|---|
+| **Overview** | CPU / RAM / Network / Disk cards seeded from the history window, the container list, swarm node chips | "is this host busy right now, and how has the last hour looked?" |
+| **Apps** | Containers grouped per stack (compose project or swarm stack) → service → container, with CPU/RAM totals, node spread and sparklines | "how much is the *media* stack using, and where is it running?" |
+| **Cluster** | Swarm-wide totals, per-node cards with utilisation bars and CPU sparklines, and a `docker system df` table per node | "which node is the hot one, and what is eating disk?" |
+
+Notes:
+
+- The **Cluster** tab only appears when the selected host is a swarm manager. The **Apps** tab
+  works everywhere; containers without a stack label are grouped into one `(standalone)` entry.
+- Overview charts start from the server's rolling history (one sample every 15 s, 60 minutes by
+  default) and then extend live every 2 s, so reloading the page does not blank the graph. App and
+  node sparklines accumulate per cluster refresh (every 10 s while a tab showing them is open).
+- History is **in-process only**. It is lost on restart and nothing is written to the database —
+  if you need something that survives a restart, use **Analyse All Logs** (a report is stored).
+- Tune it with `docker.history_interval` / `AILOG_DOCKER_POLL_SECONDS` and
+  `docker.history_minutes` / `AILOG_DOCKER_HISTORY_MINUTES`; `POST /api/docker/history/clear`
+  drops the buffers.
+- On a large swarm, opening the Cluster tab costs one SSH round trip per node (parallel, cached
+  10 s). A node that cannot be reached stays in the list marked **offline** with its error and is
+  excluded from the cluster totals, so the summary never pretends a dead node is idle.
+
 ### 🤖 AI Analysis & Monitoring
 
 #### Manual Analysis
@@ -754,6 +796,33 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v2.13.0 - Docker History, Apps and Cluster Views
+- 🕘 **Rolling history** (`dockermon/history.py`) - a background sampler records one point per
+  Docker host every 15 s into a 60-minute ring buffer
+  - Charts seed from `/api/docker/hosts/<k>/history` on load, so a refresh keeps the graph
+  - `GET …/history/stream` pushes new points over SSE; `POST /api/docker/history/clear` drops them
+  - In memory only, and therefore lost on restart: this is a "what has it been doing?" window,
+    not a metrics database. Anything that needs to outlive the process belongs in a report
+  - A metric that a sample does not report holds its previous value instead of punching a hole
+- 🗂 **Apps view** (`dockermon/parse.py: aggregate_apps/finalize_apps`) - containers grouped by
+  `com.docker.stack.namespace` → service → container, summed CPU/RAM/network and disk footprint
+  - Across a swarm the groups span nodes, so "how much is the media stack using?" is one number
+  - Falls back to a single `(standalone)` group on hosts without stack labels
+- 🖧 **Cluster view** (`dockermon/swarm.py`) - manager → node tree built from `docker node ls`
+  plus `docker node inspect` for each node's address
+  - One combined SSH command per node collects containers, `docker stats`, `docker system df`,
+    `/proc/stat`, `/proc/meminfo`, `/proc/net/dev` and `df -B1 /`
+  - Nodes are collected in parallel (6 workers) and the whole view is cached for 10 s
+  - The manager serving the request reuses its own live snapshot instead of SSHing to itself,
+    which also makes a single-node swarm cost one extra `docker system df`
+  - Unreachable nodes stay in the list marked offline with their error, and are excluded from
+    the cluster totals rather than quietly zeroing them
+  - Per-container network rates come from counter deltas (`sshstats._container_rates`), with
+    counter resets reported as 0 rather than a negative spike
+- 🧭 **UI** - the Docker page is now tabbed: **Overview** (charts + containers + node chips),
+  **Apps**, and **Cluster** (hidden unless the host is a swarm manager). Everything is rendered
+  with the page's existing Tailwind/Chart.js stack - no new front-end dependencies.
 
 ### v2.12.1 - Documentation for Server Reports
 - 📖 Usage walkthrough for **Analyse All Logs**: window/scope selection, size check, depth
