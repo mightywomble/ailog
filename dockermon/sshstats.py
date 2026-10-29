@@ -202,13 +202,21 @@ def _container_row(parsed: dict, usage: dict) -> dict:
         'created': None,
     }
     if usage:
+        # parse_stats_line() gives NetIO as an (rx, tx) pair; older code put the
+        # whole tuple into net_rx, which surfaced as "(123, 456)" wherever a
+        # caller expected a number.
+        net = usage.get('net_bytes') or (0, 0)
+        if isinstance(net, (tuple, list)):
+            net_rx, net_tx = (list(net) + [0, 0])[:2]
+        else:
+            net_rx, net_tx = net, 0
         row.update({
             'cpu_percent': usage.get('cpu_pct') or 0.0,
             'mem_used': usage.get('mem_used') or 0,
             'mem_limit': usage.get('mem_limit') or 0,
             'mem_percent': usage.get('mem_pct') or 0.0,
-            'net_rx': (usage.get('net_bytes') or 0),
-            'net_tx': 0,
+            'net_rx': net_rx or 0,
+            'net_tx': net_tx or 0,
             'pids': usage.get('pids') or 0,
         })
     return row

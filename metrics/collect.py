@@ -96,6 +96,21 @@ def _run(host: Dict[str, Any], command: str, timeout: int = SSH_TIMEOUT):
     return ok, out or ''
 
 
+def _number(value, default=0) -> float:
+    """Coerce a counter to a number.
+
+    Container rows come from two collectors with different shapes; a tuple
+    (an ``(rx, tx)`` pair) or a string must never crash the page -- it is worth
+    one small guard instead of a 500.
+    """
+    if isinstance(value, (tuple, list)):
+        value = value[0] if value else default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _float(value, default=0.0) -> float:
     try:
         return float(value)
@@ -269,8 +284,8 @@ def container_snapshot(host_key: str) -> Dict[str, Any]:
     with _container_rate_lock:
         for c in snap.get('containers') or []:
             cid = c.get('id') or c.get('short_id')
-            rx = int(c.get('net_rx') or 0)
-            tx = int(c.get('net_tx') or 0)
+            rx = int(_number(c.get('net_rx')))
+            tx = int(_number(c.get('net_tx')))
             rates = None
             cache_key = (host_key, cid)
             prev = _container_rate_cache.get(cache_key)
@@ -281,8 +296,8 @@ def container_snapshot(host_key: str) -> Dict[str, Any]:
                     'rx_bps': max(0.0, (rx - prev[1])) / elapsed,
                     'tx_bps': max(0.0, (tx - prev[2])) / elapsed,
                 }
-            mem_used = int(c.get('mem_used') or 0)
-            mem_limit = int(c.get('mem_limit') or 0)
+            mem_used = int(_number(c.get('mem_used')))
+            mem_limit = int(_number(c.get('mem_limit')))
             rows.append({
                 'id': cid,
                 'name': c.get('name'),
@@ -291,7 +306,8 @@ def container_snapshot(host_key: str) -> Dict[str, Any]:
                 'status': c.get('status'),
                 'stack': c.get('stack'),
                 'service': c.get('service'),
-                'cpu_percent': c.get('cpu_percent'),
+                'cpu_percent': (None if c.get('cpu_percent') is None
+                                else _number(c.get('cpu_percent'))),
                 'cpu_cores': c.get('cpu_cores'),
                 'mem_used': mem_used,
                 'mem_limit': mem_limit,

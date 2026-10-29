@@ -334,3 +334,20 @@ def test_metrics_page_polls_and_expands_docker_cards():
     # charts are plain canvas, no external chart library
     assert 'getContext' in js
     assert 'Chart' not in js.replace('m-ctable', '')
+
+
+def test_container_snapshot_survives_a_tuple_net_counter(monkeypatch):
+    """dockermon's SSH collector used to put the whole (rx, tx) NetIO pair in
+    net_rx. The page must not 500 on it (it did, once)."""
+    from dockermon import routes as docker_routes
+    monkeypatch.setattr(docker_routes, 'host_snapshot', lambda key: {
+        'stats': {}, 'ts': 0,
+        'containers': [{'id': 'c1', 'name': 'api', 'state': 'running',
+                        'cpu_percent': '7.5', 'mem_used': '1024', 'mem_limit': '4096',
+                        'net_rx': (1000, 2000), 'net_tx': 0}],
+    })
+    data = collect.container_snapshot('db-9')
+    row = data['containers'][0]
+    assert row['net_rx'] == 1000 and row['net_tx'] == 0
+    assert row['cpu_percent'] == 7.5
+    assert row['mem_used'] == 1024 and row['mem_limit'] == 4096

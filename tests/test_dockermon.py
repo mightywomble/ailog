@@ -349,3 +349,15 @@ def test_index_page_has_the_docker_modal(client):
     assert 'id="dockerModalFrame"' in body
     assert 'id="dockerModalClose"' in body
     assert 'iframe-modals.js' in client.get('/static/js/main.js').data.decode()
+
+
+def test_ssh_container_row_splits_the_net_pair():
+    """parse_stats_line() returns NetIO as (rx, tx); the row must not carry the
+    tuple through as net_rx (it did, and the metrics page choked on it)."""
+    from dockermon import sshstats
+    parsed = {'id': 'abcdef123456', 'name': 'api', 'image': 'nginx:latest',
+              'state': 'running', 'status': 'Up 2 minutes'}
+    row = sshstats._container_row(parsed, {'cpu_pct': 1.5, 'mem_used': 10,
+                                           'mem_limit': 20, 'mem_pct': 50.0,
+                                           'net_bytes': (111, 222), 'pids': 3})
+    assert row['net_rx'] == 111 and row['net_tx'] == 222
