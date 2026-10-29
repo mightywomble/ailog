@@ -1,0 +1,28 @@
+# Build context is the repo root (docker build -f docker/Dockerfile .), so this
+# file is what actually applies. Keep it in sync with docker/.dockerignore.
+.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite
+*.sqlite3
+venv/
+.venv/
+node_modules/
+*.log
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.backup
+
+# Local/CI-only files that must never ship inside the image
+tests/
+requirements-dev.txt
+hosts.json
+scheduler_config.json
+demovideo.webm
+helm/
