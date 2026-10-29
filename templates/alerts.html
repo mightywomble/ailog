@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Alerts - ailog</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
   <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
     .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
@@ -96,13 +97,16 @@
 </div>
 
 <!-- rule editor -->
-<div id="rule-modal" class="fixed inset-0 bg-black/70 hidden items-center justify-center z-50 p-4">
-  <div class="bg-slate-900 border border-white/10 rounded-xl w-full max-w-lg p-5">
-    <div class="flex items-center justify-between">
-      <h3 id="rule-modal-title" class="text-base font-semibold">New rule</h3>
-      <button id="rule-close" type="button" class="text-slate-400 hover:text-white">&times;</button>
+<div id="rule-modal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-md">
+    <div class="app-modal-head">
+      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-sky-400"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
+        <span id="rule-modal-title">New rule</span>
+      </div>
+      <button id="rule-close" type="button" class="app-modal-close" data-modal-close>Close</button>
     </div>
-    <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+    <div class="app-modal-body">
+    <div class="grid grid-cols-2 gap-3 text-sm">
       <label class="col-span-2">Name
         <input id="r-name" class="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2" />
       </label>
@@ -137,9 +141,11 @@
       <button id="rule-cancel" type="button" class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">Cancel</button>
       <button id="rule-save" type="button" class="bg-sky-600 hover:bg-sky-500 text-white text-sm px-3 py-2 rounded-lg">Save</button>
     </div>
+    </div>
   </div>
 </div>
 
+<script type="module" src="/static/js/modals.js"></script>
 <script type="module" src="/static/js/alerts.js"></script>
 </body>
 </html>

@@ -386,9 +386,9 @@
                             </svg>
                             <span>Analyse All Logs</span>
                         </button>
-                        <a id="logs-action-reports" href="/reports" target="_blank" rel="noopener"
+                        <button id="logs-action-reports" type="button"
                            class="text-xs termix-muted hover:text-white px-2 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
-                           title="View previous server reports">Reports</a>
+                           title="View previous server reports for this host">Reports</button>
                         <label class="flex items-center text-sm termix-muted" title="Show only Docker container logs">
                             <input type="checkbox" id="docker-only-logs" class="mr-2">
                             Docker logs only
@@ -626,26 +626,28 @@
     </div>
 
 <!-- AI Analysis Modal -->
-    <div id="ai-analysis-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="glass-container w-full max-w-3xl p-6">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-semibold text-gray-200">AI Analysis Result</h2>
-                <button id="close-ai-modal-btn" class="termix-muted hover:text-gray-200 text-2xl leading-none">&times;</button>
+    <div id="ai-analysis-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-lg">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-indigo-400"><path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg> AI Analysis Result</div>
+                <button id="close-ai-modal-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
             </div>
-            <div id="ai-analysis-content" class="overflow-auto termix-muted" style="max-height: 70vh"></div>
+            <div id="ai-analysis-content" class="app-modal-body termix-muted"></div>
         </div>
     </div>
 
     <!-- Server-wide report: analyse every log source on a host together -->
-    <div id="server-report-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="glass-container w-full max-w-2xl p-6">
-            <div class="flex justify-between items-center mb-4">
-                <div>
-                    <h2 class="text-xl font-semibold text-gray-200">Analyse All Logs</h2>
-                    <p id="server-report-subtitle" class="text-xs termix-muted mt-1">Build one correlated report for this server.</p>
+    <div id="server-report-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-md">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-indigo-400"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M7 13l3 3 7-7"/></svg>
+                    <span>Analyse All Logs
+                        <span id="server-report-subtitle" class="app-modal-sub">Build one correlated report for this server.</span>
+                    </span>
                 </div>
-                <button id="close-server-report-btn" class="termix-muted hover:text-gray-200 text-2xl leading-none">&times;</button>
+                <button id="close-server-report-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
             </div>
+            <div class="app-modal-body">
 
             <div id="server-report-form">
                 <div class="grid grid-cols-2 gap-3 text-sm">
@@ -760,6 +762,7 @@
                        class="bg-indigo-600 hover:bg-indigo-500 text-sm px-4 py-2 rounded-lg text-white font-medium">Open report</a>
                 </div>
             </div>
+            </div>
         </div>
     </div>
 
@@ -783,12 +786,11 @@
     </div>
 
     <!-- Settings Modal with Sidebar Navigation -->
-    <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="glass-container w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
-            <!-- Header -->
-            <div class="flex justify-between items-center p-6 border-b border-white/10">
-                <h3 class="text-xl font-semibold text-white">Settings</h3>
-                <button id="close-settings-btn" class="termix-muted hover:text-white text-2xl leading-none">&times;</button>
+    <div id="settings-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-xl">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-slate-300"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg> Settings</div>
+                <button id="close-settings-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
             </div>
 
             <!-- Main Content -->
@@ -1324,13 +1326,15 @@
     </div>
     
     <!-- Add/Edit Host Modal -->
-    <div id="host-modal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50">
-        <div class="glass-container w-full max-w-lg overflow-hidden border border-white/10">
-            <div class="termix-panel px-6 py-4 flex items-center justify-between border-b border-white/10">
-                <h3 id="host-modal-title" class="text-xl font-semibold termix-text">Add New Host</h3>
-                <button type="button" id="host-modal-x" class="termix-muted hover:termix-text text-2xl leading-none" aria-label="Close">&times;</button>
+    <div id="host-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-md">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-emerald-400"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+                    <span id="host-modal-title">Add New Host</span>
+                </div>
+                <button id="host-modal-x" type="button" class="app-modal-close" data-modal-close aria-label="Close">Close</button>
             </div>
-            <div class="p-6">
+            <div class="app-modal-body">
                 <form id="host-form" class="space-y-4">
                     <input type="hidden" id="host-id-input">
                     <div>
@@ -1362,9 +1366,15 @@
         </div>
     </div>
 
-    <div id="log-selection-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-6xl h-5/6 flex flex-col">
-            <h3 id="log-selection-title" class="text-xl font-semibold mb-4">Select Logs to Monitor</h3>
+    <div id="log-selection-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-xl">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-indigo-400"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10"/></svg>
+                    <span id="log-selection-title">Select Logs to Monitor</span>
+                </div>
+                <button id="close-log-selection-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
+            </div>
+            <div class="app-modal-body" style="display: flex; flex-direction: column;">
             
             <!-- Progress Section -->
             <div id="log-selection-progress" class="mb-4 hidden">
@@ -1387,6 +1397,7 @@
                 <button id="cancel-log-selection-btn" class="px-4 py-2 rounded-md bg-white/10 hover:bg-white/50 transition-colors">Cancel</button>
                 <button id="save-log-selection-btn" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Confirm Selections</button>
             </div>
+            </div>
         </div>
     </div>
     <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg"></div>
@@ -1396,13 +1407,13 @@
 
 
 
-<div id="monitor-edit-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
-  <div class="bg-slate-900 border border-white/10 rounded-xl w-full max-w-2xl p-4">
-    <div class="flex items-center justify-between">
-      <div class="font-semibold">Edit Monitor</div>
-      <button id="monitor-edit-close" class="bg-white/10 hover:bg-white/20 px-3 py-1 rounded" type="button">Close</button>
+<div id="monitor-edit-modal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-md">
+    <div class="app-modal-head">
+      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-sky-400"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12h4l3 8 4-16 3 8h4"/></svg> Edit Monitor</div>
+      <button id="monitor-edit-close" class="app-modal-close" type="button" data-modal-close>Close</button>
     </div>
-    <div id="monitor-edit-body" class="mt-4"></div>
+    <div id="monitor-edit-body" class="app-modal-body"></div>
     <div class="mt-4 flex items-center justify-between">
       <div class="text-xs text-slate-400" id="monitor-edit-status"></div>
       <div class="flex gap-2">
@@ -1414,11 +1425,11 @@
 </div>
 
 
-<div id="monitoringWizardModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
-  <div class="bg-slate-900 border border-white/10 rounded-xl w-[95vw] max-w-6xl h-[90vh] flex flex-col">
-    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
-      <div class="font-semibold">Monitoring Wizard</div>
-      <button id="monitoringWizardClose" class="bg-white/10 hover:bg-white/20 px-3 py-1 rounded" type="button">Close</button>
+<div id="monitoringWizardModal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-xl">
+    <div class="app-modal-head">
+      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-emerald-400"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg> Monitoring Wizard</div>
+      <button id="monitoringWizardClose" class="app-modal-close" type="button" data-modal-close>Close</button>
     </div>
     <iframe id="monitoringWizardFrame" class="flex-1 w-full" src="about:blank" referrerpolicy="no-referrer"></iframe>
   </div>
@@ -1427,20 +1438,29 @@
 <!-- Docker monitoring, embedded in a modal instead of navigating away.
      Deliberately large: this is a chart-heavy dashboard, not a dialog. The
      iframe is unloaded on close so its EventSource and timers stop. -->
-<div id="dockerModal" style="display: none"
-     class="fixed inset-0 bg-black/70 items-center justify-center z-50">
-  <div class="bg-slate-900 border border-white/10 rounded-xl w-[95vw] max-w-[1500px] h-[92vh] flex flex-col overflow-hidden shadow-2xl">
-    <div class="flex items-center justify-between px-4 py-2.5 border-b border-white/10 shrink-0">
-      <div class="flex items-center gap-2 min-w-0">
-        <svg class="w-4 h-4 text-sky-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 10V6h4v4m-4 0v10h10V10M3 10l2-4h4l2 4"/>
-        </svg>
-        <span id="dockerModalTitle" class="font-semibold text-sm truncate">Docker</span>
+<!-- Server report history for the selected host, embedded like the Docker page -->
+<div id="reportsModal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-xl">
+    <div class="app-modal-head">
+      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-sky-400"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
+        <span id="reportsModalTitle" class="truncate">Reports</span>
       </div>
-      <button id="dockerModalClose" type="button"
-              class="bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm">Close</button>
+      <button id="reportsModalClose" type="button" class="app-modal-close" data-modal-close>Close</button>
     </div>
-    <iframe id="dockerModalFrame" class="flex-1 w-full bg-slate-950 border-0"
+    <iframe id="reportsModalFrame" class="flex-1 w-full"
+            src="about:blank" referrerpolicy="no-referrer" title="Server reports"></iframe>
+  </div>
+</div>
+
+<div id="dockerModal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-xl">
+    <div class="app-modal-head">
+      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-sky-400"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 10V6h4v4m-4 0v10h10V10M3 10l2-4h4l2 4"/></svg>
+        <span id="dockerModalTitle" class="truncate">Docker</span>
+      </div>
+      <button id="dockerModalClose" type="button" class="app-modal-close" data-modal-close>Close</button>
+    </div>
+    <iframe id="dockerModalFrame" class="flex-1 w-full"
             src="about:blank" referrerpolicy="no-referrer" title="Docker monitoring"></iframe>
   </div>
 </div>

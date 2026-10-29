@@ -146,3 +146,116 @@ input::placeholder, textarea::placeholder { color: rgba(229,231,235,0.45) !impor
 .w-full.bg-gray-300 { background: rgba(255,255,255,0.08) !important; }
 .bg-indigo-600 { background: var(--accent) !important; }
 
+
+/* ---------------------------------------------------------------------------
+   Shared modal chrome
+   Every dialog uses the same panel: dark surface, hairline border, a title bar
+   with a Close button, body and optional footer. `.app-modal` is display:flex
+   so centering works, and `.app-modal.hidden` wins over it with higher
+   specificity — that keeps the existing show/hide call sites
+   (classList.add/remove('hidden')) working while giving every dialog the same
+   look, Escape-to-close and backdrop-click-to-close.
+   ------------------------------------------------------------------------- */
+.app-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+}
+.app-modal.hidden { display: none !important; }
+
+.app-modal-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 95vw;
+  max-height: 92vh;
+  overflow: hidden;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85);
+}
+
+/* width presets */
+.app-modal-sm { max-width: 32rem; }
+.app-modal-md { max-width: 48rem; }
+.app-modal-lg { max-width: 72rem; }
+.app-modal-xl { max-width: 94rem; }
+
+.app-modal-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.02);
+}
+.app-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+.app-modal-title svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.app-modal-title .app-modal-sub {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: rgba(229, 231, 235, 0.62);
+  margin-top: 2px;
+}
+.app-modal-close {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.10);
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 0.875rem;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+.app-modal-close:hover { background: rgba(255, 255, 255, 0.20); }
+
+.app-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+}
+.app-modal-body-flush {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.app-modal-panel > iframe {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #020617;
+}
+.app-modal-foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+@media (max-width: 640px) {
+  .app-modal-panel {
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+}

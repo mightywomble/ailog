@@ -6,6 +6,18 @@ import { loadGroupsSettings, wireGroupsSettingsUi } from './groups.js';
 import { loadSshKeys } from './sshkeys.js';
 import { loadSuricataConfigIntoForm, loadSuricataPromptSettings, refreshSuricataConfiguredState } from './suricata.js';
 
+// Shared dialog chrome lives in ./modals.js. These wrappers keep the older
+// call sites working while making sure every dialog registers on the same
+// open-order stack (so Escape and the backdrop close the topmost one).
+const openModal = (el) => {
+    if (typeof window.openAppModal === 'function') window.openAppModal(el);
+    else if (el) el.classList.remove('hidden');
+};
+const closeModal = (el) => {
+    if (typeof window.closeAppModal === 'function') window.closeAppModal(el);
+    else if (el) el.classList.add('hidden');
+};
+
 export function init() {
 
         // --- ELEMENT SELECTORS ---
@@ -486,6 +498,21 @@ export function init() {
             }
         };
 
+        // Report history for the selected host, in a dialog like Docker (the
+        // page itself stays put so the log view is not lost).
+        const logsActionReports = document.getElementById('logs-action-reports');
+        if (logsActionReports) logsActionReports.addEventListener('click', () => {
+            const label = dockerHostLabels[String(selectedHostId || '')]
+                || document.getElementById('logs-selected-host-title')?.textContent?.trim()
+                || '';
+            const host = selectedHostId ? String(selectedHostId) : '';
+            if (typeof window.openReportsModal === 'function') {
+                window.openReportsModal(host, label);
+            } else {
+                window.open(host ? `/reports?host=${encodeURIComponent(host)}` : '/reports', '_blank');
+            }
+        });
+
         if (logsActionDocker) logsActionDocker.addEventListener('click', () => {
             if (!selectedHostId) return;
             // A modal, not a navigation: the Docker page is chart-heavy and
@@ -743,7 +770,7 @@ export function init() {
                 serverReportSubtitle.textContent =
                     `Correlate every log source on ${hostName} into one report.`;
             }
-            serverReportModal.classList.remove('hidden');
+            openModal(serverReportModal);
             await loadServerReportDefaults();
         };
 
@@ -752,13 +779,13 @@ export function init() {
         }
         document.getElementById('close-server-report-btn')?.addEventListener('click', () => {
             if (serverReportRunning) return;  // don't orphan a running pipeline view
-            serverReportModal?.classList.add('hidden');
+            closeModal(serverReportModal);
         });
         document.getElementById('server-report-cancel')?.addEventListener('click', () => {
-            serverReportModal?.classList.add('hidden');
+            closeModal(serverReportModal);
         });
         document.getElementById('server-report-close-2')?.addEventListener('click', () => {
-            serverReportModal?.classList.add('hidden');
+            closeModal(serverReportModal);
         });
 
         serverReportAutoDepth?.addEventListener('change', syncDepthControls);
@@ -2324,13 +2351,13 @@ export function init() {
                         `;
 
                         const close = () => {
-                            modal.classList.add('hidden');
-                            modal.classList.remove('flex');
+                            if (typeof window.closeAppModal === 'function') window.closeAppModal(modal);
+                            else modal.classList.add('hidden');
                         };
                         btnClose.onclick = close;
 
-                        modal.classList.remove('hidden');
-                        modal.classList.add('flex');
+                        if (typeof window.openAppModal === 'function') window.openAppModal(modal);
+                        else modal.classList.remove('hidden');
                         if (status) status.textContent = '';
 
                         const addLast = document.getElementById('edit-add-last');
@@ -3604,8 +3631,8 @@ const showHostInfoMain = async () => {
                 hostIdInput.value = '';
                 hostSaveBtn.textContent = 'Add Host';
             }
-            settingsModal.classList.add('hidden');
-            hostModal.classList.remove('hidden');
+            closeModal(settingsModal);
+            openModal(hostModal);
         };
 
         // Remote Hosts sub-navigation (Import / Delete)
@@ -3830,7 +3857,7 @@ const showHostInfoMain = async () => {
         });
 
         settingsBtn.addEventListener('click', () => {
-             settingsModal.classList.remove('hidden');
+             openModal(settingsModal);
              populateHostList();
              updateSchedulerStatus();
              loadCurrentProviderConfig();
@@ -4072,7 +4099,7 @@ const showHostInfoMain = async () => {
         refreshSshEncStatus();
 
         if (closeSettingsBtn) {
-            closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+            closeSettingsBtn.addEventListener('click', () => closeModal(settingsModal));
         }
         // Host modal controls are optional (legacy manual host management)
         if (typeof addNewHostBtn !== 'undefined' && addNewHostBtn) {
@@ -4080,8 +4107,8 @@ const showHostInfoMain = async () => {
         }
         if (typeof hostModalCancelBtn !== 'undefined' && hostModalCancelBtn) {
             hostModalCancelBtn.addEventListener('click', () => {
-                hostModal.classList.add('hidden');
-                settingsModal.classList.remove('hidden');
+                closeModal(hostModal);
+                openModal(settingsModal);
             });
         if (typeof hostModalXBtn !== 'undefined' && hostModalXBtn) {
             hostModalXBtn.addEventListener('click', () => hostModalCancelBtn.click());
@@ -4149,8 +4176,8 @@ const showHostInfoMain = async () => {
             try {
                 await window.fetchApi(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(hostData) });
                 window.showToast(`Host ${hostId ? 'updated' : 'added'} successfully.`);
-                hostModal.classList.add('hidden');
-                settingsModal.classList.remove('hidden');
+                closeModal(hostModal);
+                openModal(settingsModal);
                 populateHostList();
                 populateHostCards();
             } catch(error) {}
@@ -4257,7 +4284,7 @@ const showHostInfoMain = async () => {
 (() => {
     const modal = document.getElementById('ai-analysis-modal');
     const closeBtn = document.getElementById('close-ai-modal-btn');
-    if (modal && closeBtn) closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    if (modal && closeBtn) closeBtn.addEventListener('click', () => closeModal(modal));
 })();
 
 aiAnalyseBtn.addEventListener('click', async () => {
@@ -4290,7 +4317,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
             const providerLabel = providerLabels[provider] || provider;
 
             renderAiAnalysisProgress(aiAnalysisContent, providerLabel);
-            aiAnalysisModal.classList.remove('hidden');
+            openModal(aiAnalysisModal);
 
             try {
                 const requestBody = {
@@ -4751,7 +4778,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
             if (scheduleHostsDirty) { window.showToast('Please click Save first (hosts changed).', 'error'); return; }
             logSelectionTitle.textContent = 'Select Logs to Monitor from All Hosts';
             logSelectionList.innerHTML = '';
-            logSelectionModal.classList.remove('hidden');
+            openModal(logSelectionModal);
             
             // Show progress section
             logSelectionProgress.classList.remove('hidden');
@@ -5040,10 +5067,10 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 } catch (_) {}
             }
 
-            logSelectionModal.classList.add('hidden');
+            closeModal(logSelectionModal);
         });
 
-        cancelLogSelectionBtn.addEventListener('click', () => logSelectionModal.classList.add('hidden'));
+        cancelLogSelectionBtn.addEventListener('click', () => closeModal(logSelectionModal));
 
         startScheduleBtn.addEventListener('click', async () => {
             if (!activeScheduleId) { window.showToast('No schedule selected.', 'error'); return; }

@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.15.0 | **Every dialog shares one chrome.** A single `.app-modal` stylesheet block plus `static/js/modals.js` now own all popups (AI analysis, server report, settings, host, log selection, monitor edit, monitoring wizard, Docker, Reports and the alert rule editor): same head/title/close/body markup, an open-order stack so **Escape** closes the topmost dialog, backdrop-click close, and iframes unloaded (`about:blank`) on close so their timers and EventSource stop. The **Reports** button next to a server now opens the report history in a modal instead of a new tab (`/reports?embed=1`, links still open in a new tab) | ✅ Complete |
 | 2026-10-29 | v2.14.1 | **Docker monitoring opens in a modal** instead of navigating away: the Docker button now loads `/docker/<host>?embed=1` in a large iframe dialog with its own close button (no page-level Back link), so flipping between the logs view and the Docker dashboard no longer loses your place. The standalone `/docker/<host>` page still works for deep links | ✅ Complete |
 | 2026-10-29 | v2.14.0 | **Severity filter for server reports**: analyse only Critical / Errors / Warnings (multi-select, or All for the classic behaviour). Filtering happens **on the host** — `journalctl --priority` where it is exact, one shared `grep -iE` everywhere else — and again authoritatively in the normaliser, so a busy host sends 70–99% fewer bytes and the model never sees INFO noise. The evidence pack states the filter so the model cannot read filtered-out lines as a healthy source | ✅ Complete |
 | 2026-10-29 | v2.13.1 | **Threshold alerting** (`alerting/`) evaluated on the metrics the samplers already collect, with debounce, cooldown, transitions-only Discord delivery and an `/alerts` page; **report-to-report diffs** ("Since last report" panel) computed from stored JSON; **scheduled reports** (`Schedule.kind = 'report'`); fairer source caps (`MAX_SOURCES` 60 → 120, per-kind shares, journal units ranked by activity); first **pytest suite** (108 tests); `app.py` split (`app_schema.py`, `inventory/`) and `index.html` split into ES modules | ✅ Complete |
@@ -208,6 +209,23 @@ collection path to keep in sync.
 * **Progress Visualization:** Detailed progress bars, log output, and status messages for all operations
 * **Error Recovery:** Automatic retry mechanisms for failed host connections
 * **Performance Optimization:** Concurrent processing with timeout handling for reliable operations
+
+### 🪟 **Unified Modal Dialogues**
+Every popup in the app is the same component, built from one stylesheet block and one small module — no framework, no build step.
+
+| Piece | Where | What it does |
+|---|---|---|
+| `.app-modal` / `-panel` / `-head` / `-title` / `-close` / `-body` | `static/css/style.css` | Fixed backdrop, centred panel, size presets (`-sm` `-md` `-lg` `-xl`), header with a text Close button, scrollable body, full-screen on phones |
+| `openAppModal()` / `closeAppModal()` | `static/js/modals.js` | Only owner of dialog state. Tracks an **open-order stack**, closes the topmost on `Escape`, closes on backdrop `mousedown`, wires every `[data-modal-close]` button, dispatches `appmodal:open` / `appmodal:close`, and blanks iframes on close |
+| `openDockerModal()` / `openReportsModal()` | `static/js/iframe-modals.js` | Full-document dialogs (Docker dashboard, report history) loaded in an iframe with `?embed=1` so the embedded page drops its own Back link |
+| `openModal()` / `closeModal()` | `static/js/app-core.js` | Thin wrappers so the older call sites (settings, host, log selection, AI analysis, server report, monitor edit) join the same stack |
+
+Two details that matter:
+
+* **`.app-modal` is `display:flex` and `.app-modal.hidden` is `display:none !important`.** Tailwind's `hidden` and `flex` are both display utilities, so toggling `flex` by hand made the outcome depend on stylesheet order. Only the `hidden` class is ever toggled now.
+* **Closing an iframe dialog sets `src="about:blank"`.** That unloads the document, which tears down its Chart.js timers, `EventSource` connections and polling loops instead of leaving them running in an invisible frame.
+
+Behaviour that applies to all of them: `Escape` closes only the topmost dialog, clicking the dimmed backdrop closes it, the Close button is always the same text button in the header, and every dialog is focus-moved on open so keyboard users land inside it.
 
 ### 💾 **Database Backup & Restore**
 * **One-Click Backup Download:** Download the sqlite database bundle

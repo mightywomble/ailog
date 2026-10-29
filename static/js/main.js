@@ -4,9 +4,10 @@
 // <script> blocks so that DOMContentLoaded listeners are registered in the
 // same relative order as before. Do not reorder without re-checking the page.
 import './boot.js';
+import './modals.js';              // shared dialog chrome: Escape, backdrop, close
 import './groups.js';
 import './app-core.js';           // imports ./suricata.js and ./sshkeys.js
 import './toolbar.js';
 import './monitoring-wizard.js';
 import './wizard-fallback.js';
-import './docker-modal.js';
+import './iframe-modals.js';   // docker + reports dialogs

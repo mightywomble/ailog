@@ -348,4 +348,4 @@ def test_index_page_has_the_docker_modal(client):
     assert 'id="dockerModal"' in body
     assert 'id="dockerModalFrame"' in body
     assert 'id="dockerModalClose"' in body
-    assert 'docker-modal.js' in client.get('/static/js/main.js').data.decode()
+    assert 'iframe-modals.js' in client.get('/static/js/main.js').data.decode()
