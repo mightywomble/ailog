@@ -163,6 +163,34 @@ def test_sidebar_drag_grip_is_visible(ui_css):
     assert "stroke-width" in block
 
 
+# -------------------------------------------------- SSH terminal window
+
+def test_ssh_terminal_has_an_expand_and_contract_control(index_html, ui_css):
+    assert 'id="ssh-terminal-expand-btn"' in index_html
+    assert 'aria-controls="ssh-terminal-overlay"' in index_html
+    assert 'aria-expanded="false"' in index_html
+    assert 'id="ssh-terminal-contract-btn"' in index_html
+    # the window reuses the shared dialog chrome
+    assert 'id="ssh-terminal-overlay"' in index_html
+    assert 'role="dialog"' in index_html
+    assert 'id="ssh-modal-body"' in index_html
+    assert ".ssh-modal-panel" in ui_css
+    assert '[aria-expanded="true"] .ssh-icon-contract' in ui_css
+
+
+def test_ssh_expand_moves_the_same_xterm_instance_between_hosts():
+    js = (STATIC / "js" / "app-core.js").read_text()
+    assert "const expandSshTerminal" in js
+    assert "const contractSshTerminal" in js
+    # the mount node is moved, never re-created, so the session survives
+    assert "sshModalBody.appendChild(sshTerminalBody)" in js
+    assert "sshTerminalContainer.appendChild(sshTerminalBody)" in js
+    assert "resizeSshTerminal()" in js
+    assert "window.ailogSsh" in js
+    # status is mirrored into whichever header is visible
+    assert "querySelectorAll('[data-ssh-status]')" in js
+
+
 # ------------------------------------------------------------- interactions
 
 def test_command_palette_contract():

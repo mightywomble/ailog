@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.19.1 | **SSH terminal can expand into a window.** An icon in the terminal header promotes it to a 92 vh dialog and a contract icon (or backdrop click) returns it to its slot. The same xterm instance is moved rather than re-created, so the session, scrollback and running commands are untouched | ✅ Complete |
 | 2026-10-29 | v2.19.0 | **Renamed to Homelab Manager**, and the Overview is now three cards: **Fleet**, **Alerts** and **Recent reports**. The per-host Hosts card is gone — host browsing lives in the sidebar, the ⌘K palette and the Logs workspace, so the dashboard stays a fleet summary. Page titles, the SSH-config header, backup/import filenames and the Discord test message follow the new name | ✅ Complete |
 | 2026-10-29 | v2.18.2 | Fix: the Fleet card reported **"all reachable"** next to a non-zero Offline count; it now says `N unreachable` (and still says nothing configured when the fleet is empty) | ✅ Complete |
 | 2026-10-29 | v2.18.1 | Polish for the new Overview: the **Hosts card is capped at 372 px with internal scroll**, so a 16-host fleet no longer stretches the whole card row, and the sidebar drag-grip dots are visible again (`stroke-width` was computing to 1 px) | ✅ Complete |
@@ -99,7 +100,11 @@ Monitoring and Add Devices are server-wide, so they moved out of the header/host
 * **SSH Connection Testing:** Built-in validation ensures proper SSH key setup and sudo permissions before adding hosts
 * **Dynamic Host Switching:** Seamlessly switch between configured servers with real-time log loading
 * **Connection Status Monitoring:** Visual indicators show host connectivity status
-* **SSH Terminal:** Click the green **SSH** button to open an interactive terminal to the selected host (UI inspired by the Termix project on GitHub)
+* **SSH Terminal:** Click the green **SSH** button to open an interactive terminal to the selected host (UI inspired by the Termix project on GitHub).
+  An **expand icon** in the terminal header pops the same session into a window (92 vh, the shared dialog
+  chrome) for full-screen work; the contract icon — or a click on the backdrop — puts it back in place.
+  The xterm instance and the WebSocket session are reused, so scrollback and any running command survive
+  the transition; leaving the Logs view or ending the session contracts it automatically.
 
 ### 📡 **Live Monitoring** (`metrics/`)
 
@@ -1048,6 +1053,16 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v2.19.1 - Expandable SSH terminal
+- ⤢ **Expand / contract** icon in the SSH terminal header: the session pops out to a 92 vh window using the
+  same dialog chrome as Docker, Reports and Monitoring
+- 🔁 **The session is moved, not recreated** — the xterm node is re-parented and re-fitted, so scrollback,
+  the WebSocket connection and any running command survive both directions
+- ⎋ Contract via the header icon or a backdrop click (Escape is deliberately left to the terminal, so `vim`
+  and `htop` keep working)
+- 🧹 Contracting is automatic when the session ends or you leave the Logs view
+- 📱 Below 640 px the window becomes a full-width sheet, like every other dialog
 
 ### v2.19.0 - Homelab Manager, and a leaner Overview
 - 🏷️ **Renamed to Homelab Manager** everywhere it is visible: header and brand mark, browser titles on
