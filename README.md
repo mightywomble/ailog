@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.13.1 | **Threshold alerting** (`alerting/`) evaluated on the metrics the samplers already collect, with debounce, cooldown, transitions-only Discord delivery and an `/alerts` page; **report-to-report diffs** ("Since last report" panel) computed from stored JSON; **scheduled reports** (`Schedule.kind = 'report'`); fairer source caps (`MAX_SOURCES` 60 → 120, per-kind shares, journal units ranked by activity); first **pytest suite** (108 tests); `app.py` split (`app_schema.py`, `inventory/`) and `index.html` split into ES modules | ✅ Complete |
 | 2026-10-28 | v2.13.0 | Docker monitoring grows up: a rolling **in-memory history** sampler so `/docker/<host_key>` charts survive a reload (plus a disk card), an **Apps** view that groups containers per stack/service across the cluster, a **Cluster** view with swarm-wide totals, per-node cards with sparklines and `docker system df`, all rendered as tabs on the existing Docker page | ✅ Complete |
 | 2026-10-28 | v2.12.1 | Docs: server-report usage walkthrough with depth guidance, report tuning settings/env table, endpoint reference, report-specific sudoers entries, blueprint and report-pipeline architecture notes | ✅ Complete |
 | 2026-10-28 | v2.12.0 | Report tuning: default model `openai/gpt-4o-mini`; **Executive Summary** and **How to Resolve** closing sections; a depth slider (Lite → Maximum) plus Auto; a sizing engine that measures the evidence pack and recommends depth, chunking and model; map-reduce chunking for packs too large for one request; "Check size & suggest" pre-flight that does not call the model | ✅ Complete |
@@ -110,6 +111,8 @@ This application is designed for use on a trusted, internal development network 
 * **Chunked for big hosts:** packs larger than the model can hold are split on section boundaries, summarised pass-by-pass (map) and merged into one reduced pack (reduce), with progress and the pass count shown
 * **Closing sections:** every report ends with an **Executive Summary** (plain-English, non-specialist) and **How to Resolve** (numbered remediation steps marked immediate / soon / preventive, with verification)
 * **Honest about blind spots:** truncation, source caps, failed sources and logging gaps are all stated in the report
+* **Since last report:** each report page diffs itself against the previous report for the same host — verdict transition, event delta (with %), new / gone / louder signature clusters ("louder" = ≥3× and ≥20 more events), new / gone cross-source correlations and per-source coverage change. The diff is computed from the stored `clusters_json` / `severity_json` / `correlations_json` of both rows, so opening a report never re-collects the host
+* **Scheduled reports:** a schedule can now be `kind = 'report'` instead of `'log'`. It stores its own window, depth, model and source scope, and each run produces one `/reports/<id>` per host in the schedule; the per-host outcome is recorded in `last_status` / `last_run_at` on the schedule
 
 Tuning, in **Settings** (DB-backed) or as environment variables:
 
@@ -118,7 +121,7 @@ Tuning, in **Settings** (DB-backed) or as environment variables:
 | `report.default_model` | – | `openai/gpt-4o-mini` | model used when no per-run override is given |
 | `report.window_minutes` | – | `120` | default time window |
 | `report.depth` | – | `0` (Auto) | `0` = size the run automatically, `1`-`5` = pinned depth |
-| – | `AILOG_REPORT_MAX_SOURCES` | `60` | hard cap on sources per run |
+| – | `AILOG_REPORT_MAX_SOURCES` | `120` | hard cap on sources per run (split fairly per kind, see below) |
 | – | `AILOG_REPORT_MAX_BYTES` | `25165824` (24 MB) | total log text collected per run |
 | – | `AILOG_REPORT_MAX_TOKENS` | `12000` | ceiling for the `fit_pack` trim path |
 | – | `AILOG_DOCKER_REFRESH_SECONDS` | `300` | Docker endpoint re-discovery cadence |
@@ -126,6 +129,15 @@ Tuning, in **Settings** (DB-backed) or as environment variables:
 | `docker.history_minutes` | `AILOG_DOCKER_HISTORY_MINUTES` | `60` | rolling history window kept in memory |
 | – | `AILOG_DOCKER_SWARM_TTL` | `10` | seconds a swarm cluster view is cached |
 | – | `AILOG_DOCKER_NODE_TIMEOUT` | `25` | SSH timeout per swarm node |
+
+**Source caps are per kind, not first-come.** With a flat cap, one host with 200 files in
+`/var/log` would consume the entire budget and no journald unit or container would ever be
+collected. `collect.select_sources()` reserves `KIND_SHARES = {'file': 0.45, 'journal': 0.30,
+'docker': 0.25}`, hands unused allowance to the kinds that need it, keeps discovery order
+inside each kind, and ranks journald units by recent activity first (one `journalctl -o json`
+round trip) so the busiest units are the ones that survive the cut. On db-11 the same request
+(300 sources, cap 120) now collects 54 file / 36 journal / 30 docker instead of 120 / 0 / 0, and
+the skip message states the cap, what was collected and what was left out.
 
 Docker monitoring endpoints: `GET /docker/<host_key>`, `GET /api/docker/endpoints`,
 `POST /api/docker/discover`, `GET /api/docker/hosts/<k>/{,stats,containers,nodes,history,swarm}`,
@@ -136,6 +148,33 @@ Endpoints: `POST /serverreport/stream` (SSE), `POST /serverreport/preflight`,
 `GET /api/serverreport/defaults`, `GET /reports`, `GET /reports/<id>`,
 `GET /reports/<id>/markdown`, `POST /reports/<id>/discord`, `GET /api/reports`,
 `GET|DELETE /api/reports/<id>`.
+
+### 🚨 **Threshold Alerts** (`alerting/`)
+
+Alerting is evaluated on metrics that are *already being collected* — the Docker history
+sampler's per-host series and the verdict of every server report — so there is no second
+collection path to keep in sync.
+
+* **Rules:** `name`, `metric`, `op`, `threshold`, `for_seconds`, `cooldown_seconds`, `severity`, `enabled`.
+  Metrics: `cpu_percent`, `mem_percent`, `disk_percent`, `containers_running`, `node_offline`
+  and `verdict_level` (healthy 0 / degraded 1 / failing 2, fed by report verdicts).
+  Operators: `>`, `>=`, `<`, `<=`, `==`, `!=`, `at_least`. Five sensible rules are seeded on first boot.
+* **Debounced state machine:** `ok → pending → firing → resolved`. A rule enters `pending` on the
+  first breach and only fires once it has held for `for_seconds`; a recovery before that returns
+  silently to `ok`. `cooldown_seconds` suppresses repeat notifications for the same rule/host.
+* **Notifications only on transitions**, not on every sample. The sampler ticks every 15 s, so
+  notifying per evaluation would be 240 identical Discord messages an hour. A resolution message
+  is sent too (green embed) when a firing rule recovers.
+* **Never breaks the sampler:** delivery is best-effort and every failure is caught, recorded on
+  the event row (`notified`, `notify_error`) and logged — a broken webhook cannot stop metric
+  collection.
+* **State where it belongs:** the live state machine is in memory (a restart does not re-fire old
+  alerts) while every transition is mirrored to `alert_events`, so history and "what is firing
+  right now" are both queryable.
+* **Page:** `/alerts` shows active alerts, the rule table with an inline editor, and recent events
+  (30 s auto-refresh). API: `GET|POST /api/alerts/rules`, `PUT|DELETE /api/alerts/rules/<id>`,
+  `GET /api/alerts/events`, `GET /api/alerts/state`, `POST /api/alerts/test`,
+  `POST /api/alerts/evaluate`.
 
 ### 📈 **Real-Time Progress Tracking**
 * **Instant connect feedback:** SSE responses for log discovery disable proxy buffering (`X-Accel-Buffering: no`) and send an immediate `: connected` heartbeat, so the first update lands in tens of milliseconds instead of after an nginx buffer flush
@@ -759,13 +798,33 @@ The application provides detailed startup logs showing:
   - `monitoring/` – host monitors, checks and alerting
   - `dockermon/` – Docker endpoint discovery, live stats, swarm view
   - `serverreport/` – server-wide correlated reports:
-    `collect` → `normalize` → `correlate` → `pack` → `sizing` → `llm` → `routes`
+    `collect` → `normalize` → `correlate` → `pack` → `sizing` → `llm` → `routes`,
+    plus `diff.py` (report-to-report comparison from stored JSON)
+  - `alerting/` – threshold rules, evaluation state machine, `alert_events`, Discord delivery
+  - `inventory/` – groups and tags, Ansible/SSH-config exports, SQLite backup and restore
+    (split out of `app.py` so the core module only holds logs, search, AI, schedules and hosts)
+- **Schema:** `database.py` holds the models and `db.create_all()` adds new *tables*; there is no
+  Alembic, so additive **columns** on existing tables go through `app_schema.add_missing_columns()`,
+  the single place that knows the `ALTER TABLE` list (`suricata_*`, `ssh_keys`, `log_reports`,
+  `schedules`). Two copy-pasted column helpers used to exist; both now delegate to it.
 
-### Frontend (Vanilla JavaScript)
+### Frontend (Vanilla JavaScript, no build step)
 - **UI Framework**: Tailwind CSS for responsive design
 - **Real-time Updates**: EventSource API for SSE communication
 - **State Management**: Local storage for credentials and preferences
 - **Progressive Enhancement**: Graceful degradation for network issues
+- **ES modules:** `templates/index.html` is markup only (≈1,400 lines) and loads a single entry
+  point, `<script type="module" src="/static/js/main.js">`. `main.js` imports the feature modules
+  in the same order the old inline `<script>` blocks ran, so `DOMContentLoaded` listeners register
+  in the same relative order:
+  - `boot.js` – `window.__appReady`, xterm readiness helper
+  - `groups.js` – group settings UI
+  - `app-core.js` – the main UI closure (hosts, logs, search, AI modals, schedules); imports
+    `suricata.js` and `sshkeys.js`
+  - `toolbar.js`, `monitoring-wizard.js`, `wizard-fallback.js`
+  - per-page modules: `alerts.js` (loaded by `alerts.html`)
+  Everything the markup uses from `onclick` handlers stays on `window`. No bundler, no transpiler —
+  the files are served as-is, which keeps deployment identical to before.
 
 ### Data Flow
 1. **Host Configuration**: JSON-based host storage with validation
@@ -796,6 +855,38 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v2.13.1 - Alerts, Report Diffs, Scheduled Reports and a Smaller app.py
+- 🚨 **`alerting/` blueprint** - threshold rules over metrics that are already collected
+  - `AlertRule` / `AlertEvent` models; five rules seeded on first boot; `/alerts` page with active
+    alerts, an inline rule editor and recent events (30 s refresh)
+  - `ok → pending → firing → resolved` state machine with `for_seconds` debounce and per-rule
+    `cooldown_seconds`; only transitions notify (a 15 s sampler would otherwise emit 240 identical
+    Discord messages an hour), and recoveries send a green "resolved" embed
+  - Evaluated from `dockermon/history.py` on every sample and from `serverreport/routes.py` when a
+    report's verdict is stored (`verdict_level` rule), wrapped so a delivery failure can never
+    break the sampler; live state is in memory, every transition is mirrored to `alert_events`
+- 🔁 **Report diffs** (`serverreport/diff.py`) - the report page now has a **Since last report**
+  panel: verdict transition, event delta and %, new / gone / louder signature clusters,
+  new / gone correlations, per-source coverage. Identity is `(signature, source)` for clusters and
+  an order-independent pair for correlations, and everything is read from the stored JSON columns,
+  so no host is re-collected
+- 🗓 **Scheduled reports** - `Schedule.kind` is now `'log'` (default) or `'report'`, with
+  `report_window_minutes`, `report_depth`, `report_model` and `report_scope_json`. A report
+  schedule reuses the existing pipeline unchanged: one report per host per run, per-host results
+  recorded in `last_status` / `last_run_at`
+- ⚖️ **Fairer source caps** - `AILOG_REPORT_MAX_SOURCES` 60 → 120, allocated by kind
+  (45 % file / 30 % journal / 25 % docker) with unused allowance overflow and journald units
+  ranked by activity, so a file-heavy host cannot starve journald or container sources
+- 🧱 **`app.py` split** - additive-column migrations moved to `app_schema.add_missing_columns()`
+  (replacing two duplicated helpers), and the groups / tags / export / DB-admin routes moved to
+  the new `inventory/` package. URLs and handlers are byte-for-byte the extracted code
+- 🧩 **`templates/index.html` split into ES modules** - 8,257 → ~1,399 lines of markup with one
+  `<script type="module" src="/static/js/main.js">` entry point and per-feature modules
+  (`app-core.js`, `suricata.js`, `sshkeys.js`, `groups.js`, `toolbar.js`, wizards, `alerts.js`).
+  Import order mirrors the old script-block order so `DOMContentLoaded` wiring is unchanged
+- 🧪 **First test suite** - `tests/` with 108 pytest tests over alerts, diffs, scheduled reports,
+  source caps, dockermon and inventory (see *Testing*)
 
 ### v2.13.0 - Docker History, Apps and Cluster Views
 - 🕘 **Rolling history** (`dockermon/history.py`) - a background sampler records one point per
@@ -881,7 +972,7 @@ The application provides detailed startup logs showing:
     written in the window are skipped
   - journald unit listing capped (`head -n 60`) — an uncapped `--field _SYSTEMD_UNIT` emits
     ~118k lines on db-11 and times out
-  - Caps: `AILOG_REPORT_MAX_SOURCES` (60), `AILOG_REPORT_MAX_BYTES` (24 MB), 6 workers,
+  - Caps: `AILOG_REPORT_MAX_SOURCES` (120, shared per kind), `AILOG_REPORT_MAX_BYTES` (24 MB), 6 workers,
     per-host lock so two clicks cannot stack SSH sessions, failures isolated per source
 - 🧩 **Normalisation** (`normalize.py`): timestamps parsed from RFC3339, syslog (with year
   rollover), journal `short-iso` and bracketed formats; multi-line stack traces attach to
@@ -1030,10 +1121,30 @@ python3 app.py
 ```
 
 ### Testing
-- Test with multiple host configurations
-- Verify SSH key authentication
-- Check sudo permissions on target hosts
-- Test search functionality across different log types
+
+There is a real pytest suite under `tests/` (108 tests, no network or SSH required):
+
+```bash
+pip install -r requirements-dev.txt      # pytest
+python -m pytest tests/ -q
+```
+
+`tests/conftest.py` points `DATABASE_URL` at a temporary SQLite file *before* importing `app`
+(the app builds its schema at import time), then provides `client`, `ctx`, `db_session` and a
+`host` fixture that returns a fresh `db-<id>` key. Alert state is process-wide, so an autouse
+fixture resets it between tests.
+
+| File | Covers |
+|---|---|
+| `test_alerts.py` | operators, debounce/`for_seconds`, recovery resolves, cooldown, disabled rules, missing metrics, verdict rules, notification success/failure, seeding, rule CRUD + API, events/state/evaluate endpoints, page render |
+| `test_report_diff.py` | identical reports, new/gone clusters, source as part of cluster identity, "louder" rule, verdict transitions, event delta and % (with a zero baseline), correlation identity order-independence, item caps, bad JSON tolerance |
+| `test_schedule_reports.py` | `kind` defaulting and switching, report field coercion, per-host pipeline runs and failures, log schedules keeping the old path, one APScheduler job per enabled schedule |
+| `test_collect_sources.py` | the source cap: no kind can starve another, unused shares overflow, discovery order preserved, journal units ranked by activity, window clamping |
+| `test_dockermon.py` | `docker system df` / `df` parsing, app grouping, history buffer (hold-last, bounded, clear), core-weighted swarm totals, offline nodes, container rate deltas, history/swarm routes |
+| `test_inventory.py` | groups/tags CRUD and assignment, Ansible and SSH-config exports, SQLite backup/restore validation, blueprint registration of the extracted routes |
+
+Manual checks still matter for the parts that touch real hosts: SSH key auth, passwordless sudo,
+and search across different log types.
 
 ## 📄 License
 

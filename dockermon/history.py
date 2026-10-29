@@ -282,6 +282,14 @@ def _loop(app, interval=None):
                             continue
                         record(key, snap.get('stats'),
                                snap.get('containers'), snap.get('ts'))
+                        # Every sample is also an alert evaluation - this is
+                        # where a threshold becomes a notification.
+                        try:
+                            from alerting import engine as alerts
+                            alerts.evaluate_host(key, snap.get('stats') or {},
+                                                 now=snap.get('ts'))
+                        except Exception as exc:
+                            log.debug('[dockermon] alert evaluation failed: %s', exc)
         except Exception as exc:
             log.warning('[dockermon] history sampler error: %s', exc)
         # Waiting on the event (not sleep) lets shutdown interrupt the pause.

@@ -20,7 +20,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 DEFAULT_WINDOW_MINUTES = 120
 ALLOWED_WINDOWS = (15, 30, 60, 120, 360, 1440)
 
-MAX_SOURCES = int(os.environ.get('AILOG_REPORT_MAX_SOURCES', '60') or 60)
+# The cap is a fairness knob, not a "first 60 things we saw" knob: see
+# ``select_sources``. 120 keeps a busy host's journal and containers in the
+# report instead of letting 60 log files consume the whole budget.
+MAX_SOURCES = int(os.environ.get('AILOG_REPORT_MAX_SOURCES', '120') or 120)
+
+# Share of the cap each kind may claim before overflow. Without this, a host
+# with many log files (db-11: 200+) spent the whole budget on files and never
+# collected a single journal unit or container.
+KIND_SHARES = {'file': 0.45, 'journal': 0.30, 'docker': 0.25}
 MAX_BYTES = int(os.environ.get('AILOG_REPORT_MAX_BYTES', str(24 * 1024 * 1024)) or 24 * 1024 * 1024)
 MAX_JOURNAL_UNITS = 60
 FILE_LINE_CAP = 4000
@@ -199,6 +207,10 @@ def list_sources(host_key, include_files=True, include_journal=True, include_doc
         units, err = _discover_journal_units(host_key)
         if err:
             errors.append({'kind': 'journal', 'error': err})
+        # Most active units first: a chatty unit is where the events are. One
+        # extra command ranks them; alphabetical order is otherwise arbitrary.
+        activity = _journal_activity(host_key, window_start)
+        units = sorted(units, key=lambda u: (-activity.get(u, 0), u))
         for unit in units:
             sources.append({
                 'key': f'journal:{unit}',
@@ -208,6 +220,7 @@ def list_sources(host_key, include_files=True, include_journal=True, include_doc
                 'unit': unit,
                 'size_bytes': 0,
                 'mtime': 0,
+                'activity': activity.get(unit, 0),
             })
 
     if include_docker:
@@ -341,6 +354,92 @@ class _ByteBudget:
             return '[--- truncated to fit report budget ---]\n' + clipped.decode('utf-8', 'ignore')
 
 
+def _journal_activity(host_key, window_start, limit=8000):
+    """Count recent journal lines per unit, in one round trip.
+
+    Used to rank units so the cap is spent on the units that actually wrote
+    something during the window rather than the first 30 alphabetically.
+    Best effort: an empty dict means "keep the discovery order".
+    """
+    app = _app()
+    since = ''
+    if window_start is not None:
+        try:
+            since = f'--since @{int(window_start.timestamp())} '
+        except Exception:
+            since = ''
+    cmd = (
+        f'sudo journalctl {since}-n {int(limit)} -o json '
+        f'--output-fields=_SYSTEMD_UNIT --no-pager 2>/dev/null '
+        + '''| grep -o '\"_SYSTEMD_UNIT\":\"[^\"]*\"' '''
+        + '| sort | uniq -c | sort -rn | head -n 120'
+    )
+    try:
+        res = app.execute_command(host_key, cmd, timeout=25)
+    except Exception:
+        return {}
+    counts = {}
+    for line in (res.stdout or '').splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        try:
+            count = int(parts[0])
+        except ValueError:
+            continue
+        # " 77 _SYSTEMD_UNIT=\"ssh.service\"" -> ssh.service
+        unit = parts[1].rsplit('="', 1)[-1].rstrip('"')
+        if unit:
+            counts[unit] = count
+    return counts
+
+
+def select_sources(sources, max_sources, shares=None):
+    """Trim the candidate list to ``max_sources`` without starving a kind.
+
+    Files are already ordered newest-first, journal units by activity and
+    containers running-first, so each kind's list is a priority order. The cap
+    is divided by kind, then any unused allowance overflows to the kinds that
+    still have candidates.
+
+    Returns ``(selected, dropped)`` where ``dropped`` maps kind -> count.
+    """
+    shares = shares or KIND_SHARES
+    if max_sources <= 0 or len(sources) <= max_sources:
+        return list(sources), {}
+
+    by_kind = {}
+    for source in sources:
+        by_kind.setdefault(source.get('kind') or 'other', []).append(source)
+
+    chosen = {}
+    for kind, items in by_kind.items():
+        quota = max(1, int(round(max_sources * shares.get(kind, 0.2))))
+        chosen[kind] = items[:quota]
+
+    total = sum(len(items) for items in chosen.values())
+    while total > max_sources:
+        kind = max(chosen, key=lambda k: len(chosen[k]) - max_sources * shares.get(k, 0.2))
+        if not chosen[kind]:
+            break
+        chosen[kind].pop()
+        total -= 1
+
+    while total < max_sources:
+        backlog = [k for k in by_kind if len(chosen[k]) < len(by_kind[k])]
+        if not backlog:
+            break
+        kind = max(backlog, key=lambda k: len(by_kind[k]) - len(chosen[k]))
+        chosen[kind] = by_kind[kind][:len(chosen[kind]) + 1]
+        total += 1
+
+    keep = {id(item) for items in chosen.values() for item in items}
+    selected = [s for s in sources if id(s) in keep]
+    dropped = {kind: len(items) - len(chosen.get(kind, []))
+               for kind, items in by_kind.items()}
+    return selected, {k: v for k, v in dropped.items() if v}
+
+
 def collect_host_logs(host_key, host_label=None, window_minutes=DEFAULT_WINDOW_MINUTES,
                       include_files=True, include_journal=True, include_docker=True,
                       include_stopped=False, max_sources=None, progress=None, app=None,
@@ -390,9 +489,13 @@ def collect_host_logs(host_key, host_label=None, window_minutes=DEFAULT_WINDOW_M
     result['errors'].extend(errors)
 
     if len(sources) > max_sources:
-        sources = sources[:max_sources]
+        sources, dropped = select_sources(sources, max_sources)
         result['truncated'] = True
-        result['skipped'].append(f'{len(sources)} source cap reached (MAX_SOURCES={max_sources})')
+        result['dropped'] = dropped
+        detail = ', '.join(f'{n} {kind}' for kind, n in sorted(dropped.items()) if n)
+        result['skipped'].append(
+            f'source cap reached (MAX_SOURCES={max_sources}): '
+            f'collected {len(sources)}, skipped {detail}')
 
     if not sources:
         result['duration_ms'] = int((datetime.datetime.now(datetime.timezone.utc) - started).total_seconds() * 1000)

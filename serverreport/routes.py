@@ -20,6 +20,7 @@ from flask import (Blueprint, Response, current_app, jsonify, redirect,
                    render_template, request, stream_with_context, url_for)
 
 from database import LogReport, db
+from . import diff as rdiff
 from . import collect, correlate, llm, normalize, pack, sizing
 
 reports_bp = Blueprint('serverreport', __name__)
@@ -423,6 +424,12 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
         events_total=len(events),
         clusters_total=len(clusters),
         severity_json=json.dumps(norm['severity_counts']),
+        # Kept so two reports can be compared without recollecting the host.
+        clusters_json=json.dumps([
+            {'sig': c['sig'], 'label': c['label'], 'src': c['src'],
+             'sev': c['sev'], 'count': c['count']}
+            for c in sorted(clusters, key=lambda c: -(c.get('count') or 0))[:250]
+        ]),
         timeline_json=json.dumps(corr['timeline']),
         correlations_json=json.dumps(corr['correlations']),
         containers_json=json.dumps(containers),
@@ -458,6 +465,14 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
     )
     db.session.add(report)
     db.session.commit()
+
+    # A stored verdict is itself a metric: "not healthy" can be a rule.
+    try:
+        from alerting import engine as alerts
+        alerts.record_verdict(host_key, report.verdict, report_id=report.id)
+    except Exception:
+        pass
+
     # The pipeline runs in its own thread with its own session, so hand back a
     # plain dict: the ORM instance is detached (and expired) by the time the
     # SSE generator touches it.
@@ -746,8 +761,24 @@ def list_reports():
 def view_report(report_id):
     report = LogReport.query.get(report_id)
     if not report:
-        return render_template('report.html', report=None, report_id=report_id), 404
-    return render_template('report.html', report=report, report_id=report_id)
+        return render_template('report.html', report=None, report_id=report_id,
+                               diff=None), 404
+
+    # "What changed since last time?" - compare against the previous report for
+    # the same host. Reports are read far more often than they are written, and
+    # this costs one extra row lookup.
+    previous = (LogReport.query
+                .filter(LogReport.host_key == report.host_key, LogReport.id < report.id)
+                .order_by(LogReport.id.desc()).first())
+    diff = None
+    if previous:
+        try:
+            diff = rdiff.compare(rdiff.report_payload(previous),
+                                 rdiff.report_payload(report))
+        except Exception:
+            diff = None
+    return render_template('report.html', report=report, report_id=report_id,
+                           diff=diff)
 
 
 @reports_bp.route('/reports/<int:report_id>/markdown')
