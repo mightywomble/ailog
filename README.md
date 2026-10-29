@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.18.0 | **Interface rework (Option A): fleet-first pages + a host workspace**, with a ⌘K command palette and a card-based Overview grid. Adds a responsive shell (desktop sidebar → tablet icon rail → phone drawer + bottom tab bar + bottom-sheet dialogs), a three-layer theme system with **6 themes × dark/light**, and Settings → **Appearance** (theme, mode, density, motion). Charts follow the theme; legacy Tailwind utilities are retargeted in light mode instead of rewriting 1,500 lines of markup | ✅ Complete |
 | 2026-10-29 | v2.17.0 | **Monitoring moved to a dashboard toolbar.** Monitoring is server-wide, not per host, so the button left the host toolbar and now sits in a new Quick access bar on the dashboard alongside **Add Devices** and **More** (which moved out of the global header, keeping its Ansible / SSH config / Rescan entries). The header keeps only Settings, Suricata Stats and the sudo chip. README now documents the three toolbars and which scope each control belongs to | ✅ Complete |
 | 2026-10-29 | v2.16.2 | Fix: container network counters crashed the expanded card (`TypeError: int() ... not 'tuple'`) because the SSH collector stored the whole `NetIO` pair in `net_rx`; the pair is now split into rx/tx and the metrics collector coerces counters defensively | ✅ Complete |
 | 2026-10-29 | v2.16.1 | Monitoring cards read Docker container counts from the same SSH round trip (`docker ps -a --format {{.State}}`) instead of a Docker discovery row, so the whale badge shows `running/total` and "engine not reachable" is accurate rather than stale | ✅ Complete |
@@ -57,10 +58,19 @@ This application is designed for use on a trusted, internal development network 
 
 ## 🚀 Key Features
 
-### 🧭 **Navigation (Dashboard → Logs)**
-* **Dashboard-first:** The app opens on a dark dashboard view showing stats, recent activity, and quick actions.
-* **Logs on demand:** Click any host in the left sidebar to switch into the Logs view for that host.
-* **Back button:** The Logs view has a Back button to return to the dashboard without reloading.
+### 🧭 **Navigation (fleet first, then host)**
+There is one rule: **server-wide things live on pages, per-host things live in the host workspace.**
+
+* **Overview (fleet)** — the landing page. A **Fleet** card (online hosts, average CPU/RAM, Docker
+  host and container counts, offline count), a **Hosts** card with one tile per server, **Alerts**
+  and **Recent reports**. Every card is live: it polls `/api/metrics/servers`,
+  `/api/alerts/events` and `/api/reports` every 6 s and stops while the tab is hidden.
+* **Logs (host workspace)** — pick a host in the sidebar (or a tile in the Overview) and the Logs
+  view opens for it, with the host toolbar: SSH, Pull Logs, Host Info, Docker.
+* **Back** returns to the fleet without reloading.
+* **⌘K / Ctrl+K** jumps anywhere — views, actions, every host and every theme (see below).
+* **Phone:** the sidebar becomes a slide-over drawer (hamburger), and a five-slot bottom tab bar
+  (Overview, Logs, Hosts, Monitor, Alerts) carries the primary navigation.
 
 ### 🧰 **Toolbars — what lives where**
 There are three toolbars and the split is deliberate: a control sits in the one whose scope it matches.
@@ -234,13 +244,62 @@ collection path to keep in sync.
 * **Indeterminate bar + spinner:** while no measurable progress exists the bar sweeps and a spinner is shown, switching to a normal percentage bar on the first event
 * **Elapsed clock:** the label ticks seconds and escalates (“Initializing connection…” → “Waiting for host to respond…” → “Slow to respond - still trying…”), then tracks real progress (“Listing log files…”, “Found N log sources…”)
 
-### 🎨 **UI Theme**
-* Termix-style dark theme throughout: dark panel surfaces, subtle borders, consistent spacing, and typography.
-* Fully dark headers, search bar, log viewer, settings modals, and host cards.
-* **Streaming Updates:** Server-Sent Events (SSE) provide real-time feedback during log loading and analysis
-* **Progress Visualization:** Detailed progress bars, log output, and status messages for all operations
-* **Error Recovery:** Automatic retry mechanisms for failed host connections
-* **Performance Optimization:** Concurrent processing with timeout handling for reliable operations
+### 🎨 **Appearance: themes, light/dark, density**
+Six theme families, each with a dark and a light variant. Pick one in **Settings → Appearance**
+(or type `theme` in ⌘K); the **sun/moon button next to Settings** flips dark ↔ light instantly.
+
+| Theme | Character |
+|---|---|
+| **Midnight** | The original ailog look — deep navy, violet accent |
+| **Slate** | Neutral grey, low tint, blue accent |
+| **Nord** | Cool arctic blues |
+| **Solarized** | Designed as a light/dark pair, warm paper in light mode |
+| **Terminal** | Green on black, phosphor accent |
+| **High contrast** | Maximum legibility, hard borders, no tint |
+
+How it works — three layers, and only the middle one may be used by components:
+
+1. **Palettes** (`static/css/theme.css`) define raw colours per `[data-theme][data-mode]`.
+2. **Semantic tokens** are the only names markup/CSS may reference: `--bg`, `--surface`,
+   `--surface-2/3`, `--surface-sunken`, `--border`, `--border-strong`, `--text`, `--muted`,
+   `--faint`, `--overlay`, `--accent`, `--accent-hover`, `--accent-soft`, `--on-accent`, `--ok`,
+   `--warn`, `--bad`, `--info`, `--chart-1…6`, `--shadow-1/2`, `--focus`, `--radius`, `--radius-sm`,
+   `--term-bg`, `--term-fg`, `--bg-glow-1/2`.
+3. **Components** (`style.css`, `shell.css`, `ui.css`, `metrics.css`) style themselves from those
+   tokens, so a new theme is ~20 lines instead of a search-and-replace across five files.
+
+* **No flash:** every template has a tiny inline boot script in `<head>` that reads localStorage and
+  sets `data-theme` / `data-mode` / `data-density` / `data-motion` plus `color-scheme` before first
+  paint; `static/js/theme.js` then owns all later changes and fires `themechange` events.
+* **Persistence:** `ui.theme`, `ui.mode` (`dark` | `light` | `system`), `ui.density`, `ui.motion`.
+  `system` follows `prefers-color-scheme` live.
+* **Shareable previews:** `?theme=nord&mode=light&density=compact&motion=reduced` overrides the saved
+  values for that page load (validated against the allowed lists).
+* **Charts follow the theme:** `window.themeColors()` returns the semantic colours including a
+  `series[]` array; the metrics sparklines read it at draw time and `docker.html` recolours its
+  Chart.js instances on `themechange`.
+* **Density & motion:** Comfortable/Compact changes radii and paddings; Reduced disables the
+  shimmer/pulse animations and smooth scrolling (also honoured via `prefers-reduced-motion`).
+
+### ⌘K **Command palette**
+`⌘K` on macOS, `Ctrl+K` elsewhere (there is also a magnifier button in the header).
+
+* Fuzzy subsequence search over **Views**, **Actions**, **Hosts** and **Appearance** (one entry per
+  theme, plus toggle light/dark).
+* ↑/↓ to move, Enter to run, Esc to dismiss; results are grouped and the platform-correct shortcut
+  is shown in the footer and the header hint.
+* Host entries go through the same `selectHost()` path as a sidebar click, so the palette, the
+  Overview tiles and the sidebar can never disagree.
+
+### 📱 **Responsive layout**
+| Width | Shell |
+|---|---|
+| **≥1025 px** | Fixed 264 px sidebar beside the content; header shows labelled buttons |
+| **641–1024 px** | Sidebar collapses to a **76 px icon rail** (host cards become monogram tiles with a status dot, full name in the tooltip); cards reflow to two columns |
+| **≤640 px** | Sidebar becomes a **slide-over drawer** behind a backdrop, a **bottom tab bar** (5 slots, `env(safe-area-inset-bottom)`) carries navigation, dialogs become **bottom sheets**, tables scroll horizontally, touch targets are ≥40 px |
+
+The shell is a flex column of `100dvh` with an internal scroll region, so the header and tab bar stay
+put on mobile browsers with collapsing toolbars.
 
 ### 🪟 **Unified Modal Dialogues**
 Every popup in the app is the same component, built from one stylesheet block and one small module — no framework, no build step.
@@ -945,6 +1004,14 @@ The application provides detailed startup logs showing:
     `suricata.js` and `sshkeys.js`
   - `toolbar.js`, `monitoring-wizard.js`, `wizard-fallback.js`
   - `iframe-modals.js` – the Docker and Reports dialogs (iframe-backed full documents)
+  - `shell.js` – mobile drawer, bottom tab bar and view/aria-current syncing
+  - `command-palette.js` – the ⌘K palette (views, actions, hosts, themes)
+  - `overview.js` – the dashboard cards (fleet, hosts, alerts, reports, 6 s polling)
+  - `theme.js` is loaded directly by every template (it must run before first paint) and owns the
+    four `data-*` attributes, localStorage, the Appearance panel and `themeColors()`
+  - stylesheets, in order: `style.css` (base + shared dialogs), `theme.css` (palettes + tokens),
+    `shell.css` (responsive shell), `ui.css` (palette, appearance, overview cards), plus
+    `metrics.css` for the monitoring page
   - per-page modules: `alerts.js` (loaded by `alerts.html`)
   Everything the markup uses from `onclick` handlers stays on `window`. No bundler, no transpiler —
   the files are served as-is, which keeps deployment identical to before.
@@ -978,6 +1045,22 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v2.18.0 - Fleet-first UI, ⌘K and six themes
+- 🧭 **Option A navigation** — the dashboard is now a genuine fleet Overview
+  (Fleet / Hosts / Alerts / Recent reports cards) and every per-host tool stays in the host workspace;
+  nothing was removed, everything was re-homed
+- ⌨️ **⌘K command palette** — subsequence search across views, actions, hosts and themes, with
+  ↑/↓/Enter/Esc and platform-aware shortcut hints
+- 🎨 **Six theme families × dark/light** with a sun/moon toggle next to Settings, Settings →
+  Appearance (theme, mode, density, motion), pre-paint boot script (no flash), `?theme=` overrides
+  for screenshots/links, and theme-aware charts
+- 📱 **Responsive shell** — 264 px sidebar → 76 px icon rail → phone drawer + bottom tab bar, with
+  bottom-sheet dialogs and horizontally scrolling tables
+- 🧱 **Tokenised dialog chrome** — every modal (Docker, Reports, Monitoring, Settings, host forms) now
+  paints from `--surface` / `--border` / `--shadow-2`, so light mode is legible everywhere
+- 🧪 43 new structural tests (theme palettes, boot script in every template, breakpoints, palette
+  contract, overview polling) — suite at 274 passing
 
 ### v2.14.1 - Docker Monitoring in a Modal
 - 🪟 **The Docker button opens a dialog, not a new page** — a 95vw × 92vh panel with the

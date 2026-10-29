@@ -16,6 +16,22 @@
     .spin { animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <script>
+    (function () {
+      try {
+        var r = document.documentElement;
+        var mode = localStorage.getItem('ui.mode') || 'system';
+        var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        r.dataset.theme = localStorage.getItem('ui.theme') || 'midnight';
+        r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
+        r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
+        r.dataset.motion = localStorage.getItem('ui.motion') || 'full';
+        r.style.colorScheme = r.dataset.mode;
+      } catch (e) {}
+    })();
+  </script>
+  <script type="module" src="/static/js/theme.js"></script>
 </head>
 {# The same page is served standalone (/docker/<host>) and embedded in the
    index.html modal (?embed=1). Embedded: no Back link (the modal owns the
@@ -1045,6 +1061,27 @@
     startSwarmTick();
   })();
 })();
+</script>
+<script>
+/* Re-colour Chart.js instances when the theme/mode changes. */
+document.addEventListener('themechange', function () {
+  var colors = window.themeColors ? window.themeColors() : null;
+  if (!colors || !window.Chart) return;
+  Chart.defaults.color = colors.muted;
+  Chart.defaults.borderColor = colors.border;
+  Object.values(Chart.instances || {}).forEach(function (chart) {
+    try {
+      Object.values(chart.options.scales || {}).forEach(function (scale) {
+        if (scale.ticks) scale.ticks.color = colors.muted;
+        if (scale.grid) scale.grid.color = colors.border;
+        if (scale.title) scale.title.color = colors.muted;
+      });
+      var legend = chart.options.plugins && chart.options.plugins.legend;
+      if (legend && legend.labels) legend.labels.color = colors.text;
+      chart.update('none');
+    } catch (e) { /* a chart mid-destroy must not break the page */ }
+  });
+});
 </script>
 </body>
 </html>

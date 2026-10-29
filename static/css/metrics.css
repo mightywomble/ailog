@@ -333,3 +333,67 @@ body {
   .m-wrap { padding: 12px; }
   .m-ctable .m-mini, .m-ctable .m-bar { display: none; }
 }
+
+
+/* --------------------------------------------------------------------------
+   Theme integration: everything above predates the token layer, so the
+   surface/text colours are re-pointed at the semantic tokens here. Chart
+   *series* colours come from window.themeColors() in metrics-page.js.
+   -------------------------------------------------------------------------- */
+body { background: var(--bg); color: var(--text); }
+.m-title, .m-name, .m-metric-val, .m-cname-text, .m-ctable td { color: var(--text); }
+.m-subtitle, .m-metric-top, .m-containers-head, .m-ctable th { color: var(--muted); }
+.m-ip, .m-metric-foot, .m-cstack, .m-cstate, .m-containers-note,
+.m-containers-note, .m-empty, .m-chev { color: var(--faint); }
+.m-card {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.m-card:hover { border-color: var(--border-strong); }
+.m-card.is-expanded {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: var(--shadow-1);
+}
+.m-dot { background: var(--faint); }
+.m-dot.up { background: var(--ok); box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 55%, transparent); }
+.m-dot.down { background: var(--bad); }
+.m-metric { background: var(--surface-2); border-color: var(--border); }
+.m-containers { border-top-color: var(--border); }
+.m-ctable th { border-bottom-color: var(--border); }
+.m-ctable td { border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent); }
+.m-bar { background: var(--overlay); }
+.m-btn, .m-field select {
+  background: var(--overlay);
+  border-color: var(--border);
+  color: var(--text);
+}
+.m-back { background: var(--overlay); border-color: var(--border); color: var(--accent); }
+.m-card-error {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
+}
+.m-cstate.running { color: var(--ok); }
+.m-cstate.exited { color: var(--warn); }
+.m-live { color: var(--ok); }
+.m-live-dot { background: var(--ok); }
+
+/* sampling failure: one summary line, raw command output on demand */
+.m-card-error strong { display: block; font-weight: 600; }
+.m-card-error details { margin-top: 4px; }
+.m-card-error summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .66rem;
+  user-select: none;
+}
+.m-card-error pre {
+  margin: 4px 0 0;
+  max-height: 110px;
+  overflow: auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .64rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  opacity: .85;
+}

@@ -10,4 +10,7 @@ import './app-core.js';           // imports ./suricata.js and ./sshkeys.js
 import './toolbar.js';
 import './monitoring-wizard.js';
 import './wizard-fallback.js';
-import './iframe-modals.js';   // docker + reports dialogs
+import './iframe-modals.js';     // docker + reports dialogs (iframes)
+import './shell.js';              // responsive shell: drawer, tab bar, view state
+import './command-palette.js';    // ⌘K fast path over views/hosts/actions
+import './overview.js';           // dashboard overview cards

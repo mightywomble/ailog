@@ -1,0 +1,279 @@
+/* Overview cards — the dashboard's card vocabulary (Option C).
+ *
+ * Everything here is read-only summarising of endpoints that already exist:
+ *   GET /api/metrics/servers   fleet live stats + Docker presence
+ *   GET /api/alerts/events     active + recent alert events
+ *   GET /api/reports           recent server reports
+ *
+ * It adds no state of its own: refresh replaces the card contents, and the
+ * whole block is skipped while the dashboard is not the visible view.
+ */
+
+(function initOverview() {
+    const mount = document.getElementById('overview-cards');
+    if (!mount) return;
+
+    const POLL_MS = 6000;
+    let timer = null;
+    let busy = false;
+
+    const fmtBytes = (n) => {
+        if (n === null || n === undefined || Number.isNaN(Number(n))) return '–';
+        const v = Number(n);
+        const units = ['B', 'kB', 'MB', 'GB', 'TB', 'PB'];
+        if (!v) return '0 B';
+        const i = Math.min(Math.floor(Math.log(Math.abs(v)) / Math.log(1000)), units.length - 1);
+        const scaled = v / 1000 ** i;
+        return `${scaled.toFixed(scaled >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+    };
+
+    const fmtPct = (v) => (v === null || v === undefined ? '–' : `${Number(v).toFixed(0)}%`);
+
+    const timeAgo = (value) => {
+        if (!value) return '';
+        const then = new Date(value).getTime();
+        if (Number.isNaN(then)) return '';
+        const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+        if (secs < 60) return `${secs}s ago`;
+        if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+        if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
+        return `${Math.round(secs / 86400)}d ago`;
+    };
+
+    const esc = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    const getJson = async (url) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        let res;
+        try {
+            res = await fetch(url, { headers: { Accept: 'application/json' }, signal: controller.signal });
+        } finally {
+            clearTimeout(timeout);
+        }
+        if (!res.ok) throw new Error(`${res.status}`);
+        return res.json();
+    };
+
+    const dashboardVisible = () => {
+        const view = document.getElementById('dashboard-view');
+        return !!view && !view.classList.contains('hidden') && !document.hidden;
+    };
+
+    /* ------------------------------------------------------------- render */
+
+    function renderFleet(servers) {
+        const online = servers.filter((s) => s.online !== false);
+        const cpu = online.map((s) => s.cpu?.percent).filter((v) => v !== null && v !== undefined);
+        const mem = online.map((s) => s.mem?.percent).filter((v) => v !== null && v !== undefined);
+        const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+        const docker = servers.filter((s) => s.docker?.installed).length;
+        const running = servers.reduce((sum, s) => sum + (s.docker?.containers_running || 0), 0);
+
+        return `
+          <div class="ov-card ov-card-wide" data-ov="fleet">
+            <div class="ov-card-head">
+              <h3>Fleet</h3>
+              <span class="ov-chip ${online.length === servers.length && servers.length ? 'is-ok' : 'is-warn'}">
+                ${online.length}/${servers.length} online
+              </span>
+            </div>
+            <div class="ov-metrics">
+              <div class="ov-metric"><span>CPU</span><strong>${fmtPct(avg(cpu))}</strong>
+                <div class="ov-bar"><i style="width:${Math.min(100, avg(cpu) || 0)}%;background:var(--chart-1)"></i></div></div>
+              <div class="ov-metric"><span>RAM</span><strong>${fmtPct(avg(mem))}</strong>
+                <div class="ov-bar"><i style="width:${Math.min(100, avg(mem) || 0)}%;background:var(--chart-2)"></i></div></div>
+              <div class="ov-metric"><span>Docker hosts</span><strong>${docker}</strong>
+                <div class="ov-sub">${running} containers running</div></div>
+              <div class="ov-metric"><span>Offline</span>
+                <strong class="${servers.length - online.length ? 'ov-bad' : ''}">${servers.length - online.length}</strong>
+                <div class="ov-sub">${online.length ? 'all reachable' : 'no hosts configured'}</div></div>
+            </div>
+          </div>`;
+    }
+
+    function renderHosts(servers) {
+        const tiles = servers.map((s) => {
+            const online = s.online !== false;
+            const cpu = s.cpu?.percent;
+            const mem = s.mem?.percent;
+            const disk = s.disk?.percent;
+            return `
+              <button type="button" class="ov-host" data-host="${esc(s.host_key)}" ${online ? '' : 'data-offline="1"'}>
+                <div class="ov-host-top">
+                  <span class="ov-dot ${online ? 'is-up' : 'is-down'}"></span>
+                  <span class="ov-host-name">${esc(s.name || s.host_key)}</span>
+                  ${s.docker?.installed ? `<span class="ov-docker" title="Docker installed">🐳 ${s.docker.containers_running || 0}</span>` : ''}
+                </div>
+                <div class="ov-host-ip">${esc(s.ip || '')}</div>
+                <div class="ov-host-bars">
+                  <span title="CPU">${fmtPct(cpu)}<i style="width:${Math.min(100, cpu || 0)}%;background:var(--chart-1)"></i></span>
+                  <span title="RAM">${fmtPct(mem)}<i style="width:${Math.min(100, mem || 0)}%;background:var(--chart-2)"></i></span>
+                  <span title="Disk">${fmtPct(disk)}<i style="width:${Math.min(100, disk || 0)}%;background:var(--chart-3)"></i></span>
+                </div>
+              </button>`;
+        }).join('');
+
+        return `
+          <div class="ov-card" data-ov="hosts">
+            <div class="ov-card-head">
+              <h3>Hosts</h3>
+              <span class="ov-sub">${servers.length} configured</span>
+            </div>
+            <div class="ov-host-grid">${tiles || '<div class="ov-sub">No hosts yet — use Add Devices.</div>'}</div>
+          </div>`;
+    }
+
+    function renderAlerts(data) {
+        const active = data?.active || [];
+        const events = (data?.events || []).slice(0, 4);
+        const rows = (active.length ? active : events).slice(0, 4).map((e) => {
+            const sev = (e.severity || 'warning').toLowerCase();
+            const label = e.rule_name || e.message || e.metric || 'alert';
+            return `<li class="ov-row">
+                <span class="ov-sev is-${esc(sev)}"></span>
+                <span class="ov-row-main">${esc(label)}</span>
+                <span class="ov-row-meta">${esc(e.host_label || e.host_key || '')}</span>
+              </li>`;
+        }).join('');
+
+        return `
+          <div class="ov-card" data-ov="alerts">
+            <div class="ov-card-head">
+              <h3>Alerts</h3>
+              <a href="/alerts" class="ov-link">Open</a>
+            </div>
+            ${active.length
+                ? `<div class="ov-big-number ov-bad">${active.length}<span>active</span></div>`
+                : '<div class="ov-big-number ov-good">0<span>active</span></div>'}
+            <ul class="ov-rows">${rows || '<li class="ov-row"><span class="ov-row-main ov-sub">Nothing firing.</span></li>'}</ul>
+          </div>`;
+    }
+
+    function renderReports(data) {
+        const reports = (data?.reports || []).slice(0, 4);
+        const rows = reports.map((r) => {
+            const verdict = (r.verdict || 'unknown').toLowerCase();
+            return `<li class="ov-row">
+                <span class="ov-verdict is-${esc(verdict)}">${esc(verdict)}</span>
+                <a class="ov-row-main" href="/reports/${esc(r.id)}" target="_blank" rel="noopener">${esc(r.host_label || r.host_key)}</a>
+                <span class="ov-row-meta">${esc(timeAgo(r.created_at))}</span>
+              </li>`;
+        }).join('');
+
+        return `
+          <div class="ov-card" data-ov="reports">
+            <div class="ov-card-head">
+              <h3>Recent reports</h3>
+              <button type="button" class="ov-link" data-ov-open-reports>Open</button>
+            </div>
+            <ul class="ov-rows">${rows || '<li class="ov-row"><span class="ov-row-main ov-sub">No server reports yet.</span></li>'}</ul>
+          </div>`;
+    }
+
+    function renderError(what, err) {
+        return `
+          <div class="ov-card" data-ov="error">
+            <div class="ov-card-head"><h3>${esc(what)}</h3></div>
+            <p class="ov-sub">Could not load: ${esc(err.message || err)}</p>
+          </div>`;
+    }
+
+    /* --------------------------------------------------------------- poll */
+
+    // keyed results so each card can appear the moment its endpoint answers
+    const result = { servers: null, alerts: null, reports: null };
+    let painted = false;
+
+    function skeletonCard(title) {
+        return `
+          <div class="ov-card" data-ov-skeleton>
+            <div class="ov-card-head"><h3>${esc(title)}</h3></div>
+            <div class="ov-skeleton-line"></div>
+            <div class="ov-skeleton-line short"></div>
+          </div>`;
+    }
+
+    function paint() {
+        const cards = [];
+        if (result.servers === null) {
+            cards.push(skeletonCard('Fleet'));
+        } else if (result.servers.error) {
+            cards.push(renderError('Fleet', result.servers.error));
+        } else {
+            const list = result.servers.data?.servers || [];
+            cards.push(renderFleet(list));
+            cards.push(renderHosts(list));
+        }
+
+        if (result.alerts === null) cards.push(skeletonCard('Alerts'));
+        else cards.push(result.alerts.error ? renderError('Alerts', result.alerts.error) : renderAlerts(result.alerts.data));
+
+        if (result.reports === null) cards.push(skeletonCard('Recent reports'));
+        else cards.push(result.reports.error ? renderError('Reports', result.reports.error) : renderReports(result.reports.data));
+
+        mount.innerHTML = cards.join('');
+        mount.dataset.updated = new Date().toISOString();
+        painted = true;
+
+        // Host tiles open that host's logs; the sidebar selection is what
+        // app-core actually drives, so go through the exported helper.
+        mount.querySelectorAll('.ov-host').forEach((tile) => {
+            tile.addEventListener('click', () => {
+                window.ailogOpenHost?.(tile.dataset.host);
+            });
+        });
+        mount.querySelector('[data-ov-open-reports]')?.addEventListener('click', () => {
+            if (typeof window.openReportsModal === 'function') window.openReportsModal(null, '');
+            else window.open('/reports', '_blank', 'noopener');
+        });
+    }
+
+    async function refresh() {
+        if (busy || !dashboardVisible()) return;
+        busy = true;
+
+        const load = async (key, url) => {
+            try {
+                const data = await getJson(url);
+                result[key] = { data };
+            } catch (error) {
+                result[key] = { error };
+            }
+            if (dashboardVisible()) paint();
+        };
+
+        try {
+            if (!painted) {
+                result.servers = result.alerts = result.reports = null;
+                paint();
+            }
+            await Promise.all([
+                load('servers', '/api/metrics/servers'),
+                load('alerts', '/api/alerts/events?limit=8'),
+                load('reports', '/api/reports?limit=5'),
+            ]);
+        } finally {
+            busy = false;
+        }
+    }
+
+    function schedule() {
+        clearInterval(timer);
+        timer = setInterval(() => {
+            if (!dashboardVisible()) return;
+            refresh();
+        }, POLL_MS);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && dashboardVisible()) refresh();
+    });
+    window.addEventListener('themechange', () => refresh());
+
+    window.refreshOverview = refresh;
+    refresh();
+    schedule();
+})();
