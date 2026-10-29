@@ -18,6 +18,7 @@ from flask import (Blueprint, Response, current_app, g, jsonify, request)
 from sqlalchemy import text as sql_text
 
 from database import db, AppSetting
+from core.timeutil import utcnow
 
 bp = Blueprint('inventory_dbadmin', __name__)
 
@@ -111,7 +112,7 @@ def backup_database():
         if not os.path.exists(db_path):
             return jsonify({'error': f'Database file not found: {db_path}'}), 404
 
-        ts = datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+        ts = utcnow().strftime('%Y%m%dT%H%M%SZ')
         filename = f"homelab-manager-backup-{ts}.db"
 
         with open(db_path, 'rb') as f:

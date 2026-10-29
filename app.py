@@ -30,6 +30,7 @@ from monitoring.sshkeys import (
     key_plaintext_from_model as _sshkey_plaintext_from_model,
 )
 from core.sse_sessions import create_session as create_wizard_session_id
+from core.timeutil import utcnow
 
 # --- APPLICATION FACTORY ---
 
@@ -42,6 +43,25 @@ core_routes = Blueprint('core_ui', __name__)
 # ``sock`` is bound to the app by create_app(); the module-level decorators
 # below then attach the terminal websocket route to that instance.
 sock = Sock()
+
+
+def _configure_sqlite(app: Flask) -> None:
+    """WAL + busy timeout for sqlite.
+
+    The samplers, the scheduler and the request threads all write to the same
+    file; the default rollback journal serialises them and produces
+    ``database is locked`` under load. WAL lets readers run while a writer
+    commits, and ``timeout`` makes the writer wait instead of failing.
+    """
+    uri = app.config.get('SQLALCHEMY_DATABASE_URI', '') or ''
+    if not uri.startswith('sqlite:'):
+        return
+
+    options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS') or {})
+    connect_args = dict(options.get('connect_args') or {})
+    connect_args.setdefault('timeout', 30)
+    options['connect_args'] = connect_args
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = options
 
 
 def create_app(config: dict | None = None) -> Flask:
@@ -93,12 +113,17 @@ def create_app(config: dict | None = None) -> Flask:
     from alerting import alerts_bp
     app.register_blueprint(alerts_bp)
 
+    # One request for the dashboard (aggregate + ETag)
+    from overview import overview_bp
+    app.register_blueprint(overview_bp)
+
     # Groups, tags, inventory exports and DB backup/restore (modular bolt-on)
     from inventory import groups_bp as _inv_groups_bp, export_bp as _inv_export_bp, dbadmin_bp as _inv_dbadmin_bp
     app.register_blueprint(_inv_groups_bp)
     app.register_blueprint(_inv_export_bp)
     app.register_blueprint(_inv_dbadmin_bp)
 
+    _configure_sqlite(app)
     db.init_app(app)
     return app
 
@@ -872,6 +897,15 @@ def get_remote_sources(hostname):
 # Cache for host sources to avoid repeated queries
 _host_sources_cache = {}
 _cache_timeout = 60  # Cache for 60 seconds
+_HOST_SOURCES_CACHE_MAX = 64
+
+
+def _cache_host_sources(cache_key, payload, timestamp):
+    """Store a source listing, evicting the oldest entry past the size cap."""
+    while len(_host_sources_cache) >= _HOST_SOURCES_CACHE_MAX:
+        oldest = min(_host_sources_cache, key=lambda k: _host_sources_cache[k][1])
+        _host_sources_cache.pop(oldest, None)
+    _host_sources_cache[cache_key] = (payload, timestamp)
 
 def fetch_sources_from_host(host_id, host_name, failed_hosts):
     """Fetch log sources from a single host with proper error handling"""
@@ -1038,7 +1072,7 @@ def get_all_host_sources():
     }
     
     # Cache the result
-    _host_sources_cache[cache_key] = (response_data, current_time)
+    _cache_host_sources(cache_key, response_data, current_time)
     
     return jsonify(response_data)
 
@@ -1140,7 +1174,7 @@ def get_log_table_view():
     }
     
     # Cache the result
-    _host_sources_cache[cache_key] = (response_data, current_time)
+    _cache_host_sources(cache_key, response_data, current_time)
     
     return jsonify(response_data)
 
@@ -2607,7 +2641,7 @@ def _run_schedule(schedule: Schedule, emit=None):
     """
     if (schedule.kind or 'log') == 'report':
         results = _run_report_schedule(schedule, emit=emit)
-        schedule.last_run_at = datetime.datetime.utcnow()
+        schedule.last_run_at = utcnow()
         schedule.last_status = json.dumps(results)[:2000]
         try:
             db.session.commit()
@@ -3415,6 +3449,18 @@ def _suricata_cleanup_key_cache():
 atexit.register(_suricata_cleanup_key_cache)
 
 
+_SURICATA_KEY_CACHE_MAX = 16
+
+
+def _suricata_evict_key_cache(ssh_key_id):
+    path = _suricata_key_cache.pop(ssh_key_id, None)
+    if path:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
 def _suricata_get_ssh_key_path(ssh_key_id: int | None) -> str | None:
     """Return a local temp file path containing the SSH private key for this id."""
     if not ssh_key_id:
@@ -3431,6 +3477,8 @@ def _suricata_get_ssh_key_path(ssh_key_id: int | None) -> str | None:
     tf.flush()
     tf.close()
     os.chmod(tf.name, 0o600)
+    while len(_suricata_key_cache) >= _SURICATA_KEY_CACHE_MAX:
+        _suricata_evict_key_cache(next(iter(_suricata_key_cache)))
     _suricata_key_cache[ssh_key_id] = tf.name
     return tf.name
 
@@ -4703,7 +4751,7 @@ def rescan_host(host_id):
 
         # Update host status
         host.status = 'online'
-        host.last_seen = datetime.datetime.utcnow()
+        host.last_seen = utcnow()
 
         # Upsert SystemInfo
         si = SystemInfo.query.filter_by(host_id=host_id).order_by(SystemInfo.captured_at.desc()).first()
@@ -4721,8 +4769,8 @@ def rescan_host(host_id):
         si.cpu_cores = sys_info.get('cpu_cores')
         si.main_ip = sys_info.get('main_ip')
         si.netbird_ip = sys_info.get('netbird_ip')
-        si.last_update = datetime.datetime.utcnow()
-        si.captured_at = datetime.datetime.utcnow()
+        si.last_update = utcnow()
+        si.captured_at = utcnow()
 
         # Replace services snapshot
         Service.query.filter_by(host_id=host_id).delete()
@@ -4793,7 +4841,7 @@ def rescan_all_hosts():
                 services = collect_services(user, ip, ssh_key_path)
 
                 host.status = 'online'
-                host.last_seen = datetime.datetime.utcnow()
+                host.last_seen = utcnow()
 
                 si = SystemInfo.query.filter_by(host_id=host.id).order_by(SystemInfo.captured_at.desc()).first()
                 if not si:
@@ -4810,8 +4858,8 @@ def rescan_all_hosts():
                 si.cpu_cores = sys_info.get('cpu_cores')
                 si.main_ip = sys_info.get('main_ip')
                 si.netbird_ip = sys_info.get('netbird_ip')
-                si.last_update = datetime.datetime.utcnow()
-                si.captured_at = datetime.datetime.utcnow()
+                si.last_update = utcnow()
+                si.captured_at = utcnow()
 
                 Service.query.filter_by(host_id=host.id).delete()
                 for svc in services or []:
@@ -4935,7 +4983,7 @@ def validate_hosts_stream(session_id):
                 else:
                     user = 'root'
                 
-                timestamp = datetime.datetime.utcnow().isoformat()
+                timestamp = utcnow().isoformat()
                 msg = {'type': 'progress', 'current': i, 'total': len(ips), 'message': 'Testing ' + ip + '...'}
                 yield "data: " + json.dumps(msg) + "\n\n"
                 
@@ -5007,7 +5055,7 @@ def collect_info_stream(session_id):
                 else:
                     user = 'root'
                 
-                timestamp = datetime.datetime.utcnow().isoformat()
+                timestamp = utcnow().isoformat()
                 msg = {'type': 'progress', 'current': i, 'total': len(ips), 'message': 'Collecting info from ' + ip + '...'}
                 yield "data: " + json.dumps(msg) + "\n\n"
                 
@@ -5137,7 +5185,29 @@ def verify_ssh_keys_integrity():
 
 app = create_app()
 
+def _apply_sqlite_pragmas() -> None:
+    try:
+        from sqlalchemy import event
+        engine = db.engine
+        if engine.dialect.name != 'sqlite':
+            return
+
+        @event.listens_for(engine, 'connect')
+        def _pragmas(dbapi_connection, _record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute('PRAGMA journal_mode=WAL')
+                cursor.execute('PRAGMA synchronous=NORMAL')
+                cursor.execute('PRAGMA busy_timeout=30000')
+                cursor.execute('PRAGMA foreign_keys=ON')
+            finally:
+                cursor.close()
+    except Exception:
+        pass
+
+
 with app.app_context():
+    _apply_sqlite_pragmas()
     db.create_all()
     _ensure_suricata_endpoint_columns()
     _ensure_sshkey_encryption_columns()

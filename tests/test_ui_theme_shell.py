@@ -225,10 +225,12 @@ def test_overview_shows_fleet_alerts_and_reports_only():
     assert "renderHosts" not in js
 
 
-def test_overview_polls_the_three_summary_endpoints():
+def test_overview_polls_the_aggregate_endpoint():
     js = (STATIC / "js" / "overview.js").read_text()
-    for endpoint in ("/api/metrics/servers", "/api/alerts/events", "/api/reports"):
-        assert endpoint in js
+    # phase 6: one aggregate call with an ETag replaces three separate polls
+    assert "/api/overview" in js
+    assert "If-None-Match" in js
+    assert "/api/metrics/servers" not in js.split("*/", 1)[1]
     assert "POLL_MS" in js
     assert "document.hidden" in js
     # cards must not wait for the slowest endpoint, and must not hang forever

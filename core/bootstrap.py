@@ -13,12 +13,25 @@ import atexit
 import os
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 def start_background_services(app, app_module) -> None:
-    """Start schedulers and samplers for *app* (the module that owns them)."""
+    """Start schedulers and samplers for *app* (the module that owns them).
+
+    Set ``AILOG_RUN_SCHEDULER=0`` on web replicas so that only one process owns
+    the APScheduler jobs (phase 6: the scheduler should not run N times because
+    N workers happen to be up).
+    """
     app_module.initialize_app()
 
+    run_scheduler = _env_bool('AILOG_RUN_SCHEDULER', True)
     scheduler = getattr(app_module, 'scheduler', None)
-    if scheduler is not None:
+    if scheduler is not None and run_scheduler:
         scheduler.start()
         app_module.startup_scheduler()
         atexit.register(scheduler.shutdown)

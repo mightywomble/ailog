@@ -7,13 +7,13 @@ prefix so every URL stays exactly where it was.
 
 from __future__ import annotations
 
-import datetime
 import json
 
 from core.hostkeys import ssh_config_block
 from flask import (Blueprint, Response, jsonify)
 
 from database import Host
+from core.timeutil import utcnow
 
 bp = Blueprint('inventory_export', __name__)
 
@@ -68,7 +68,7 @@ def export_ssh_config():
         hosts = Host.query.all()
         
         ssh_config = "# Auto-generated SSH config from Homelab Manager\n"
-        ssh_config += f"# Generated: {datetime.datetime.utcnow().isoformat()}\n\n"
+        ssh_config += f"# Generated: {utcnow().isoformat()}\n\n"
         
         def _host_block(name, ip, host_obj):
             nonlocal ssh_config

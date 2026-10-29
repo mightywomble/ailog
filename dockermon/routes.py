@@ -32,6 +32,7 @@ from . import history as dhistory
 from . import sshstats
 from . import stats as dstats
 from . import swarm as dswarm
+from core.timeutil import utcnow
 
 docker_bp = Blueprint('docker', __name__)
 
@@ -68,7 +69,7 @@ def _save_endpoint(host_key: str, result: dict):
         row.server_version = result.get('server_version')
         row.is_reachable = bool(result.get('reachable'))
         row.last_error = result.get('error')
-        row.last_checked_at = __import__('datetime').datetime.utcnow()
+        row.last_checked_at = utcnow()
         db.session.commit()
     except Exception:
         try:
