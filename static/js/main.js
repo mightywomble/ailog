@@ -9,3 +9,4 @@ import './app-core.js';           // imports ./suricata.js and ./sshkeys.js
 import './toolbar.js';
 import './monitoring-wizard.js';
 import './wizard-fallback.js';
+import './docker-modal.js';

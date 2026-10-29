@@ -1424,5 +1424,26 @@
   </div>
 </div>
 
+<!-- Docker monitoring, embedded in a modal instead of navigating away.
+     Deliberately large: this is a chart-heavy dashboard, not a dialog. The
+     iframe is unloaded on close so its EventSource and timers stop. -->
+<div id="dockerModal" style="display: none"
+     class="fixed inset-0 bg-black/70 items-center justify-center z-50">
+  <div class="bg-slate-900 border border-white/10 rounded-xl w-[95vw] max-w-[1500px] h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+    <div class="flex items-center justify-between px-4 py-2.5 border-b border-white/10 shrink-0">
+      <div class="flex items-center gap-2 min-w-0">
+        <svg class="w-4 h-4 text-sky-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 10V6h4v4m-4 0v10h10V10M3 10l2-4h4l2 4"/>
+        </svg>
+        <span id="dockerModalTitle" class="font-semibold text-sm truncate">Docker</span>
+      </div>
+      <button id="dockerModalClose" type="button"
+              class="bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm">Close</button>
+    </div>
+    <iframe id="dockerModalFrame" class="flex-1 w-full bg-slate-950 border-0"
+            src="about:blank" referrerpolicy="no-referrer" title="Docker monitoring"></iframe>
+  </div>
+</div>
+
 </body>
 </html>
