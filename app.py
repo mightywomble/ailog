@@ -1,6 +1,6 @@
 import subprocess
 import io
-from flask import Flask, render_template, jsonify, request, Response, stream_with_context, has_app_context, current_app
+from flask import Blueprint, Flask, render_template, jsonify, request, Response, stream_with_context, has_app_context, current_app
 from flask_sock import Sock
 import paramiko
 import shlex
@@ -31,46 +31,77 @@ from monitoring.sshkeys import (
 )
 from core.sse_sessions import create_session as create_wizard_session_id
 
-# --- INITIALIZATION ---
-app = Flask(__name__, instance_path=None)
+# --- APPLICATION FACTORY ---
 
-# Security baseline: auth gate, security headers, upload cap, /healthz.
-from core.security import install_security  # noqa: E402
-install_security(app)
-
-sock = Sock(app)
-
-# Monitoring subsystem (modular bolt-on)
-from monitoring import monitoring_bp
-app.register_blueprint(monitoring_bp)
-
-# Docker monitoring subsystem (modular bolt-on)
-from dockermon import docker_bp
-app.register_blueprint(docker_bp)
-
-# Live system/container metrics behind the Monitoring button
-from metrics import metrics_bp
-app.register_blueprint(metrics_bp)
-
-# Server-wide correlated log reports (modular bolt-on)
-from serverreport import reports_bp
-app.register_blueprint(reports_bp)
-
-# Threshold alerting over the metrics the samplers collect (modular bolt-on)
-from alerting import alerts_bp
-app.register_blueprint(alerts_bp)
-
-# Groups, tags, inventory exports and DB backup/restore (modular bolt-on)
-from inventory import groups_bp as _inv_groups_bp, export_bp as _inv_export_bp, dbadmin_bp as _inv_dbadmin_bp
-app.register_blueprint(_inv_groups_bp)
-app.register_blueprint(_inv_export_bp)
-app.register_blueprint(_inv_dbadmin_bp)
-
-# --- DATABASE CONFIGURATION ---
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog.db')
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db.init_app(app)
+
+# All routes in this module live on one blueprint so ``create_app`` can build a
+# fully wired application (phase 3 of the audit: app factory).
+core_routes = Blueprint('core_ui', __name__)
+
+# ``sock`` is bound to the app by create_app(); the module-level decorators
+# below then attach the terminal websocket route to that instance.
+sock = Sock()
+
+
+def create_app(config: dict | None = None) -> Flask:
+    """Build a configured Flask app.
+
+    ``config`` overrides individual Flask settings (handy in tests: pass a
+    ``SQLALCHEMY_DATABASE_URI`` pointing at a temp file).  Everything that used
+    to happen at import time now happens here, once.
+    """
+    global sock
+
+    app = Flask(__name__, instance_path=None)
+
+    database_url = DATABASE_URL
+    if config:
+        database_url = config.get('SQLALCHEMY_DATABASE_URI', database_url)
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    if config:
+        app.config.update(config)
+
+    # Security baseline: auth gate, security headers, upload cap, /healthz.
+    from core.security import install_security
+    install_security(app)
+
+    sock.init_app(app)
+
+    # Route tables
+    app.register_blueprint(core_routes)
+
+    # Monitoring subsystem (modular bolt-on)
+    from monitoring import monitoring_bp
+    app.register_blueprint(monitoring_bp)
+
+    # Docker monitoring subsystem (modular bolt-on)
+    from dockermon import docker_bp
+    app.register_blueprint(docker_bp)
+
+    # Live system/container metrics behind the Monitoring button
+    from metrics import metrics_bp
+    app.register_blueprint(metrics_bp)
+
+    # Server-wide correlated log reports (modular bolt-on)
+    from serverreport import reports_bp
+    app.register_blueprint(reports_bp)
+
+    # Threshold alerting over the metrics the samplers collect (modular bolt-on)
+    from alerting import alerts_bp
+    app.register_blueprint(alerts_bp)
+
+    # Groups, tags, inventory exports and DB backup/restore (modular bolt-on)
+    from inventory import groups_bp as _inv_groups_bp, export_bp as _inv_export_bp, dbadmin_bp as _inv_dbadmin_bp
+    app.register_blueprint(_inv_groups_bp)
+    app.register_blueprint(_inv_export_bp)
+    app.register_blueprint(_inv_dbadmin_bp)
+
+    db.init_app(app)
+    return app
+
 
 # Create database tables on startup
 
@@ -136,16 +167,6 @@ def _ensure_sshkey_encryption_columns():
             db.session.commit()
     except Exception:
         db.session.rollback()
-
-with app.app_context():
-    db.create_all()
-    _ensure_suricata_endpoint_columns()
-    _ensure_sshkey_encryption_columns()
-    try:
-        from alerting import engine as _alerts_engine
-        _alerts_engine.seed_defaults()
-    except Exception:
-        pass
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -379,7 +400,7 @@ def get_ssh_prefix_args(user, ip, identity_file=None):
 
 # -----------------------------
 # --- SEARCH FUNCTIONALITY ---
-@app.route('/search', methods=['POST'])
+@core_routes.route('/search', methods=['POST'])
 def search_logs():
     """Search for keywords/phrases across logs"""
     data = request.get_json()
@@ -821,11 +842,11 @@ def send_discord_status(webhook_url, log_name, host_id, message, data_start=None
 
 
 # --- FLASK ROUTES ---
-@app.route('/')
+@core_routes.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/favicon.ico')
+@core_routes.route('/favicon.ico')
 def favicon():
     return '', 204  # No content response for favicon
 
@@ -838,12 +859,12 @@ SOURCES_STREAM_HEADERS = {
     'Connection': 'keep-alive',
 }
 
-@app.route('/sources/local')
+@core_routes.route('/sources/local')
 def get_local_sources():
     return Response(stream_with_context(get_log_sources_from_host_stream('local')),
                     mimetype='text/event-stream', headers=SOURCES_STREAM_HEADERS)
 
-@app.route('/sources/remote/<hostname>')
+@core_routes.route('/sources/remote/<hostname>')
 def get_remote_sources(hostname):
     return Response(stream_with_context(get_log_sources_from_host_stream(hostname)),
                     mimetype='text/event-stream', headers=SOURCES_STREAM_HEADERS)
@@ -946,14 +967,14 @@ def fetch_sources_from_host(host_id, host_name, failed_hosts):
 
     return host_sources
 
-@app.route('/sources/clear-cache', methods=['POST'])
+@core_routes.route('/sources/clear-cache', methods=['POST'])
 def clear_sources_cache():
     """Clear the host sources cache"""
     global _host_sources_cache
     _host_sources_cache.clear()
     return jsonify({'message': 'Cache cleared successfully'})
 
-@app.route('/sources/all', methods=['POST'])
+@core_routes.route('/sources/all', methods=['POST'])
 def get_all_host_sources():
     """Get a simplified list of log sources from all configured hosts for selection purposes"""
     current_time = time.time()
@@ -1021,7 +1042,7 @@ def get_all_host_sources():
     
     return jsonify(response_data)
 
-@app.route('/sources/table', methods=['POST'])
+@core_routes.route('/sources/table', methods=['POST'])
 def get_log_table_view():
     """Get logs organized in a table format: log names as rows, hosts as columns"""
     current_time = time.time()
@@ -1123,7 +1144,7 @@ def get_log_table_view():
     
     return jsonify(response_data)
 
-@app.route('/sources/table/stream')
+@core_routes.route('/sources/table/stream')
 def get_log_table_view_stream():
     """Get logs organized in a table format with streaming progress updates"""
     def generate_table_events():
@@ -1340,7 +1361,7 @@ def _safe_log_path(filename):
     return os.path.join(LOG_DIRECTORY, *parts)
 
 
-@app.route('/log/<path:filename>')
+@core_routes.route('/log/<path:filename>')
 def get_log_content(filename):
     hostname = request.args.get('host', 'local')
     try:
@@ -1355,7 +1376,7 @@ def get_log_content(filename):
     except Exception as e: 
         return jsonify({'error': f"Could not read log file '{filename}' on '{hostname}': {e}"}), 500
 
-@app.route('/journal/<path:unit>')
+@core_routes.route('/journal/<path:unit>')
 def get_journal_content(unit):
     hostname = request.args.get('host', 'local')
     try:
@@ -1365,7 +1386,7 @@ def get_journal_content(unit):
     except Exception as e: 
         return jsonify({'error': f"Could not read journal for unit '{unit}' on '{hostname}': {e}"}), 500
 
-@app.route('/api/docker/log/<path:container>')
+@core_routes.route('/api/docker/log/<path:container>')
 def get_docker_log_content(container):
     """Tail the last 500 log lines of a container.
 
@@ -1395,7 +1416,7 @@ def get_docker_log_content(container):
         return jsonify({'error': f"Could not read Docker logs for '{container}' on '{hostname}': {e}"}), 500
 
 # --- HOST MANAGEMENT ROUTES ---
-@app.route('/hosts', methods=['GET'])
+@core_routes.route('/hosts', methods=['GET'])
 def get_hosts():
     """Return combined hosts from config file and database."""
     print("[DEBUG] /hosts endpoint called")
@@ -1422,7 +1443,7 @@ def get_hosts():
     print(f"[DEBUG] Returning hosts data: {hosts_data}")
     return jsonify(hosts_data)
 
-@app.route('/hosts/add', methods=['POST'])
+@core_routes.route('/hosts/add', methods=['POST'])
 def add_host():
     data = request.get_json()
     host_id = str(uuid.uuid4())
@@ -1431,7 +1452,7 @@ def add_host():
     save_hosts(hosts)
     return jsonify({'message': 'Host added successfully.', 'host_id': host_id})
 
-@app.route('/hosts/update/<host_id>', methods=['PUT'])
+@core_routes.route('/hosts/update/<host_id>', methods=['PUT'])
 def update_host(host_id):
     data = request.get_json()
     hosts = load_hosts()
@@ -1441,7 +1462,7 @@ def update_host(host_id):
         return jsonify({'message': 'Host updated successfully.'})
     return jsonify({'error': 'Host not found.'}), 404
 
-@app.route('/hosts/delete/<host_id>', methods=['DELETE'])
+@core_routes.route('/hosts/delete/<host_id>', methods=['DELETE'])
 def delete_host(host_id):
     """Delete a host from either the config file or the database.
 
@@ -1480,7 +1501,7 @@ def delete_host(host_id):
 
     return jsonify({'error': 'Host not found.'}), 404
 
-@app.route('/hosts/test', methods=['POST'])
+@core_routes.route('/hosts/test', methods=['POST'])
 def test_host_connection():
     data = request.get_json()
     user, ip = data.get('user'), data.get('ip')
@@ -1501,7 +1522,7 @@ def test_host_connection():
         return jsonify({'success': False, 'error': str(e)})
 
 
-@app.route('/hosts/import/template', methods=['GET'])
+@core_routes.route('/hosts/import/template', methods=['GET'])
 def hosts_import_template():
     """Download a JSON template for bulk host import."""
     template = {
@@ -1568,7 +1589,7 @@ def _coerce_host_record(raw, idx: int):
     }
 
 
-@app.route('/hosts/import', methods=['POST'])
+@core_routes.route('/hosts/import', methods=['POST'])
 def import_hosts_from_file():
     """Import hosts into the database so they appear in the main UI (db-<id> hosts).
 
@@ -1650,7 +1671,7 @@ def import_hosts_from_file():
         return jsonify({'error': str(e)}), 500
 
 # --- OLLAMA INTEGRATION ROUTES ---
-@app.route('/ollama/test', methods=['POST'])
+@core_routes.route('/ollama/test', methods=['POST'])
 def test_ollama():
     """Test connection to Ollama instance"""
     data = request.get_json()
@@ -1681,7 +1702,7 @@ def test_ollama():
     except Exception as e:
         return jsonify({'success': False, 'error': f'Unexpected error: {str(e)}'}), 500
 
-@app.route('/ollama/models', methods=['POST'])
+@core_routes.route('/ollama/models', methods=['POST'])
 def get_ollama_models():
     """Fetch available models from Ollama instance - backend proxy to avoid CORS"""
     data = request.get_json()
@@ -1708,7 +1729,7 @@ def get_ollama_models():
     except Exception as e:
         return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
 
-@app.route('/ai/config', methods=['GET'])
+@core_routes.route('/ai/config', methods=['GET'])
 def get_ai_config():
     """Get current AI provider configuration"""
     config = load_config()
@@ -1727,7 +1748,7 @@ def get_ai_config():
     
     return jsonify(result)
 
-@app.route('/openai/config', methods=['POST', 'GET'])
+@core_routes.route('/openai/config', methods=['POST', 'GET'])
 def openai_config():
     """Save or retrieve OpenAI configuration"""
     if request.method == 'POST':
@@ -1751,7 +1772,7 @@ def openai_config():
 
 
 
-@app.route('/openai/test-saved', methods=['GET'])
+@core_routes.route('/openai/test-saved', methods=['GET'])
 def test_saved_openai_key():
     # Test the saved OpenAI API key stored in DB settings.
     try:
@@ -1777,7 +1798,7 @@ def test_saved_openai_key():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/ai/search-config', methods=['GET', 'POST'])
+@core_routes.route('/ai/search-config', methods=['GET', 'POST'])
 def ai_search_config():
     """Get/set the AI search prompt and alert keywords (DB-backed)."""
     if request.method == 'POST':
@@ -1792,7 +1813,7 @@ def ai_search_config():
         return jsonify({'search_prompt': get_ai_search_prompt(), 'alert_keywords': get_ai_alert_keywords(), 'message': 'AI search settings saved.'})
     return jsonify({'search_prompt': get_ai_search_prompt(), 'alert_keywords': get_ai_alert_keywords()})
 
-@app.route('/suricata/prompt', methods=['GET', 'POST'])
+@core_routes.route('/suricata/prompt', methods=['GET', 'POST'])
 def suricata_prompt_config():
     if request.method == 'GET':
         return jsonify({'prompt': get_suricata_prompt()})
@@ -1805,7 +1826,7 @@ def suricata_prompt_config():
     return jsonify({'prompt': get_suricata_prompt()})
 
 
-@app.route('/discord/config', methods=['GET', 'POST'])
+@core_routes.route('/discord/config', methods=['GET', 'POST'])
 def discord_config():
     # Save or retrieve Discord webhook configuration.
     if request.method == 'POST':
@@ -1824,7 +1845,7 @@ def discord_config():
     return jsonify({'configured': configured, 'webhook_url': webhook_url})
 
 
-@app.route('/discord/test', methods=['POST'])
+@core_routes.route('/discord/test', methods=['POST'])
 def discord_test():
     # Send a test message to Discord using provided webhook_url or saved config.
     try:
@@ -1844,7 +1865,7 @@ def discord_test():
         return jsonify({'success': False, 'error': f'Discord returned {r.status_code}: {r.text[:200]}'}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
-@app.route('/ollama/config', methods=['POST', 'GET'])
+@core_routes.route('/ollama/config', methods=['POST', 'GET'])
 def ollama_config():
     """Save or retrieve Ollama configuration"""
     if request.method == 'POST':
@@ -1905,7 +1926,7 @@ def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
     except Exception as e:
         raise Exception(f'Ollama analysis failed: {str(e)}')
 
-@app.route('/openrouter/config', methods=['POST', 'GET'])
+@core_routes.route('/openrouter/config', methods=['POST', 'GET'])
 def openrouter_config():
     """Save or retrieve OpenRouter configuration"""
     if request.method == 'POST':
@@ -1935,7 +1956,7 @@ def openrouter_config():
             'analysis_provider': config.get('analysis_provider', 'openai')
         })
 
-@app.route('/openrouter/models', methods=['POST'])
+@core_routes.route('/openrouter/models', methods=['POST'])
 def get_openrouter_models():
     """Fetch available models from OpenRouter API"""
     data = request.get_json()
@@ -1965,7 +1986,7 @@ def get_openrouter_models():
     except Exception as e:
         return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
 
-@app.route('/openrouter/test-saved', methods=['GET'])
+@core_routes.route('/openrouter/test-saved', methods=['GET'])
 def test_saved_openrouter_key():
     """Test the saved OpenRouter API key"""
     try:
@@ -2188,7 +2209,7 @@ def _notify_if_alerting(webhook_url, log_name, log_content, analysis):
         return False
 
 
-@app.route('/analyse', methods=['POST'])
+@core_routes.route('/analyse', methods=['POST'])
 def analyse_log():
     data = request.get_json(silent=True) or {}
     log_content = data.get('log_content')
@@ -2209,7 +2230,7 @@ def analyse_log():
         return jsonify({'error': f'An error occurred during AI Analysis: {str(e)}'}), 500
 
 
-@app.route('/analyse/stream', methods=['POST'])
+@core_routes.route('/analyse/stream', methods=['POST'])
 def analyse_log_stream():
     """Same analysis as /analyse but streams staged progress via SSE.
 
@@ -2315,7 +2336,7 @@ def analyse_log_stream():
                     headers=SOURCES_STREAM_HEADERS)
 
 
-@app.route('/suricata/analyse', methods=['POST'])
+@core_routes.route('/suricata/analyse', methods=['POST'])
 def suricata_analyse():
     data = request.get_json(silent=True) or {}
     log_content = data.get('log_content')
@@ -2725,7 +2746,7 @@ def _sync_scheduler_jobs_from_db():
         )
 
 
-@app.route('/api/schedules', methods=['GET', 'POST'])
+@core_routes.route('/api/schedules', methods=['GET', 'POST'])
 def api_schedules_collection():
     if request.method == 'GET':
         schedules = Schedule.query.order_by(Schedule.id.asc()).all()
@@ -2770,7 +2791,7 @@ def api_schedules_collection():
     return jsonify(_schedule_to_payload(s, include_children=True)), 201
 
 
-@app.route('/api/schedules/<int:schedule_id>', methods=['GET', 'PUT', 'DELETE'])
+@core_routes.route('/api/schedules/<int:schedule_id>', methods=['GET', 'PUT', 'DELETE'])
 def api_schedule_item(schedule_id: int):
     s = Schedule.query.get_or_404(schedule_id)
 
@@ -2826,7 +2847,7 @@ def api_schedule_item(schedule_id: int):
     return jsonify(_schedule_to_payload(s, include_children=True))
 
 
-@app.route('/api/schedules/<int:schedule_id>/run_now/stream', methods=['GET'])
+@core_routes.route('/api/schedules/<int:schedule_id>/run_now/stream', methods=['GET'])
 def api_schedule_run_now_stream(schedule_id: int):
     from queue import Queue, Empty
 
@@ -2863,7 +2884,7 @@ def api_schedule_run_now_stream(schedule_id: int):
     return Response(stream_with_context(generate()), mimetype='text/event-stream', headers=headers)
 
 
-@app.route('/api/schedules/<int:schedule_id>/sources/table/stream', methods=['GET'])
+@core_routes.route('/api/schedules/<int:schedule_id>/sources/table/stream', methods=['GET'])
 def api_schedule_sources_table_stream(schedule_id: int):
     """Like /sources/table/stream but limited to selected hosts (host-first)."""
     Schedule.query.get_or_404(schedule_id)
@@ -2958,7 +2979,7 @@ def api_schedule_sources_table_stream(schedule_id: int):
     return Response(stream_with_context(generate_table_events()), mimetype='text/event-stream')
 
 
-@app.route('/schedule/start', methods=['POST'])
+@core_routes.route('/schedule/start', methods=['POST'])
 def start_schedule():
     config = request.get_json()
     interval = config.get('interval')
@@ -2969,7 +2990,7 @@ def start_schedule():
     scheduler.add_job(perform_scheduled_analysis, 'interval', hours=interval, id='scheduled_analysis', replace_existing=True)
     return jsonify({'message': 'Scheduled analysis started.'})
 
-@app.route('/schedule/stop', methods=['POST'])
+@core_routes.route('/schedule/stop', methods=['POST'])
 def stop_schedule():
     if scheduler.get_job('scheduled_analysis'): scheduler.remove_job('scheduled_analysis')
     config = load_config()
@@ -2977,7 +2998,7 @@ def stop_schedule():
     save_config(config)
     return jsonify({'message': 'Scheduled analysis stopped.'})
 
-@app.route('/schedule/run_now', methods=['POST'])
+@core_routes.route('/schedule/run_now', methods=['POST'])
 def run_now():
     config = load_config()
     if not all([config.get('api_key'), config.get('webhook_url'), config.get('sources')]):
@@ -2987,7 +3008,7 @@ def run_now():
     thread.start()
     return jsonify({'message': 'Immediate analysis triggered. Alerts will be sent for any issues found.'})
 
-@app.route('/schedule/run_now/stream', methods=['GET'])
+@core_routes.route('/schedule/run_now/stream', methods=['GET'])
 def run_now_stream():
     """Run an immediate analysis and stream progress via Server-Sent Events."""
     from queue import Queue, Empty
@@ -3040,7 +3061,7 @@ def run_now_stream():
     headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
     return Response(stream_with_context(generate()), mimetype='text/event-stream', headers=headers)
 
-@app.route('/schedule/status', methods=['GET', 'POST'])
+@core_routes.route('/schedule/status', methods=['GET', 'POST'])
 def schedule_status():
     config = load_config()
     job = scheduler.get_job('scheduled_analysis')
@@ -3746,7 +3767,7 @@ def startup_suricata_ingest_jobs():
     scheduler.add_job(_job, trigger='interval', seconds=30, id='suricata_ingest', replace_existing=True)
 
 
-@app.route('/suricata/config', methods=['GET', 'POST'])
+@core_routes.route('/suricata/config', methods=['GET', 'POST'])
 def suricata_config():
     if request.method == 'GET':
         sensors = SuricataSensor.query.order_by(SuricataSensor.updated_at.desc(), SuricataSensor.id.desc()).all()
@@ -3792,7 +3813,7 @@ def suricata_config():
     return jsonify(sensor.to_dict())
 
 
-@app.route('/suricata/test', methods=['POST'])
+@core_routes.route('/suricata/test', methods=['POST'])
 def suricata_test():
     data = request.get_json(force=True, silent=True) or {}
     host = (data.get('host') or '').strip()
@@ -3831,7 +3852,7 @@ def suricata_test():
     })
 
 
-@app.route('/suricata/ingest/run_once', methods=['POST'])
+@core_routes.route('/suricata/ingest/run_once', methods=['POST'])
 def suricata_ingest_run_once():
     data = request.get_json(force=True, silent=True) or {}
     sensor_id = data.get('sensor_id')
@@ -3849,7 +3870,7 @@ def suricata_ingest_run_once():
             return jsonify({'results': suricata_ingest_all_enabled()})
 
 
-@app.route('/suricata/stats', methods=['GET'])
+@core_routes.route('/suricata/stats', methods=['GET'])
 def suricata_stats():
     sensor_id = request.args.get('sensor_id', type=int)
     range_key = (request.args.get('range') or '24h').strip()
@@ -3931,7 +3952,7 @@ def suricata_stats():
 
 # --- NEW WIZARD & SSH KEY MANAGEMENT ENDPOINTS ---
 
-@app.route('/suricata/endpoints', methods=['GET'])
+@core_routes.route('/suricata/endpoints', methods=['GET'])
 def suricata_endpoints():
     """Return a simple endpoint summary by parsing recent fast.log + eve.json (alerts only)."""
     sensor_id = request.args.get('sensor_id', type=int)
@@ -4013,7 +4034,7 @@ def suricata_endpoints():
 
 
 
-@app.route('/suricata/endpoint_stats', methods=['GET'])
+@core_routes.route('/suricata/endpoint_stats', methods=['GET'])
 def suricata_endpoint_stats():
     """DB-backed endpoint/port/source aggregates for the Endpoint Stats dashboard."""
     sensor_id = request.args.get('sensor_id', type=int)
@@ -4127,7 +4148,7 @@ def suricata_endpoint_stats():
             'endpoint_port_matrix': matrix,
             'top_sources': top_sources
         })
-@app.route('/suricata/raw', methods=['POST'])
+@core_routes.route('/suricata/raw', methods=['POST'])
 def suricata_raw():
     """Return raw tail output from a Suricata log file (optionally filtered by query)."""
     data = request.get_json(force=True, silent=True) or {}
@@ -4163,7 +4184,7 @@ def suricata_raw():
         return jsonify({'sensor': sensor.to_dict(), 'filename': filename, 'query': query, 'content': out})
 
 
-@app.route('/ssh-keys', methods=['GET'])
+@core_routes.route('/ssh-keys', methods=['GET'])
 def get_ssh_keys():
     """Get list of stored SSH keys with verification status"""
     try:
@@ -4188,7 +4209,7 @@ def get_ssh_keys():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/settings/sshkey-encryption/status', methods=['GET'])
+@core_routes.route('/settings/sshkey-encryption/status', methods=['GET'])
 def sshkey_encryption_status():
     """Return whether SSH key encryption is configured."""
     return jsonify({
@@ -4198,7 +4219,7 @@ def sshkey_encryption_status():
         'env_var': 'AILOG_SSHKEY_MASTER_KEY'
     })
 
-@app.route('/settings/sshkey-encryption/config', methods=['GET', 'POST'])
+@core_routes.route('/settings/sshkey-encryption/config', methods=['GET', 'POST'])
 def sshkey_encryption_config():
     """Get/set SSH key encryption toggle."""
     if request.method == 'POST':
@@ -4214,7 +4235,7 @@ def sshkey_encryption_config():
         'env_var': 'AILOG_SSHKEY_MASTER_KEY'
     })
 
-@app.route('/settings/sshkey-encryption/generate', methods=['POST'])
+@core_routes.route('/settings/sshkey-encryption/generate', methods=['POST'])
 def sshkey_encryption_generate():
     """Generate a new master key (not persisted)."""
     try:
@@ -4223,7 +4244,7 @@ def sshkey_encryption_generate():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/settings/sshkey-encryption/validate', methods=['POST'])
+@core_routes.route('/settings/sshkey-encryption/validate', methods=['POST'])
 def sshkey_encryption_validate():
     """Validate that a provided master key (or env var) can encrypt/decrypt."""
     data = request.get_json(silent=True) or {}
@@ -4238,7 +4259,7 @@ def sshkey_encryption_validate():
     except Exception as e:
         return jsonify({'valid': False, 'error': str(e)}), 400
 
-@app.route('/ssh-keys/upload', methods=['POST'])
+@core_routes.route('/ssh-keys/upload', methods=['POST'])
 def upload_ssh_key():
     """Upload SSH key from file"""
     try:
@@ -4283,7 +4304,7 @@ def upload_ssh_key():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/ssh-keys/save', methods=['POST'])
+@core_routes.route('/ssh-keys/save', methods=['POST'])
 def save_ssh_key():
     """Save SSH key from pasted content"""
     try:
@@ -4347,7 +4368,7 @@ def save_ssh_key():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/ssh-keys/<int:key_id>', methods=['GET'])
+@core_routes.route('/ssh-keys/<int:key_id>', methods=['GET'])
 def get_ssh_key(key_id):
     """Get a specific SSH key metadata"""
     try:
@@ -4359,7 +4380,7 @@ def get_ssh_key(key_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/ssh-keys/<int:key_id>', methods=['DELETE'])
+@core_routes.route('/ssh-keys/<int:key_id>', methods=['DELETE'])
 def delete_ssh_key(key_id):
     """Delete an SSH key"""
     try:
@@ -4388,7 +4409,7 @@ def delete_ssh_key(key_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/ssh-keys/<int:key_id>/test-decrypt', methods=['GET'])
+@core_routes.route('/ssh-keys/<int:key_id>/test-decrypt', methods=['GET'])
 def test_decrypt_ssh_key(key_id):
     """Test decryption of an SSH key (for debugging)"""
     try:
@@ -4420,7 +4441,7 @@ def test_decrypt_ssh_key(key_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/wizard/validate-hosts', methods=['POST'])
+@core_routes.route('/wizard/validate-hosts', methods=['POST'])
 def validate_hosts():
     """Validate SSH connectivity for multiple hosts"""
     try:
@@ -4475,7 +4496,7 @@ def validate_hosts():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/wizard/collect-info', methods=['POST'])
+@core_routes.route('/wizard/collect-info', methods=['POST'])
 def collect_host_info():
     """Collect system information from validated hosts"""
     try:
@@ -4534,7 +4555,7 @@ def collect_host_info():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/wizard/add-devices', methods=['POST'])
+@core_routes.route('/wizard/add-devices', methods=['POST'])
 def add_devices_from_wizard():
     """Add multiple devices from wizard with collected info"""
     try:
@@ -4630,7 +4651,7 @@ def add_devices_from_wizard():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/hosts/db/<int:host_id>/info', methods=['GET'])
+@core_routes.route('/hosts/db/<int:host_id>/info', methods=['GET'])
 def get_host_info(host_id):
     """Return detailed host info including system info and services."""
     try:
@@ -4659,7 +4680,7 @@ def get_host_info(host_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/hosts/db/<int:host_id>/rescan', methods=['POST'])
+@core_routes.route('/hosts/db/<int:host_id>/rescan', methods=['POST'])
 def rescan_host(host_id):
     '''Re-scan a DB host to refresh system info (including wt0 netbird IP) and services.'''
     try:
@@ -4749,7 +4770,7 @@ def rescan_host(host_id):
 
 
 
-@app.route('/hosts/db/rescan-all', methods=['POST'])
+@core_routes.route('/hosts/db/rescan-all', methods=['POST'])
 def rescan_all_hosts():
     '''Re-scan all DB hosts to refresh system info (including wt0 netbird IP) and services.'''
     try:
@@ -4849,7 +4870,7 @@ def rescan_all_hosts():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
-@app.route('/hosts/db', methods=['POST'])
+@core_routes.route('/hosts/db', methods=['POST'])
 def get_hosts_db():
     """Get all hosts from database"""
     try:
@@ -4858,7 +4879,7 @@ def get_hosts_db():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/hosts/db/<int:host_id>', methods=['POST'])
+@core_routes.route('/hosts/db/<int:host_id>', methods=['POST'])
 def get_host_db(host_id):
     """Get specific host from database with all details"""
     try:
@@ -4873,12 +4894,12 @@ def get_host_db(host_id):
 # Group / tag / export / DB-admin routes now live in the inventory package.
 
 
-@app.route('/wizard/session/create', methods=['POST'])
+@core_routes.route('/wizard/session/create', methods=['POST'])
 def create_wizard_session():
     """Create a new wizard session ID for streaming"""
     return jsonify({'session_id': create_wizard_session_id()})
 
-@app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['POST'])
+@core_routes.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['POST'])
 def validate_hosts_stream(session_id):
     """Stream SSH validation progress via SSE"""
     # Read JSON body once so generator doesn't depend on request context
@@ -4950,7 +4971,7 @@ def validate_hosts_stream(session_id):
         'X-Accel-Buffering': 'no'
     })
 
-@app.route('/wizard/session/<session_id>/collect-info-stream', methods=['POST'])
+@core_routes.route('/wizard/session/<session_id>/collect-info-stream', methods=['POST'])
 def collect_info_stream(session_id):
     """Stream system information collection progress via SSE"""
     # Read JSON body once so generator doesn't depend on request context
@@ -5052,7 +5073,7 @@ def collect_info_stream(session_id):
 
 
 # Debug endpoint to test SSE
-@app.route('/wizard/test-sse')
+@core_routes.route('/wizard/test-sse')
 def test_sse():
     """Simple test SSE endpoint"""
     def generate():
@@ -5065,7 +5086,7 @@ def test_sse():
         'X-Accel-Buffering': 'no'
     })
 
-@app.route('/ssh-keys/verify-integrity', methods=['GET'])
+@core_routes.route('/ssh-keys/verify-integrity', methods=['GET'])
 def verify_ssh_keys_integrity():
     """Verify integrity of all SSH keys by checking their checksums.
     Returns status for each key: verified, corrupted, or unknown (no checksum).
@@ -5114,27 +5135,20 @@ def verify_ssh_keys_integrity():
         return jsonify({'error': str(e)}), 500
 
 
-if __name__ == '__main__':
-    # Initialize application
-    initialize_app()
-    
-    # Start scheduler
-    scheduler.start()
-    startup_scheduler()
-    atexit.register(lambda: scheduler.shutdown())
+app = create_app()
 
-    # Docker history sampler: keeps a rolling in-memory window per Docker host
-    # so the /docker/<host_key> charts survive a page reload.
+with app.app_context():
+    db.create_all()
+    _ensure_suricata_endpoint_columns()
+    _ensure_sshkey_encryption_columns()
     try:
-        from dockermon import history as docker_history
-        docker_history.start_sampler(app)
-        atexit.register(docker_history.stop_sampler)
+        from alerting import engine as _alerts_engine
+        _alerts_engine.seed_defaults()
     except Exception:
-        app.logger.exception('could not start the docker history sampler')
-    
-    # Start Flask app (loopback by default; set AILOG_BIND=0.0.0.0 to expose)
-    app.run(
-        host=os.getenv('AILOG_BIND', '127.0.0.1'),
-        port=int(os.getenv('AILOG_PORT', '5001')),
-        debug=False,
-    )
+        pass
+
+
+if __name__ == '__main__':
+    import sys
+    from core.bootstrap import main
+    main(app, sys.modules[__name__])
