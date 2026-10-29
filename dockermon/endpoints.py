@@ -9,7 +9,6 @@ Two transports are supported:
 """
 import json
 import os
-import ssl
 import socket
 from typing import Any, Dict, Optional
 

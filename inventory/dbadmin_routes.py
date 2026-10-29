@@ -17,7 +17,7 @@ import tempfile
 from flask import (Blueprint, Response, current_app, jsonify, request)
 from sqlalchemy import text as sql_text
 
-from database import db, AppSetting, Group, Host, Tag
+from database import db, AppSetting
 
 bp = Blueprint('inventory_dbadmin', __name__)
 
@@ -129,12 +129,6 @@ def restore_database():
 
 # --- SERVER-SENT EVENTS (SSE) STREAMING ENDPOINTS ---
 
-import uuid as uuid_lib
-from threading import Lock
-
-# Global dictionary to store event queues for each wizard session
-wizard_sessions = {}
-sessions_lock = Lock()
 
 
 

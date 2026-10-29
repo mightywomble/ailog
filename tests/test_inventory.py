@@ -5,7 +5,6 @@ These routes used to live in app.py and were extracted verbatim into the
 honest.
 """
 import json
-import os
 
 
 def _host_id(host_key):

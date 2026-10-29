@@ -10,7 +10,6 @@ import openai
 import requests
 import json
 import re
-import sqlite3
 import atexit
 from apscheduler.schedulers.background import BackgroundScheduler
 import threading
@@ -18,15 +17,19 @@ import queue
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
-from functools import lru_cache
-import ast
 import tempfile
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
-import shutil
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, Group, Tag, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket, Monitor, MonitorCheck, HostDockerInventory, DockerEndpoint
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services, execute_remote_command
-from utils.sshkey_crypto import encrypt_str, decrypt_str, is_configured as sshkey_crypto_configured, generate_master_key, SSHKeyCryptoError, compute_key_checksum, verify_key_checksum, normalize_ssh_key_text
+from utils.sshkey_crypto import encrypt_str, decrypt_str, is_configured as sshkey_crypto_configured, generate_master_key, compute_key_checksum, verify_key_checksum
+from monitoring.sshkeys import (
+    materialize_ssh_key_path as _materialize_ssh_key_path_impl,
+    evict_key_cache as _evict_ssh_key_cache,
+    write_temp_ssh_key_file as _write_temp_ssh_key_file,
+    key_plaintext_from_model as _sshkey_plaintext_from_model,
+)
+from core.sse_sessions import create_session as create_wizard_session_id
 
 # --- INITIALIZATION ---
 app = Flask(__name__, instance_path=None)
@@ -466,7 +469,7 @@ def search_host_logs(host_id, host_name, query, search_scope, case_sensitive):
                                 'content': content.strip(),
                                 'timestamp': None  # Could extract from log line if needed
                             })
-            except Exception as e:
+            except Exception:
                 # Skip files we can't read
                 continue
         
@@ -501,10 +504,10 @@ def search_host_logs(host_id, host_name, query, search_scope, case_sensitive):
                                         'content': content.strip(),
                                         'timestamp': None
                                     })
-                    except Exception as e:
+                    except Exception:
                         continue
                         
-            except Exception as e:
+            except Exception:
                 # Skip journal search if it fails
                 pass
                 
@@ -537,8 +540,6 @@ def execute_command(hostname, command_str, timeout=10):
             if Host is not None:
                 try:
                     host_id = int(hostname.split('-', 1)[1])
-                    from flask import current_app
-                    from app import db
                     # We assume we're in an app/request context when this is called via Flask routes
                     host_obj = Host.query.get(host_id)
                     if host_obj:
@@ -1293,7 +1294,7 @@ def fetch_sources_from_host_detailed(host_id, host_name, progress_callback, base
                             'modified_epoch': mod_time_epoch,
                             'modified_formatted': format_relative_time(mod_time_epoch)
                         })
-                except Exception as e:
+                except Exception:
                     continue
 
         # Get journald services with timeout
@@ -1343,21 +1344,6 @@ def _safe_log_path(filename):
 @app.route('/log/<path:filename>')
 def get_log_content(filename):
     hostname = request.args.get('host', 'local')
-    
-    # Debug: show which SSH key is being used for DB hosts
-    if hostname != 'local' and hostname.startswith('db-'):
-        try:
-            host_id = int(hostname.split('-', 1)[1])
-            host_obj = Host.query.get(host_id)
-            if host_obj:
-                ssh_key_id = host_obj.ssh_key_id
-                identity_path = _materialize_ssh_key_path(ssh_key_id)
-                print(f"[DEBUG /log] Using SSH key_id={ssh_key_id} for DB host {hostname}")
-        except Exception as e:
-            print(f"[DEBUG /log] Error resolving DB host SSH key: {e}")
-    else:
-        print(f"[DEBUG /log] Using local/config host: {hostname}")
-    
     try:
         safe_path = _safe_log_path(filename)
     except ValueError as e:
@@ -1703,19 +1689,10 @@ def get_ollama_models():
     ollama_url = data.get('ollama_url', '').strip()
     
     if not ollama_url:
-        # Fall back to config if not provided
+        # Fall back to the configured Ollama URL when the caller omits it
         config = load_config()
-    def _emit(payload):
-        try:
-            if emit:
-                emit(payload)
-            else:
-                # default: log to server
-                print(payload.get('message') or payload)
-        except Exception:
-            pass
-        ollama_url = config.get('ollama_url', '').strip()
-    
+        ollama_url = (config.get('ollama_url') or '').strip()
+
     if not ollama_url:
         return jsonify({'error': 'Ollama URL not provided.'}), 400
     
@@ -1901,7 +1878,7 @@ def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
     
     truncated_content = log_content
     if len(log_content) > MAX_CHAR_COUNT:
-        truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+        truncated_content = "[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
     
     prompt = f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"
     
@@ -2020,7 +1997,7 @@ def analyse_with_openrouter(log_content, log_name, api_key, model):
     """Analyze log using OpenRouter (OpenAI-compatible API)"""
     truncated_content = log_content
     if len(log_content) > MAX_CHAR_COUNT:
-        truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+        truncated_content = "[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
     
     try:
         response = requests.post(
@@ -2183,7 +2160,7 @@ def _run_analysis(provider, data, log_content, log_name, model=None):
 
     truncated_content = log_content
     if len(log_content) > MAX_CHAR_COUNT:
-        truncated_content = f"[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+        truncated_content = "[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
 
     client = openai.OpenAI(api_key=api_key)
     response = client.chat.completions.create(
@@ -2373,7 +2350,7 @@ def suricata_analyse():
 
             truncated_content = log_content
             if len(log_content) > MAX_CHAR_COUNT:
-                truncated_content = f"[--- Data truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
+                truncated_content = "[--- Data truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
 
             client = openai.OpenAI(api_key=api_key)
             response = client.chat.completions.create(
@@ -3123,7 +3100,6 @@ def startup_scheduler():
     with app.app_context():
         # Monitoring runner job (executes due monitors)
         try:
-            from monitoring.scheduler import run_due_monitors
             scheduler.add_job(
                 _monitoring_runner_job,
                 trigger='interval',
@@ -3194,7 +3170,7 @@ def initialize_app():
     else:
         print("Scheduler is not configured to run")
     
-    print(f"Starting web server on http://0.0.0.0:5001")
+    print("Starting web server on http://0.0.0.0:5001")
     print("============================")
 
 
@@ -3204,121 +3180,14 @@ SURICATA_ALLOWED_FILES = ['eve.json', 'fast.log', 'stats.log', 'suricata.log']
 # Cache SSH key temp files (key_id -> path)
 _suricata_key_cache = {}
 
-# Cache SSH key temp files (ssh_key_id -> path) for general remote operations
-_ssh_key_file_cache = {}
-
-def _cleanup_ssh_key_file_cache():
-    for p in list(_ssh_key_file_cache.values()):
-        try:
-            if p and os.path.exists(p):
-                os.unlink(p)
-        except Exception:
-            pass
-
-atexit.register(_cleanup_ssh_key_file_cache)
-
-
-def _write_temp_ssh_key_file(plaintext: str) -> str:
-    """Write SSH key plaintext to a temp file in a way that avoids newline/encoding issues."""
-    normalized = normalize_ssh_key_text(plaintext or '')
-    if normalized and not normalized.endswith("\n"):
-        normalized = normalized + "\n"
-    tf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
-    tf.write(normalized.encode('utf-8'))
-    tf.flush(); tf.close()
-    os.chmod(tf.name, 0o600)
-    return tf.name
-
-
-
-
-def _sshkey_plaintext_from_model(key: SSHKey) -> str:
-    """Return decrypted plaintext for a stored SSHKey row.
-
-    Historical note: some rows ended up being encrypted multiple times due to earlier
-    bugs/migrations. We attempt to decrypt repeatedly until the result resembles an
-    SSH private key.
-    """
-    if not key:
-        return ''
-
-    content = key.key_content or ''
-    if not getattr(key, 'is_encrypted', False):
-        return content
-
-    # Decrypt up to N layers. Stop once it looks like a private key.
-    max_layers = 6
-    for layer in range(1, max_layers + 1):
-        try:
-            content = decrypt_str(content)
-        except Exception as e:
-            print(f"[DEBUG] SSH key decrypt failed at layer {layer}: {e}", flush=True)
-            break
-
-        # If we got something that looks like a private key, stop.
-        if 'BEGIN' in content and 'PRIVATE KEY' in content and 'END' in content:
-            break
-
-        # If it still looks like an encoded blob (single-line token), keep going.
-        # (Fernet tokens / our stored format often look like long base64-url strings.)
-        if '\n' not in content and len(content) > 200 and re.fullmatch(r'[A-Za-z0-9_\-]+=*', content.strip()):
-            continue
-
-        # Otherwise: stop; we don't want to accidentally mangle non-token plaintext.
-        break
-
-    return content or ''
-
 
 def _materialize_ssh_key_path(ssh_key_id: int | None) -> str | None:
-    """Return temp file path containing decrypted key; cached per key id."""
-    if not ssh_key_id:
-        return None
-    ssh_key_id = int(ssh_key_id)
-    if ssh_key_id in _ssh_key_file_cache and os.path.exists(_ssh_key_file_cache[ssh_key_id]):
-        return _ssh_key_file_cache[ssh_key_id]
-    key = SSHKey.query.get(ssh_key_id)
-    if not key:
-        print(f"[DEBUG] SSH key {ssh_key_id} not found in database")
-        return None
-    print(f"[DEBUG] SSH key {ssh_key_id} found: is_encrypted={getattr(key, 'is_encrypted', 'MISSING')}")
-    content = _sshkey_plaintext_from_model(key)
-    print(f"[DEBUG] Key content length after decryption: {len(content) if content else 0} bytes")
-    if not content:
-        print(f"[DEBUG] SSH key {ssh_key_id} decrypted to empty content")
-        return None
-    if not content.lstrip().startswith('BEGIN'):
-        print(f"[DEBUG] WARNING: SSH key {ssh_key_id} doesn't start with a PEM BEGIN header after decryption!")
-        print(f"[DEBUG] First 100 chars: {content[:100]!r}")
-    if not content.strip().endswith('END'):
-        print(f"[DEBUG] WARNING: SSH key {ssh_key_id} doesn't end with 'END' after decryption!")
-        print(f"[DEBUG] Last 100 chars: {content[-100:]!r}")
-    tf_name = _write_temp_ssh_key_file(content)
-    # Verify file was written correctly
-    with open(tf_name, 'r', encoding='utf-8') as f:
-        written_content = f.read()
-    if written_content != content:
-        print(f"[DEBUG] WARNING: Written key content doesn't match original!")
-        print(f"[DEBUG] Original: {len(content)} bytes, Written: {len(written_content)} bytes")
-    print(f"[DEBUG] Materialized SSH key {ssh_key_id} to {tf_name} ({len(content)} bytes)")
-    
-    # Verify we can read it back
-    try:
-        with open(tf_name, 'r') as verify_f:
-            verify_content = verify_f.read()
-        if verify_content == content:
-            print(f"[DEBUG] ✓ Key file verified: content matches")
-        else:
-            print(f"[DEBUG] ✗ Key file mismatch: {len(verify_content)} bytes read vs {len(content)} bytes written")
-        
-        # Check permissions
-        stat_info = os.stat(tf_name)
-        print(f"[DEBUG] Key file permissions: {oct(stat_info.st_mode)}")
-    except Exception as e:
-        print(f"[DEBUG] Error verifying key file: {e}")
-    
-    _ssh_key_file_cache[ssh_key_id] = tf_name
-    return tf_name
+    """Return a temp file containing the decrypted key (single implementation).
+
+    The body lives in ``monitoring/sshkeys.py``; this wrapper keeps the historic
+    private name used throughout app.py.
+    """
+    return _materialize_ssh_key_path_impl(ssh_key_id)
 
 
 def _get_default_ssh_key_id() -> int | None:
@@ -3528,9 +3397,9 @@ def _suricata_get_ssh_key_path(ssh_key_id: int | None) -> str | None:
     tf.write(_sshkey_plaintext_from_model(key) or '')
     tf.flush()
     tf.close()
-    os.chmod(tf_name, 0o600)
-    _suricata_key_cache[ssh_key_id] = tf_name
-    return tf_name
+    os.chmod(tf.name, 0o600)
+    _suricata_key_cache[ssh_key_id] = tf.name
+    return tf.name
 
 
 def _suricata_bucket_ts(epoch_seconds: int, bucket_size: int) -> int:
@@ -4498,13 +4367,8 @@ def delete_ssh_key(key_id):
         db.session.delete(key)
         db.session.commit()
         
-        # Clean up cached decrypted key file
-        if key_id in _ssh_key_file_cache:
-            try:
-                os.unlink(_ssh_key_file_cache[key_id])
-            except:
-                pass
-            del _ssh_key_file_cache[key_id]
+        # Clean up the cached decrypted key file (owned by monitoring.sshkeys)
+        _evict_ssh_key_cache(key_id)
         
         return jsonify({'message': f'Key {key_id} deleted'})
     except Exception as e:
@@ -4735,7 +4599,7 @@ def add_devices_from_wizard():
                     db.session.add(host_log)
                     
                     added_hosts.append({'id': host.id, 'hostname': host.hostname, 'ip': host.ip_address})
-            except IntegrityError as e:
+            except IntegrityError:
                 skipped_hosts.append({'ip': ip, 'reason': 'integrity error'})
                 continue
             except Exception as e:
@@ -4758,7 +4622,7 @@ def add_devices_from_wizard():
 def get_host_info(host_id):
     """Return detailed host info including system info and services."""
     try:
-        from database import Host, SystemInfo, Service
+        from database import Host, Service
         host = Host.query.get(host_id)
         if not host:
             return jsonify({'error': 'Host not found'}), 404
@@ -5000,13 +4864,7 @@ def get_host_db(host_id):
 @app.route('/wizard/session/create', methods=['POST'])
 def create_wizard_session():
     """Create a new wizard session ID for streaming"""
-    session_id = str(uuid_lib.uuid4())
-    with sessions_lock:
-        wizard_sessions[session_id] = {
-            'created_at': datetime.datetime.utcnow(),
-            'status': 'active'
-        }
-    return jsonify({'session_id': session_id})
+    return jsonify({'session_id': create_wizard_session_id()})
 
 @app.route('/wizard/session/<session_id>/validate-hosts-stream', methods=['POST'])
 def validate_hosts_stream(session_id):

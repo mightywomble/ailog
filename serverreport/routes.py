@@ -16,8 +16,7 @@ import queue
 import threading
 import time
 
-from flask import (Blueprint, Response, current_app, jsonify, redirect,
-                   render_template, request, stream_with_context, url_for)
+from flask import (Blueprint, Response, current_app, jsonify, render_template, request, stream_with_context, url_for)
 
 from database import LogReport, db
 from . import diff as rdiff

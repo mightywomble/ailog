@@ -4,8 +4,7 @@ Helper functions for device onboarding wizard
 
 import subprocess
 import json
-from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 def test_ssh_connection(user: str, ip: str, ssh_key_path: str = None, timeout: int = 5) -> Dict:
     """

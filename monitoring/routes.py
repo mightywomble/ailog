@@ -28,7 +28,7 @@ def _http_probe_ports(host_ip: str, ports: List[int]) -> Dict[int, Dict[str, Any
         for scheme in ('http', 'https'):
             url = f'{scheme}://{host_ip}:{port}/'
             try:
-                r = requests.get(url, timeout=2, allow_redirects=True, verify=False)
+                requests.get(url, timeout=2, allow_redirects=True, verify=False)
                 # If we got any HTTP status, it's HTTP.
                 results[port] = {'is_http': True, 'url': f'{scheme}://{host_ip}:{port}'}
                 break

@@ -9,15 +9,10 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
-import shutil
-import sqlite3
-import tempfile
 
-from flask import (Blueprint, Response, current_app, jsonify, request)
-from sqlalchemy import text as sql_text
+from flask import (Blueprint, Response, jsonify)
 
-from database import db, AppSetting, Group, Host, Tag
+from database import Host
 
 bp = Blueprint('inventory_export', __name__)
 

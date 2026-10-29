@@ -1,7 +1,6 @@
 """Report-to-report diffing."""
 import json
 
-import pytest
 
 from serverreport import diff
 

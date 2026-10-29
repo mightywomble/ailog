@@ -8,7 +8,6 @@ to steer the report.
 All three providers are supported through ``app._analysis_config`` so credentials
 and model resolution stay in one place.
 """
-import json
 import re
 
 import requests

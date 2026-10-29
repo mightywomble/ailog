@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff
+      - name: Lint (bugs only)
+        run: ruff check --select F,E9 .
+      - name: Tests
+        env:
+          DATABASE_URL: sqlite:////tmp/ci.db
+        run: pytest -q --cov=. --cov-report=term
+      - name: Coverage floor
+        env:
+          DATABASE_URL: sqlite:////tmp/ci.db
+        run: pytest -q --cov=. --cov-fail-under=45 --no-header
+
+  frontend-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: node --check every module
+        run: |
+          status=0
+          for f in $(find static/js -name '*.js'); do
+            node --check "$f" || status=1
+          done
+          exit $status

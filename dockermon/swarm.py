@@ -23,7 +23,6 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
-from . import endpoints as ep
 from . import history as hist
 from . import sshstats
 from .parse import aggregate_apps, downsample, finalize_apps
