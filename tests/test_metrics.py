@@ -46,11 +46,12 @@ DF = """Filesystem     1024-blocks      Used Available Capacity Mounted on
 
 def sample_output(stat=PROC_STAT, mem=PROC_MEMINFO, net=PROC_NETDEV, df=DF,
                   load='0.50 0.40 0.30 2/100 1234', up='86400.00 700000.00',
-                  host='web-01', docker='yes'):
+                  host='web-01', docker='yes',
+                  dstate='running\nrunning\nexited\nAILOG_DOCKER_OK'):
     parts = []
     for name, value in (('stat', stat), ('mem', mem), ('net', net), ('df', df),
                         ('load', load), ('up', up), ('host', host),
-                        ('docker', docker)):
+                        ('docker', docker), ('dstate', dstate)):
         parts.append(f'{collect.MARK}:{name}\n{value.strip()}')
     return '\n'.join(parts)
 
@@ -80,6 +81,15 @@ def test_parse_system_reads_counters_and_meta():
     assert raw['uptime'] == 86400.0
     assert raw['hostname'] == 'web-01'
     assert raw['docker_installed'] is True
+    assert raw['docker_reachable'] is True
+    assert raw['docker_running'] == 2 and raw['docker_total'] == 3
+
+
+def test_parse_system_reports_docker_daemon_failures():
+    raw = collect.parse_system(sample_output(dstate=''))
+    assert raw['docker_installed'] is True
+    assert raw['docker_reachable'] is False
+    assert raw['docker_total'] == 0
 
 
 def test_parse_system_tolerates_missing_sections():
@@ -236,6 +246,7 @@ def test_api_servers_reports_stats_and_docker_block(flask_app, monkeypatch):
     assert set(server['docker']) == {'installed', 'reachable', 'containers_running',
                                      'containers_total', 'engine_version'}
     assert server['docker']['installed'] is True
+    assert server['docker']['reachable'] is False   # fake snapshot has no counts
 
 
 def test_api_servers_is_cached_between_polls(flask_app, monkeypatch):

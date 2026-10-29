@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 from dockermon.parse import parse_df_root, parse_meminfo, parse_netdev, parse_proc_stat
 
 MARK = '===AILOG_METRICS==='
-SECTIONS = ('stat', 'mem', 'net', 'df', 'load', 'up', 'host', 'docker')
+SECTIONS = ('stat', 'mem', 'net', 'df', 'load', 'up', 'host', 'docker', 'dstate')
 
 # host_key -> (wall clock, rx, tx, cpu_total, cpu_idle)
 _rate_lock = threading.Lock()
@@ -57,8 +57,14 @@ def build_command() -> str:
             cmd = 'cat /proc/uptime'
         elif name == 'host':
             cmd = 'hostname'
-        else:
+        elif name == 'docker':
             cmd = 'command -v docker >/dev/null 2>&1 && echo yes || echo no'
+        else:
+            # Container counts (and a definitive "the engine answered") from
+            # the same round trip: no separate Docker API call, no stale DB row.
+            cmd = ("{ (sudo -n docker ps -a --format '{{.State}}' 2>/dev/null "
+                   "|| docker ps -a --format '{{.State}}' 2>/dev/null) "
+                   "&& echo AILOG_DOCKER_OK; } 2>/dev/null")
         lines.append(f"echo '{MARK}:{name}'; {cmd} 2>/dev/null")
     return '; '.join(lines)
 
@@ -125,6 +131,10 @@ def parse_system(text: str) -> Dict[str, Any]:
     swap_total = _meminfo_value(blocks.get('mem', ''), 'SwapTotal')
     swap_free = _meminfo_value(blocks.get('mem', ''), 'SwapFree')
 
+    states = [ln.strip().lower() for ln in (blocks.get('dstate', '') or '').splitlines()]
+    docker_ok = 'ailog_docker_ok' in states
+    states = [st for st in states if st and st != 'ailog_docker_ok']
+
     return {
         'cpu_total': proc.get('total') or 0,
         'cpu_idle': proc.get('idle') or 0,
@@ -143,6 +153,9 @@ def parse_system(text: str) -> Dict[str, Any]:
         'uptime': uptime,
         'hostname': (blocks.get('host', '') or '').strip().splitlines()[0] if blocks.get('host') else None,
         'docker_installed': (blocks.get('docker', '') or '').strip().lower().startswith('yes'),
+        'docker_reachable': docker_ok,
+        'docker_running': sum(1 for st in states if st.startswith('running')),
+        'docker_total': len(states),
     }
 
 
@@ -205,6 +218,9 @@ def system_snapshot(host: Dict[str, Any]) -> Dict[str, Any]:
         'hostname': raw['hostname'] or base['name'],
         'uptime': raw['uptime'],
         'docker_installed': raw['docker_installed'],
+        'docker_reachable': raw['docker_reachable'],
+        'docker_running': raw['docker_running'],
+        'docker_total': raw['docker_total'],
         'cpu': {
             'percent': rates['cpu_percent'],
             'cores': max(cores - 1, 1) if cores else 1,

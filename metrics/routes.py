@@ -42,22 +42,22 @@ def _host_list() -> List[Dict[str, Any]]:
     return out
 
 
-def _docker_block(host_key: str, online: bool, installed: bool) -> Dict[str, Any]:
-    """Docker presence for the card badge, plus a container count."""
-    block = {'installed': bool(installed), 'reachable': False,
-             'containers_running': 0, 'containers_total': 0,
-             'engine_version': None}
-    if not installed or not online:
-        return block
-    try:
-        from database import DockerEndpoint
-        row = DockerEndpoint.query.filter_by(host_key=host_key).first()
-        if row is not None:
-            block['reachable'] = bool(getattr(row, 'is_reachable', False))
-            block['engine_version'] = getattr(row, 'server_version', None)
-    except Exception:
-        pass
-    return block
+def _docker_block(snap: Dict[str, Any]) -> Dict[str, Any]:
+    """Docker presence for the card badge, plus container counts.
+
+    All three facts come from the same SSH round trip as the system stats, so
+    the badge cannot disagree with the expansion (and does not depend on a
+    Docker discovery pass having run recently).
+    """
+    installed = bool(snap.get('docker_installed'))
+    reachable = bool(snap.get('docker_reachable')) and installed
+    return {
+        'installed': installed,
+        'reachable': reachable,
+        'containers_running': int(snap.get('docker_running') or 0) if reachable else 0,
+        'containers_total': int(snap.get('docker_total') or 0) if reachable else 0,
+        'engine_version': None,
+    }
 
 
 def collect_servers() -> Dict[str, Any]:
@@ -67,9 +67,7 @@ def collect_servers() -> Dict[str, Any]:
 
     def one(host):
         snap = collect.system_snapshot(host)
-        snap['docker'] = _docker_block(snap.get('host_key'),
-                                       bool(snap.get('online')),
-                                       bool(snap.get('docker_installed')))
+        snap['docker'] = _docker_block(snap)
         return snap
 
     if hosts:
