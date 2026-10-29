@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v3.1.0 | **Interface (look and feel) as a fourth appearance axis.** Settings → Appearance now offers three layouts — **Classic** (the existing shell), **Glass** (bento cards, pill navigation, blurred translucent panels, ambient glow) and **Console** (dense instrument grid, accent-topped cards, uppercase micro-labels, tabular numerals). Colour themes, light/dark, density and motion all apply on top of every interface; the choice is stored in `ui.interface`, applied as `data-ui` before first paint, exposed as `?ui=glass`, and switchable from ⌘K | ✅ Complete |
 | 2026-10-29 | v3.0.0 | **Audit phases 0–6 implemented.** Dead code removed and `ruff`/coverage CI added; security baseline (opt-in auth gate, loopback bind, DB-admin gate + integrity-checked restores, CSP/nosniff/HSTS headers, vendored Tailwind/Chart.js/marked/DOMPurify with SRI, WebSocket origin check, pinned SSH host keys); one SSH transport (`core/ssh.py`); `create_app()` factory plus `core/bootstrap.py`; every HTML sink escaped and `index.html` split into `templates/partials/` (1,542 → 737 lines) with the wizard JS extracted; and performance work (`/api/overview` aggregate with ETag/304, adaptive polling, bounded caches, SQLite WAL). Four real `ruff` bugs fixed on the way (undefined `emit`, `tf_name`, `_ssh_key_file_cache`, wizard `sessions_lock`) | ✅ Complete |
 | 2026-10-29 | v2.19.1 | **SSH terminal can expand into a window.** An icon in the terminal header promotes it to a 92 vh dialog and a contract icon (or backdrop click) returns it to its slot. The same xterm instance is moved rather than re-created, so the session, scrollback and running commands are untouched | ✅ Complete |
 | 2026-10-29 | v2.19.0 | **Renamed to Homelab Manager**, and the Overview is now three cards: **Fleet**, **Alerts** and **Recent reports**. The per-host Hosts card is gone — host browsing lives in the sidebar, the ⌘K palette and the Logs workspace, so the dashboard stays a fleet summary. Page titles, the SSH-config header, backup/import filenames and the Discord test message follow the new name | ✅ Complete |
@@ -253,7 +254,25 @@ collection path to keep in sync.
 * **Indeterminate bar + spinner:** while no measurable progress exists the bar sweeps and a spinner is shown, switching to a normal percentage bar on the first event
 * **Elapsed clock:** the label ticks seconds and escalates (“Initializing connection…” → “Waiting for host to respond…” → “Slow to respond - still trying…”), then tracks real progress (“Listing log files…”, “Found N log sources…”)
 
-### 🎨 **Appearance: themes, light/dark, density**
+### 🎨 **Appearance: interface, themes, light/dark, density**
+Appearance has two independent choices: **interface** (how the page is laid out) and **theme**
+(what colours it uses). Any interface works with any theme, in dark or light.
+
+#### Interfaces (`static/css/interfaces.css`)
+
+Pick one in **Settings → Appearance → Interface**, or from ⌘K (`Interface: …`).
+
+| Interface | Character |
+|---|---|
+| **Classic** | The default shell: sidebar, flat cards, quiet chrome. No overrides — this is the app's own CSS |
+| **Glass** | Bento overview grid, floating pill header, pill controls, blurred translucent panels, ambient accent glow, large radii |
+| **Console** | Dense instrument panel: 8 px radii, accent-topped cards with **uppercase micro-labels**, tabular numerals, faint blueprint grid, squared compact controls |
+
+Only semantic tokens are used, so a theme change re-colours every interface. The axis is
+`data-ui` on `<html>`, persisted as `ui.interface`, previewable with `?ui=console`, and it never
+changes navigation or which controls exist.
+
+#### Themes
 Six theme families, each with a dark and a light variant. Pick one in **Settings → Appearance**
 (or type `theme` in ⌘K); the **sun/moon button next to Settings** flips dark ↔ light instantly.
 
@@ -276,13 +295,16 @@ How it works — three layers, and only the middle one may be used by components
    `--term-bg`, `--term-fg`, `--bg-glow-1/2`.
 3. **Components** (`style.css`, `shell.css`, `ui.css`, `metrics.css`) style themselves from those
    tokens, so a new theme is ~20 lines instead of a search-and-replace across five files.
+   **Interfaces** (`interfaces.css`) sit on top of components and only re-shape radii, spacing,
+   surfaces and typography — never colours.
 
 * **No flash:** every template has a tiny inline boot script in `<head>` that reads localStorage and
-  sets `data-theme` / `data-mode` / `data-density` / `data-motion` plus `color-scheme` before first
-  paint; `static/js/theme.js` then owns all later changes and fires `themechange` events.
-* **Persistence:** `ui.theme`, `ui.mode` (`dark` | `light` | `system`), `ui.density`, `ui.motion`.
+  sets `data-ui` / `data-theme` / `data-mode` / `data-density` / `data-motion` plus `color-scheme`
+  before first paint; `static/js/theme.js` then owns all later changes and fires `themechange` events.
+* **Persistence:** `ui.interface`, `ui.theme`, `ui.mode` (`dark` | `light` | `system`),
+  `ui.density`, `ui.motion`.
   `system` follows `prefers-color-scheme` live.
-* **Shareable previews:** `?theme=nord&mode=light&density=compact&motion=reduced` overrides the saved
+* **Shareable previews:** `?ui=glass&theme=nord&mode=light&density=compact&motion=reduced` overrides the saved
   values for that page load (validated against the allowed lists).
 * **Charts follow the theme:** `window.themeColors()` returns the semantic colours including a
   `series[]` array; the metrics sparklines read it at draw time and `docker.html` recolours its
@@ -294,7 +316,7 @@ How it works — three layers, and only the middle one may be used by components
 `⌘K` on macOS, `Ctrl+K` elsewhere (there is also a magnifier button in the header).
 
 * Fuzzy subsequence search over **Views**, **Actions**, **Hosts** and **Appearance** (one entry per
-  theme, plus toggle light/dark).
+  interface and per theme, plus toggle light/dark).
 * ↑/↓ to move, Enter to run, Esc to dismiss; results are grouped and the platform-correct shortcut
   is shown in the footer and the header hint.
 * Host entries go through the same `selectHost()` path as a sidebar click, so the palette, the
@@ -1089,6 +1111,20 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.1.0 - Interfaces: Classic, Glass and Console
+- 🧩 **A new appearance axis, independent of colour.** Settings → Appearance → **Interface** offers three
+  layouts; themes, light/dark, density and motion apply on top of all of them
+- 🫧 **Glass** — bento overview (fleet wide, reports across the bottom), floating pill header, pill buttons
+  and search, blurred translucent panels with a top sheen, and an ambient accent glow that follows the theme
+- 🖥️ **Console** — dense instrument grid: accent-topped cards, uppercase micro-labels, tabular numerals,
+  squared compact controls, 8 px radii and a faint blueprint grid behind the page
+- 🎛️ Each option is a tiny live preview in the picker; the active one is highlighted
+- ⌨️ **⌘K** gained `Interface: …` entries, so you can flip layouts without opening Settings
+- 💾 Persisted as `ui.interface`, applied before first paint (`data-ui`), shared with the embedded
+  Monitoring / Docker / Reports pages, and previewable with `?ui=glass`
+- 🧪 Tests: `tests/test_ui_interfaces.py` (tokens only, no `!important`, boot script on every page,
+  stylesheet ordering, controller API, palette, phone guards)
 
 ### v3.0.0 - Audit implementation: security baseline, one SSH path, split module tree, faster dashboard
 This release is the six-phase audit implemented end to end. There are behaviour changes worth reading

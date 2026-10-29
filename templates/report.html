@@ -31,6 +31,7 @@
     .ai-markdown th { background: rgba(255,255,255,0.04); color: #e2e8f0; }
   </style>
   <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/interfaces.css">
   <script>
     (function () {
       try {
@@ -38,6 +39,7 @@
         var mode = localStorage.getItem('ui.mode') || 'system';
         var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         r.dataset.theme = localStorage.getItem('ui.theme') || 'midnight';
+        r.dataset.ui = localStorage.getItem('ui.interface') || 'classic';
         r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
         r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
         r.dataset.motion = localStorage.getItem('ui.motion') || 'full';

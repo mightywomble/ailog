@@ -53,8 +53,8 @@
                 run: () => document.getElementById('settings-btn')?.click(),
             },
             {
-                id: 'appearance', title: 'Appearance & themes', hint: 'theme, light/dark, density',
-                group: 'Actions', icon: 'theme', keywords: 'theme dark light mode colours colors density',
+                id: 'appearance', title: 'Appearance & themes', hint: 'interface, theme, light/dark, density',
+                group: 'Actions', icon: 'theme', keywords: 'interface look feel layout theme dark light mode colours colors density',
                 run: () => {
                     document.getElementById('settings-btn')?.click();
                     setTimeout(() => document.querySelector('.settings-nav-btn[data-section="appearance"]')?.click(), 60);
@@ -81,6 +81,14 @@
                 run: () => window.ailogTheme?.toggleMode(),
             },
         ];
+
+        (window.ailogTheme?.INTERFACES || []).forEach((ui) => {
+            actions.push({
+                id: `ui-${ui.id}`, title: `Interface: ${ui.label}`, hint: ui.hint,
+                group: 'Appearance', icon: 'theme', keywords: `interface layout look feel ${ui.id} ui`,
+                run: () => window.ailogTheme?.setInterface(ui.id),
+            });
+        });
 
         (window.ailogTheme?.THEMES || []).forEach((theme) => {
             actions.push({

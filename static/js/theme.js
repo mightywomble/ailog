@@ -1,7 +1,8 @@
 /* Theme controller.
  *
- * Owns the three appearance axes stored on <html>:
+ * Owns the four appearance axes stored on <html>:
  *   data-theme    midnight | slate | nord | solarized | terminal | contrast
+ *   data-ui       classic | glass | console   ("look and feel", theme-independent)
  *   data-mode     dark | light        (the sun/moon button flips this)
  *   data-density  comfortable | compact
  *   data-motion   full | reduced
@@ -21,8 +22,15 @@ export const THEMES = [
     { id: 'contrast', label: 'High contrast', hint: 'Maximum legibility', swatch: ['#000000', '#ffd400', '#ffffff'] },
 ];
 
+export const INTERFACES = [
+    { id: 'classic', label: 'Classic', hint: 'Current shell: sidebar, cards, quiet chrome' },
+    { id: 'glass', label: 'Glass', hint: 'Bento cards, pill nav, blurred translucent panels' },
+    { id: 'console', label: 'Console', hint: 'Dense instrument grid, accent-topped cards' },
+];
+
 const KEY = {
     theme: 'ui.theme',
+    ui: 'ui.interface',
     mode: 'ui.mode',        // 'dark' | 'light' | 'system'
     density: 'ui.density',
     motion: 'ui.motion',
@@ -59,6 +67,7 @@ const pick = (name, allowed, fallback) => {
 
 export const state = {
     theme: pick('theme', THEMES.map((t) => t.id), read(KEY.theme, DEFAULT_THEME)),
+    ui: pick('ui', INTERFACES.map((i) => i.id), read(KEY.ui, 'classic')),
     mode: pick('mode', ['dark', 'light', 'system'], read(KEY.mode, 'system')),   // what the user chose
     density: pick('density', ['comfortable', 'compact'], read(KEY.density, 'comfortable')),
     motion: pick('motion', ['full', 'reduced'], read(KEY.motion, 'full')),
@@ -70,9 +79,14 @@ export function isKnownTheme(id) {
     return THEMES.some((t) => t.id === id);
 }
 
+export function isKnownInterface(id) {
+    return INTERFACES.some((i) => i.id === id);
+}
+
 function apply({ animate = false } = {}) {
     const mode = resolvedMode();
     if (!isKnownTheme(state.theme)) state.theme = DEFAULT_THEME;
+    if (!isKnownInterface(state.ui)) state.ui = 'classic';
 
     if (animate) {
         root.classList.add('theme-switching');
@@ -80,6 +94,7 @@ function apply({ animate = false } = {}) {
     }
 
     root.dataset.theme = state.theme;
+    root.dataset.ui = state.ui;
     root.dataset.mode = mode;
     root.dataset.density = state.density;
     root.dataset.motion = state.motion;
@@ -88,7 +103,7 @@ function apply({ animate = false } = {}) {
 
     syncControls();
     window.dispatchEvent(new CustomEvent('themechange', {
-        detail: { theme: state.theme, mode, choice: state.mode, colors: themeColors() },
+        detail: { theme: state.theme, ui: state.ui, mode, choice: state.mode, colors: themeColors() },
     }));
 }
 
@@ -97,6 +112,13 @@ export function setTheme(id, { animate = true } = {}) {
     state.theme = id;
     write(KEY.theme, id);
     apply({ animate });
+}
+
+export function setInterface(id) {
+    if (!isKnownInterface(id)) return;
+    state.ui = id;
+    write(KEY.ui, id);
+    apply({ animate: true });
 }
 
 export function setMode(mode, { animate = true } = {}) {
@@ -128,10 +150,12 @@ export function setMotion(value) {
 
 export function resetAppearance() {
     state.theme = DEFAULT_THEME;
+    state.ui = 'classic';
     state.mode = 'system';
     state.density = 'comfortable';
     state.motion = 'full';
     write(KEY.theme, state.theme);
+    write(KEY.ui, state.ui);
     write(KEY.mode, state.mode);
     write(KEY.density, state.density);
     write(KEY.motion, state.motion);
@@ -182,6 +206,12 @@ function syncControls() {
         btn.classList.toggle('is-active', active);
     });
 
+    document.querySelectorAll('[data-ui-choice]').forEach((btn) => {
+        const active = btn.dataset.uiChoice === state.ui;
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        btn.classList.toggle('is-active', active);
+    });
+
     document.querySelectorAll('[data-mode-choice]').forEach((btn) => {
         const active = btn.dataset.modeChoice === state.mode;
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -204,6 +234,22 @@ function syncControls() {
 function buildAppearancePanel(container) {
     const modeButtons = [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']];
     container.innerHTML = `
+      <div class="appearance-block">
+        <div class="appearance-label">Interface</div>
+        <div class="ui-grid" role="group" aria-label="Interface">
+          ${INTERFACES.map((i) => `
+            <button type="button" class="ui-card" data-ui-choice="${i.id}"
+                    aria-pressed="false" title="${i.hint}">
+              <span class="ui-preview ui-preview-${i.id}" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i>
+              </span>
+              <span class="ui-name">${i.label}</span>
+              <span class="ui-hint">${i.hint}</span>
+            </button>`).join('')}
+        </div>
+        <p class="appearance-help">Layout and card treatment. Colour themes apply to every interface.</p>
+      </div>
+
       <div class="appearance-block">
         <div class="appearance-label">Theme</div>
         <div class="theme-grid" role="group" aria-label="Theme">
@@ -257,7 +303,8 @@ function wireAppearancePanel(container) {
         const target = event.target.closest('button');
         if (!target) return;
         const d = target.dataset;
-        if (d.themeChoice) setTheme(d.themeChoice);
+        if (d.uiChoice) setInterface(d.uiChoice);
+        else if (d.themeChoice) setTheme(d.themeChoice);
         else if (d.modeChoice) setMode(d.modeChoice);
         else if (d.densityChoice) setDensity(d.densityChoice);
         else if (d.motionChoice) setMotion(d.motionChoice);
@@ -289,7 +336,7 @@ function mount() {
 
 /* Public surface, also on window for the non-module pages (docker, metrics…). */
 Object.assign(window, {
-    ailogTheme: { THEMES, state, setTheme, setMode, toggleMode, setDensity, setMotion, resetAppearance, themeColors, resolvedMode },
+    ailogTheme: { THEMES, INTERFACES, state, setTheme, setInterface, setMode, toggleMode, setDensity, setMotion, resetAppearance, themeColors, resolvedMode },
     themeColors,
     toggleThemeMode: toggleMode,
 });
