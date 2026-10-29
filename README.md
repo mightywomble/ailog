@@ -583,6 +583,23 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
+**Current production image** (as of 2026-10-29): `zot.safehomelan.com/ailog:v2.15.1`
+(`:latest` points at the same manifest), digest
+`sha256:c0c8a5a5bb691b36dd74b10c16b0521bc72941ac8c267199f71da2c68df69cd2`, running as
+`ailog_ailog.1` on `swarm-worker1`. Redeploy after a push with:
+
+```bash
+docker service update --with-registry-auth --force ailog_ailog
+```
+
+Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
+list and the digest running in the swarm will not match the one you tagged:
+
+```bash
+docker build --provenance=false --sbom=false -f docker/Dockerfile \
+  -t zot.safehomelan.com/ailog:v2.15.1 -t zot.safehomelan.com/ailog:latest .
+```
+
 Plain Docker host equivalent:
 
 ```bash
