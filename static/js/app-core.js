@@ -182,6 +182,11 @@ export function init() {
         const sshTerminalContainer = document.getElementById('ssh-terminal-container');
         const sshTerminalBody = document.getElementById('ssh-terminal-body');
         const sshTerminalStatus = document.getElementById('ssh-terminal-status');
+        const sshExpandBtn = document.getElementById('ssh-terminal-expand-btn');
+        const sshOverlay = document.getElementById('ssh-terminal-overlay');
+        const sshModalBody = document.getElementById('ssh-modal-body');
+        const sshContractBtn = document.getElementById('ssh-terminal-contract-btn');
+        const sshModalHost = document.getElementById('ssh-modal-host');
 
         const dashboardSelectedHostEl = document.getElementById('dashboard-selected-host');
         const dashboardTotalHostsEl = document.getElementById('dashboard-total-hosts');
@@ -438,6 +443,7 @@ export function init() {
 
 
         const showDashboard = () => {
+            if (typeof contractSshTerminal === 'function') contractSshTerminal();
             if (dashboardView) dashboardView.classList.remove('hidden');
             if (logsView) logsView.classList.add('hidden');
         };
@@ -1118,9 +1124,12 @@ export function init() {
         };
 
         const setSshStatus = (text, tone = 'muted') => {
-            if (!sshTerminalStatus) return;
-            sshTerminalStatus.textContent = text;
-            sshTerminalStatus.className = `text-xs ${tone === 'error' ? 'text-red-400' : tone === 'ok' ? 'text-green-400' : 'termix-muted'}`;
+            const cls = `text-xs ${tone === 'error' ? 'text-red-400' : tone === 'ok' ? 'text-green-400' : 'termix-muted'}`;
+            // the same session can be shown inline or in the expanded window
+            document.querySelectorAll('[data-ssh-status]').forEach((el) => {
+                el.textContent = text;
+                el.className = cls;
+            });
         };
 
         const handleSshExitEnded = () => {
@@ -1214,6 +1223,61 @@ export function init() {
                 }));
             }
         };
+
+        // ---- expand / contract the SSH terminal -------------------------
+        // The xterm instance is never re-created: its mount node is moved between
+        // the inline panel and a window-backed overlay, then re-fitted. The
+        // WebSocket session and scrollback are untouched by either transition.
+        let sshMaximized = false;
+
+        const setSshExpandedUi = (expanded) => {
+            if (sshExpandBtn) {
+                sshExpandBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                const label = expanded ? 'Contract terminal back into the page' : 'Expand terminal to a window';
+                sshExpandBtn.setAttribute('aria-label', label);
+                sshExpandBtn.setAttribute('title', label);
+            }
+        };
+
+        const expandSshTerminal = () => {
+            if (sshMaximized || !sshOverlay || !sshModalBody || !sshTerminalBody) return;
+            sshMaximized = true;
+            const hostId = sshConnectedHost || selectedHostId;
+            if (sshModalHost) {
+                sshModalHost.textContent = hostId ? (hosts?.[hostId]?.friendly_name || hostId) : '';
+            }
+            sshModalBody.appendChild(sshTerminalBody);
+            sshOverlay.classList.remove('hidden');
+            document.body.classList.add('ssh-maximized');
+            setSshExpandedUi(true);
+            setTimeout(() => {
+                resizeSshTerminal();
+                try { sshTerm?.focus(); } catch (_) {}
+            }, 60);
+        };
+
+        const contractSshTerminal = () => {
+            if (!sshMaximized) return;
+            sshMaximized = false;
+            sshOverlay?.classList.add('hidden');
+            document.body.classList.remove('ssh-maximized');
+            if (sshTerminalContainer && sshTerminalBody) sshTerminalContainer.appendChild(sshTerminalBody);
+            setSshExpandedUi(false);
+            setTimeout(() => {
+                resizeSshTerminal();
+                try { sshTerm?.focus(); } catch (_) {}
+            }, 60);
+        };
+
+        sshExpandBtn?.addEventListener('click', () => {
+            if (sshMaximized) contractSshTerminal();
+            else expandSshTerminal();
+        });
+        sshContractBtn?.addEventListener('click', contractSshTerminal);
+        sshOverlay?.addEventListener('click', (event) => {
+            // clicking the backdrop contracts; clicking inside the panel does not
+            if (event.target === sshOverlay) contractSshTerminal();
+        });
 
         const closeSshSocket = () => {
             if (sshSocket) {
@@ -2024,6 +2088,7 @@ export function init() {
         
 
 const showHostInfoMain = async () => {
+            if (typeof contractSshTerminal === 'function') contractSshTerminal();
             const hostId = selectedHostId;
             const hostName = hostId === 'local' ? 'Localhost' : (hosts[hostId]?.friendly_name || hostId);
 
@@ -5006,6 +5071,11 @@ aiAnalyseBtn.addEventListener('click', async () => {
         // --- Shell integration (command palette, overview cards, mobile tabs) ---
         // "Open host" means: select it, then show the logs view - the same path
         // a sidebar click takes, so nothing can drift between the two.
+        window.ailogSsh = {
+            expand: () => expandSshTerminal(),
+            contract: () => contractSshTerminal(),
+            isMaximized: () => sshMaximized
+        };
         window.ailogOpenHost = (hostId) => {
             if (!hostId) return;
             selectHost(hostId);
