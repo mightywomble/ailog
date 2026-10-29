@@ -14,12 +14,64 @@ import shutil
 import sqlite3
 import tempfile
 
-from flask import (Blueprint, Response, current_app, jsonify, request)
+from flask import (Blueprint, Response, current_app, g, jsonify, request)
 from sqlalchemy import text as sql_text
 
-from database import db, AppSetting, Group, Host, Tag
+from database import db, AppSetting
+from core.timeutil import utcnow
 
 bp = Blueprint('inventory_dbadmin', __name__)
+
+
+@bp.before_request
+def _guard_db_admin():
+    """DB backup/restore is destructive: opt-in via env AND authenticated."""
+    if not current_app.config.get('AILOG_ALLOW_DB_ADMIN'):
+        return jsonify({
+            'error': 'Database admin endpoints are disabled. Set AILOG_ALLOW_DB_ADMIN=1 to enable them.'
+        }), 403
+    mode = current_app.config.get('AILOG_AUTH_MODE', 'none')
+    if mode != 'none' and not getattr(g, 'auth_user', None):
+        return jsonify({'error': 'Authentication required'}), 401
+    return None
+
+
+MIN_DB_BYTES = 4096
+REQUIRED_TABLES = ('host',)
+
+
+def _validate_sqlite_upload(path):
+    """Reject anything that is not a plausible, structurally valid Homelab DB.
+
+    Raises ValueError with a user-safe message.
+    """
+    size = os.path.getsize(path)
+    if size < MIN_DB_BYTES:
+        raise ValueError('Uploaded file is too small to be a database backup')
+    with open(path, 'rb') as fh:
+        if fh.read(16) != b'SQLite format 3\x00':
+            raise ValueError('Uploaded file is not a valid sqlite database')
+    conn = sqlite3.connect('file:' + path + '?mode=ro', uri=True)
+    try:
+        row = conn.execute('PRAGMA integrity_check').fetchone()
+        if not row or str(row[0]).lower() != 'ok':
+            raise ValueError('Uploaded database failed the integrity check')
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = [t for t in REQUIRED_TABLES if t not in tables]
+        if missing:
+            raise ValueError('Uploaded database is missing required tables: ' + ', '.join(missing))
+    finally:
+        conn.close()
+
+
+def _pre_restore_backup(db_path):
+    """Copy the live database aside before it is replaced. Returns the copy path."""
+    if not os.path.exists(db_path):
+        return None
+    stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    backup_path = f'{db_path}.pre-restore-{stamp}'
+    shutil.copyfile(db_path, backup_path)
+    return backup_path
 
 
 def _put_setting(key, value):
@@ -60,7 +112,7 @@ def backup_database():
         if not os.path.exists(db_path):
             return jsonify({'error': f'Database file not found: {db_path}'}), 404
 
-        ts = datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+        ts = utcnow().strftime('%Y%m%dT%H%M%SZ')
         filename = f"homelab-manager-backup-{ts}.db"
 
         with open(db_path, 'rb') as f:
@@ -96,12 +148,15 @@ def restore_database():
         upload.save(tmp_path)
 
         try:
-            with open(tmp_path, 'rb') as fh:
-                header = fh.read(16)
-            if header != b'SQLite format 3\x00':
-                return jsonify({'error': 'Uploaded file is not a valid sqlite database'}), 400
+            try:
+                _validate_sqlite_upload(tmp_path)
+            except ValueError as exc:
+                return jsonify({'error': str(exc)}), 400
 
             os.makedirs(os.path.dirname(db_path) or '.', exist_ok=True)
+
+            # Keep a timestamped copy of the live DB so a bad restore is recoverable.
+            backup_path = _pre_restore_backup(db_path)
 
             # Drop connections and replace DB file
             try:
@@ -121,7 +176,10 @@ def restore_database():
             except Exception:
                 pass
 
-        return jsonify({'message': 'Database restored successfully. Please refresh the page.'})
+        return jsonify({
+            'message': 'Database restored successfully. Please refresh the page.',
+            'backup': backup_path,
+        })
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -129,12 +187,6 @@ def restore_database():
 
 # --- SERVER-SENT EVENTS (SSE) STREAMING ENDPOINTS ---
 
-import uuid as uuid_lib
-from threading import Lock
-
-# Global dictionary to store event queues for each wizard session
-wizard_sessions = {}
-sessions_lock = Lock()
 
 
 
@@ -182,10 +234,10 @@ def restore_database_selective():
         upload.save(tmp_path)
 
         try:
-            with open(tmp_path, 'rb') as fh:
-                header = fh.read(16)
-            if header != b'SQLite format 3\x00':
-                return jsonify({'error': 'Uploaded file is not a valid sqlite database'}), 400
+            try:
+                _validate_sqlite_upload(tmp_path)
+            except ValueError as exc:
+                return jsonify({'error': str(exc)}), 400
 
             src = sqlite3.connect(tmp_path)
             src.row_factory = sqlite3.Row

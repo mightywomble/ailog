@@ -1,0 +1,35 @@
+    <div id="log-selection-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-xl">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-indigo-400"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10"/></svg>
+                    <span id="log-selection-title">Select Logs to Monitor</span>
+                </div>
+                <button id="close-log-selection-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
+            </div>
+            <div class="app-modal-body" style="display: flex; flex-direction: column;">
+            
+            <!-- Progress Section -->
+            <div id="log-selection-progress" class="mb-4 hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium termix-muted">Loading logs from hosts...</span>
+                    <span id="log-selection-progress-percent" class="text-sm termix-muted">0%</span>
+                </div>
+                <div class="w-full bg-white/5 rounded-full h-2 mb-2">
+                    <div id="log-selection-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div id="log-selection-progress-details" class="max-h-20 overflow-y-auto bg-gray-900 rounded-md p-2 text-xs font-mono termix-muted">
+                    <div>Starting host scan...</div>
+                </div>
+            </div>
+            
+            <div id="log-selection-list" class="flex-grow overflow-hidden border border-gray-700 rounded-md">
+                <!-- Content will be populated here -->
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button id="cancel-log-selection-btn" class="px-4 py-2 rounded-md bg-white/10 hover:bg-white/50 transition-colors">Cancel</button>
+                <button id="save-log-selection-btn" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 transition-colors text-white">Confirm Selections</button>
+            </div>
+            </div>
+        </div>
+    </div>
+    <!-- Mobile navigation (hidden >= 641px) -->

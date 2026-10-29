@@ -1,0 +1,40 @@
+    <!-- Add/Edit Host Modal -->
+    <div id="host-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-md app-modal-fit">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-emerald-400"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+                    <span id="host-modal-title">Add New Host</span>
+                </div>
+                <button id="host-modal-x" type="button" class="app-modal-close" data-modal-close aria-label="Close">Close</button>
+            </div>
+            <div class="app-modal-body">
+                <form id="host-form" class="space-y-4">
+                    <input type="hidden" id="host-id-input">
+                    <div>
+                        <label for="host-friendly-name-input" class="block text-sm font-medium termix-muted mb-1">Friendly Name</label>
+                        <input type="text" id="host-friendly-name-input" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100" required>
+                    </div>
+                    <div>
+                        <label for="host-ip-input" class="block text-sm font-medium termix-muted mb-1">IP Address or Hostname</label>
+                        <input type="text" id="host-ip-input" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100" required>
+                    </div>
+                    <div>
+                        <label for="host-user-input" class="block text-sm font-medium termix-muted mb-1">SSH User</label>
+                        <input type="text" id="host-user-input" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100" required>
+                    </div>
+                    <div>
+                        <label for="host-description-input" class="block text-sm font-medium termix-muted mb-1">Description</label>
+                        <textarea id="host-description-input" rows="2" class="w-full px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100"></textarea>
+                    </div>
+                    <div id="host-test-status" class="text-sm p-3 rounded-lg border border-white/10 bg-white/5 hidden"></div>
+                    <div class="flex justify-between items-center pt-2">
+                        <button type="button" id="host-modal-cancel-btn" class="termix-btn">Cancel</button>
+                        <div id="host-form-actions" class="flex items-center space-x-2">
+                            <button type="button" id="host-test-btn" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 text-sm rounded-md font-medium transition-colors">Test Connection</button>
+                            <button type="submit" id="host-save-btn" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 text-sm rounded-md font-medium transition-colors hidden">Save Host</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>

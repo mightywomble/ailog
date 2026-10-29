@@ -374,10 +374,10 @@ async function refreshSuricataEndpoints() {
 
         rows.forEach(r => {
             const tr = document.createElement('tr');
-            const protos = (r.top_protocols||[]).map(p => `${p.name}:${p.count}`).join(', ');
+            const protos = (r.top_protocols||[]).map(p => `${String(p.name||'')}:${p.count}`).join(', ');
             const srcs = (r.top_sources||[]).map(p => `${p.ip}:${p.count}`).join(', ');
             tr.innerHTML = `
-                <td class="py-2 px-3">${r.endpoint}</td>
+                <td class="py-2 px-3">${String(r.endpoint||'')}</td>
                 <td class="py-2 px-3 text-right">${r.alerts}</td>
                 <td class="py-2 px-3">${protos}</td>
                 <td class="py-2 px-3">${srcs}</td>

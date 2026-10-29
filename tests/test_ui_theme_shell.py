@@ -20,7 +20,12 @@ TEMPLATES = ROOT / "templates"
 
 @pytest.fixture(scope="module")
 def index_html():
-    return (TEMPLATES / "index.html").read_text()
+    """index.html plus its extracted partials (phase 5 keeps them in sync)."""
+    parts = [TEMPLATES / "index.html"]
+    partials = sorted((TEMPLATES / "partials").glob("*.html"))
+    assert partials, "templates/partials is missing"
+    parts.extend(partials)
+    return "\n".join(p.read_text() for p in parts)
 
 
 @pytest.fixture(scope="module")
@@ -220,10 +225,12 @@ def test_overview_shows_fleet_alerts_and_reports_only():
     assert "renderHosts" not in js
 
 
-def test_overview_polls_the_three_summary_endpoints():
+def test_overview_polls_the_aggregate_endpoint():
     js = (STATIC / "js" / "overview.js").read_text()
-    for endpoint in ("/api/metrics/servers", "/api/alerts/events", "/api/reports"):
-        assert endpoint in js
+    # phase 6: one aggregate call with an ETag replaces three separate polls
+    assert "/api/overview" in js
+    assert "If-None-Match" in js
+    assert "/api/metrics/servers" not in js.split("*/", 1)[1]
     assert "POLL_MS" in js
     assert "document.hidden" in js
     # cards must not wait for the slowest endpoint, and must not hang forever

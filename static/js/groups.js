@@ -1,6 +1,11 @@
 // Groups settings UI (moved verbatim from templates/index.html).
 // Exports the two entry points used by the core settings panel.
 
+const esc = (value) => String(value == null ? '' : value).replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+);
+
 // --- GROUPS SETTINGS ---
 async function loadGroupsSettings() {
     const list = document.getElementById('groups-list');
@@ -21,12 +26,12 @@ async function loadGroupsSettings() {
             wrapper.innerHTML = `
                 <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                        <div class="font-medium text-white truncate">${g.name}</div>
-                        <div class="text-xs termix-muted mt-1">${(g.description || '').replace(/</g,'&lt;')}</div>
+                        <div class="font-medium text-white truncate">${esc(g.name)}</div>
+                        <div class="text-xs termix-muted mt-1">${esc(g.description || '')}</div>
                         <div class="text-xs termix-muted mt-2" id="group-hosts-${g.id}">Loading hosts...</div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
-                        <button class="groups-edit-btn bg-white/10 hover:bg-white/20 text-white text-xs px-2 py-1 rounded" data-id="${g.id}" data-name="${g.name}" data-desc="${g.description || ''}">Edit</button>
+                        <button class="groups-edit-btn bg-white/10 hover:bg-white/20 text-white text-xs px-2 py-1 rounded" data-id="${esc(g.id)}" data-name="${esc(g.name)}" data-desc="${esc(g.description || '')}">Edit</button>
                         <button class="groups-del-btn bg-red-600/80 hover:bg-red-600 text-white text-xs px-2 py-1 rounded" data-id="${g.id}">Delete</button>
                     </div>
                 </div>
@@ -90,7 +95,7 @@ async function loadGroupsSettings() {
         });
 
     } catch (e) {
-        list.innerHTML = `<div class="text-xs text-red-400">Failed to load groups: ${e.message}</div>`;
+        list.innerHTML = `<div class="text-xs text-red-400">Failed to load groups: ${esc(e.message)}</div>`;
     }
 }
 

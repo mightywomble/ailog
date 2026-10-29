@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v3.0.0 | **Audit phases 0–6 implemented.** Dead code removed and `ruff`/coverage CI added; security baseline (opt-in auth gate, loopback bind, DB-admin gate + integrity-checked restores, CSP/nosniff/HSTS headers, vendored Tailwind/Chart.js/marked/DOMPurify with SRI, WebSocket origin check, pinned SSH host keys); one SSH transport (`core/ssh.py`); `create_app()` factory plus `core/bootstrap.py`; every HTML sink escaped and `index.html` split into `templates/partials/` (1,542 → 737 lines) with the wizard JS extracted; and performance work (`/api/overview` aggregate with ETag/304, adaptive polling, bounded caches, SQLite WAL). Four real `ruff` bugs fixed on the way (undefined `emit`, `tf_name`, `_ssh_key_file_cache`, wizard `sessions_lock`) | ✅ Complete |
 | 2026-10-29 | v2.19.1 | **SSH terminal can expand into a window.** An icon in the terminal header promotes it to a 92 vh dialog and a contract icon (or backdrop click) returns it to its slot. The same xterm instance is moved rather than re-created, so the session, scrollback and running commands are untouched | ✅ Complete |
 | 2026-10-29 | v2.19.0 | **Renamed to Homelab Manager**, and the Overview is now three cards: **Fleet**, **Alerts** and **Recent reports**. The per-host Hosts card is gone — host browsing lives in the sidebar, the ⌘K palette and the Logs workspace, so the dashboard stays a fleet summary. Page titles, the SSH-config header, backup/import filenames and the Discord test message follow the new name | ✅ Complete |
 | 2026-10-29 | v2.18.2 | Fix: the Fleet card reported **"all reachable"** next to a non-zero Offline count; it now says `N unreachable` (and still says nothing configured when the fleet is empty) | ✅ Complete |
@@ -372,13 +373,48 @@ torn down (an iframe, a poller, a chart).
 * **Log output is rendered as text:** `/var/log` and container log contents are inserted with `textContent`, so a log line containing HTML/JS cannot execute in the browser
 * **Path traversal blocked:** `/log/<file>` rejects absolute paths and any `..` segment, so the endpoint can only read below `/var/log`
 * **Container identifiers validated:** `/api/docker/log/<container>` only accepts Docker-legal name characters (and is `shlex`-quoted) before reaching the remote shell
-* **No authentication by design:** every Docker endpoint (`/docker/<host_key>`, `/api/docker/*`) inherits the app's unauthenticated trusted-network model. Anyone who can reach the UI can read container logs and swarm metadata — keep the app off the public internet and restrict access at the proxy.
+* **Authentication is opt-in, not absent:** `AILOG_AUTH_MODE` (default `none`) can be set to `proxy` (trust an upstream identity header) or `local` (HTTP Basic against env credentials). In `none` mode every endpoint still inherits the trusted-network model — keep the app off the public internet and restrict access at the proxy.
+* **Security headers on every response:** CSP (`default-src 'self'`, `frame-ancestors 'self'`, `object-src 'none'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` and a `Permissions-Policy` that disables camera/mic/geolocation. HSTS is sent when `AILOG_HSTS=1` or the request is already TLS.
+* **Front-end assets are vendored, not remote:** Tailwind, Chart.js, marked and DOMPurify are served from `static/vendor/` with `integrity="sha384-…"` SRI hashes, so a compromised CDN cannot inject script into the UI.
+* **Host keys are pinned:** SSH uses `StrictHostKeyChecking=accept-new` against a real `known_hosts` file (`AILOG_SSH_HOST_KEY_POLICY=strict|accept-new|off`), and paramiko loads/saves the same file. The exported `~/.ssh/config` no longer disables host checking.
+* **Uploads are capped and validated:** `AILOG_MAX_UPLOAD_MB` (default 32) is enforced by Flask; a DB restore must pass an SQLite header check, `PRAGMA integrity_check`, and a required-tables check, and the live DB is copied to `<db>.pre-restore-<timestamp>` first.
+* **Destructive endpoints are opt-in:** `/admin/db/*` returns 403 unless `AILOG_ALLOW_DB_ADMIN=1`, and requires authentication when an auth mode is enabled.
+* **WebSocket origin checked:** `/ssh/websocket` rejects upgrades whose `Origin` is not the app's own host (cross-site WebSocket hijacking defence).
 * **TLS Docker endpoints:** discovery accepts self-signed certificates (`verify=False` unless a CA is supplied). Only enable TLS endpoints you trust on the network path.
 * **Dependency pinning:** the Docker SDK is pinned (`docker>=7.1.0,<8.0`) to avoid surprise breaking/major-version changes on image rebuild.
 * **Server reports treat logs as hostile input:** log content is attacker-controlled, so the evidence pack is fenced with `<<<EVIDENCE … EVIDENCE>>>` and the system prompt states it is untrusted data that must never be followed as instructions (prompt-injection defence). Report Markdown is rendered through DOMPurify.
 * **Model names validated:** per-run model overrides must match `[A-Za-z0-9][A-Za-z0-9._:/@-]*` (max 128 chars) before reaching a provider request.
 * **Report fan-out is bounded:** all file paths still go through `_safe_log_path`, container names through the existing identifier regex, and each run is capped by source count, byte budget, worker count and a per-host lock.
 * **No automatic Discord posts:** reports only reach Discord when a user presses **Send to Discord** on `/reports/<id>`.
+
+#### Authentication and hardening environment variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AILOG_AUTH_MODE` | `none` | `none`, `proxy` (header from your reverse proxy) or `local` (HTTP Basic) |
+| `AILOG_AUTH_USER` / `AILOG_AUTH_PASSWORD` | `admin` / – | Credentials for `local` mode |
+| `AILOG_AUTH_PASSWORD_HASH` | – | werkzeug hash; wins over the plaintext password |
+| `AILOG_AUTH_PROXY_HEADER` | `X-Forwarded-User` | Header carrying the authenticated user in `proxy` mode |
+| `AILOG_TRUSTED_PROXIES` | – | Comma-separated IPs/CIDRs allowed to set that header |
+| `AILOG_ALLOW_DB_ADMIN` | `0` | Exposes `/admin/db/backup|restore*` |
+| `AILOG_MAX_UPLOAD_MB` | `32` | Request body limit |
+| `AILOG_HSTS` | `0` | Send `Strict-Transport-Security` |
+| `AILOG_CSP` | built-in policy | Override the CSP, or `off` |
+| `AILOG_BIND` / `AILOG_PORT` | `127.0.0.1` / `5001` | Dev listen address (the container sets `0.0.0.0`) |
+| `AILOG_SSH_HOST_KEY_POLICY` | `accept-new` | `accept-new`, `strict` or `off` |
+| `AILOG_KNOWN_HOSTS` | `/data/known_hosts` (fallback `~/.ssh/known_hosts`) | Pinned host keys |
+| `AILOG_WS_ALLOW_NO_ORIGIN` | `0` | Accept websocket upgrades without an `Origin` header (only for old clients) |
+| `AILOG_RUN_SCHEDULER` | `1` | Set `0` on web replicas so only one process owns APScheduler |
+
+Health probe: `GET /healthz` is unauthenticated and reports the active auth mode.
+
+### ⚡ Performance notes
+
+* **One dashboard request:** the Overview polls `GET /api/overview`, which aggregates fleet metrics, alerts and recent reports server-side and answers `If-None-Match` with `304 Not Modified`. An idle dashboard therefore costs a header round trip. The per-subsystem endpoints remain for the pages that use them.
+* **Adaptive polling:** the Overview backs off exponentially (to 60 s) on failures and resumes on visibility change; the Monitoring page slows its interval when many hosts are open and no card is expanded, and backs off when a poll fails.
+* **Bounded caches:** host source listings (64), Suricata key paths (16) and report bundles (32) are size-capped, not just TTL-capped, so a long-lived process cannot grow without bound.
+* **SQLite WAL:** `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=30s` and `foreign_keys=ON` are applied on connect, and the engine uses a 30 s connect timeout — samplers and requests no longer fail with `database is locked`.
+* **Scheduler placement:** `AILOG_RUN_SCHEDULER=0` lets you run a dedicated worker so replicas do not each execute every schedule.
 
 ### 🔌 Tailscale egress for SSH (Kubernetes deployments)
 If your target hosts are only reachable over Tailscale, the AILog pod needs tailnet routing to connect to `100.x` addresses. The Helm chart now supports an optional Tailscale **egress sidecar** (tun mode) that provides outbound tailnet/subnet access from the pod. See the Helm chart README for configuration details.
@@ -1053,6 +1089,36 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.0.0 - Audit implementation: security baseline, one SSH path, split module tree, faster dashboard
+This release is the six-phase audit implemented end to end. There are behaviour changes worth reading
+before upgrading — they are all in the *Security and hardening* and *Performance* sections above.
+
+- 🔐 **Opt-in authentication** (`AILOG_AUTH_MODE=none|proxy|local`) with a single `before_request` gate, plus
+  `/healthz`. `none` keeps today's trusted-network behaviour, so nothing breaks by default
+- 🛡️ **Security headers everywhere** — CSP, `nosniff`, `Referrer-Policy`, `SAMEORIGIN`, `Permissions-Policy`,
+  optional HSTS — and the app now binds **127.0.0.1** unless `AILOG_BIND` says otherwise (the image sets it)
+- 📦 **Front-end assets are vendored** in `static/vendor/` with **SRI hashes**; a CDN compromise can no longer
+  inject script into the UI. `GET /` no longer touches the internet
+- 🔑 **SSH host keys are pinned** (`StrictHostKeyChecking=accept-new` + a real `known_hosts`); the exported
+  `~/.ssh/config` no longer disables host checking either
+- 🗄️ **DB backup/restore is opt-in** (`AILOG_ALLOW_DB_ADMIN=1`) and restores are validated
+  (`PRAGMA integrity_check`, required tables, size cap) with a `<db>.pre-restore-<ts>` copy kept
+- 🚪 **WebSocket origin check** on `/ssh/websocket` (cross-site hijacking)
+- 🧵 **One SSH transport** — `core/ssh.py` replaces five near-duplicate remote-exec paths; `core/hostkeys.py`
+  owns the policy
+- 🏗️ **`create_app()` factory** and `core/bootstrap.py`; app routes live on the `core_ui` blueprint. Routes and
+  URLs are unchanged
+- 🧼 **Every HTML sink is escaped** (host names, descriptions, errors, log/container names, group attributes)
+  and a test walks all JS to keep it that way; `index.html` is 737 lines with dialogs in `templates/partials/`,
+  and the wizard's inline script is `static/js/wizard.js`
+- ⚡ **`/api/overview`** aggregates the dashboard into one ETag'd request (`304` when nothing changed), polling
+  backs off on failure, caches are size-capped, and SQLite runs in WAL with a busy timeout
+- 🐛 **Four latent crashes fixed** (found by `ruff`): undefined `emit` in `get_ollama_models`, undefined
+  `tf_name` in the Suricata SSH read, undefined `_ssh_key_file_cache` on key delete, and undefined
+  `sessions_lock` in `/wizard/session/create` — plus a `/ssh-keys/verify-integrity` route that never
+  registered because `app.run()` sat above it
+- 🧪 **CI**: `ruff --select F,E9`, `pytest` with a coverage floor, and `node --check` on every JS module
 
 ### v2.19.1 - Expandable SSH terminal
 - ⤢ **Expand / contract** icon in the SSH terminal header: the session pops out to a 92 vh window using the

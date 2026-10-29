@@ -1793,10 +1793,10 @@ export function init() {
                         ${grabHandleHtml}
                         <div class="min-w-0 flex-1">
                             <span class="host-monogram" aria-hidden="true">${hostInitial}</span>
-                            <h3 class="host-card-name font-bold termix-text truncate">${hostData.friendly_name}</h3>
+                            <h3 class="host-card-name font-bold termix-text truncate">${escapeHtml(hostData.friendly_name)}</h3>
                             <div class="host-card-meta">
                                 <p class="text-sm termix-muted truncate">Group: ${(hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none'}</p>
-                                <p class="text-xs termix-muted font-mono truncate">${hostData.user}@${hostData.ip}</p>
+                                <p class="text-xs termix-muted font-mono truncate">${escapeHtml(hostData.user)}@${escapeHtml(hostData.ip)}</p>
                             </div>
                         </div>
                     </div>
@@ -1914,8 +1914,8 @@ export function init() {
             const baseHeader = `
                 <div class="flex items-center justify-between mb-4">
                     <div class="min-w-0">
-                        <h2 class="text-xl font-bold termix-text truncate" title="${hostData.friendly_name}">${hostData.friendly_name}</h2>
-                        <p class="text-sm termix-muted truncate" title="${hostData.description || 'No description'}">${hostData.description || 'No description'}</p>
+                        <h2 class="text-xl font-bold termix-text truncate" title="${escapeHtml(hostData.friendly_name)}">${escapeHtml(hostData.friendly_name)}</h2>
+                        <p class="text-sm termix-muted truncate" title="${escapeHtml(hostData.description || 'No description')}">${escapeHtml(hostData.description || 'No description')}</p>
                     </div>
                     <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700">
                         ${hostId === 'local' ? 'Local' : 'Remote'}
@@ -1955,7 +1955,7 @@ export function init() {
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h18M3 17h18"></path>
                             </svg>
                         </span>
-                        <span class="font-mono">${hostData.user}@${hostData.ip}</span>
+                        <span class="font-mono">${escapeHtml(hostData.user)}@${escapeHtml(hostData.ip)}</span>
                     </div>
                     <p class="text-xs termix-muted mt-2">Detailed system info is only available for hosts onboarded via the wizard.</p>
                 `;
@@ -1979,16 +1979,16 @@ export function init() {
                     bodyEl.innerHTML = `
 
                     <div class="flex items-center justify-between">
-                        <span class="font-mono truncate" title="${info.ssh_user || hostData.user}@${info.ip_address || hostData.ip}">
-                            ${(info.ssh_user || hostData.user)}@${info.ip_address || hostData.ip}
+                        <span class="font-mono truncate" title="${escapeHtml(info.ssh_user || hostData.user)}@${escapeHtml(info.ip_address || hostData.ip)}">
+                            ${escapeHtml(info.ssh_user || hostData.user)}@${escapeHtml(info.ip_address || hostData.ip)}
                         </span>
                     </div>
                     <div class="grid grid-cols-2 gap-3 mb-3">
                         <div class="p-3 rounded-lg bg-white/5 space-y-1">
                             <p class="text-xs font-semibold termix-muted">OS / Hostname</p>
-                            <p class="text-xs termix-text break-all">${si.os_version || 'Unknown OS'}</p>
-                            <p class="text-xs termix-muted">Hostname: ${si.hostname || 'N/A'}</p>
-                            <p class="text-xs termix-muted">Last update: ${si.last_update || 'N/A'}</p>
+                            <p class="text-xs termix-text break-all">${escapeHtml(si.os_version || 'Unknown OS')}</p>
+                            <p class="text-xs termix-muted">Hostname: ${escapeHtml(si.hostname || 'N/A')}</p>
+                            <p class="text-xs termix-muted">Last update: ${escapeHtml(si.last_update || 'N/A')}</p>
                         </div>
                         <div class="p-3 rounded-lg bg-white/5 space-y-1">
                             <p class="text-xs font-semibold termix-muted">Resources</p>
@@ -2017,7 +2017,7 @@ export function init() {
                     const resp = await fetch(`/hosts/db/${dbId}/info`);
                     const info = await resp.json();
                     if (info.error) {
-                        bodyEl.innerHTML = `<p class="text-xs text-red-600">Error loading host info: ${info.error}</p>`;
+                        bodyEl.innerHTML = `<p class="text-xs text-red-600">Error loading host info: ${escapeHtml(info.error)}</p>`;
                         return null;
                     }
                     renderHostInfo(info);
@@ -2050,7 +2050,7 @@ export function init() {
 
             } catch (err) {
                 console.error('Error loading host info', err);
-                bodyEl.innerHTML = `<p class="text-xs text-red-600">Error loading host info: ${err.message}</p>`;
+                bodyEl.innerHTML = `<p class="text-xs text-red-600">Error loading host info: ${escapeHtml(err.message)}</p>`;
             }
         };
 
@@ -2141,9 +2141,9 @@ const showHostInfoMain = async () => {
                 if (container) {
                     container.innerHTML = `
                         <div class="termix-panel p-4 rounded-lg border border-white/10">
-                            <div class="termix-text font-semibold text-lg">${hostData.friendly_name || hostName}</div>
-                            <div class="text-sm termix-muted mt-1">Group: ${groups}</div>
-                            <div class="text-xs termix-muted font-mono mt-3">${hostData.user || 'root'}@${hostData.ip || hostId}</div>
+                            <div class="termix-text font-semibold text-lg">${escapeHtml(hostData.friendly_name || hostName)}</div>
+                            <div class="text-sm termix-muted mt-1">Group: ${escapeHtml(groups)}</div>
+                            <div class="text-xs termix-muted font-mono mt-3">${escapeHtml(hostData.user || 'root')}@${escapeHtml(hostData.ip || hostId)}</div>
                             <div class="text-xs termix-muted mt-3">Detailed system info is available for wizard-onboarded (db-*) hosts.</div>
                         </div>
                     `;
@@ -2196,12 +2196,12 @@ const showHostInfoMain = async () => {
                                     </div>
                                     <div class="min-w-0">
                                         <div class="flex items-center gap-2 flex-wrap">
-                                            <div class="termix-text font-semibold text-lg truncate">${info.friendly_name || hostName}</div>
+                                            <div class="termix-text font-semibold text-lg truncate">${escapeHtml(info.friendly_name || hostName)}</div>
                                             <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border ${osColor}">${osLabel}</span>
-                                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border bg-white/5 text-gray-200 border-white/10">Group: ${groups}</span>
+                                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border bg-white/5 text-gray-200 border-white/10">Group: ${escapeHtml(groups)}</span>
                                         </div>
-                                        <div class="text-xs termix-muted font-mono mt-2">${(info.ssh_user || hostData.user || 'root')}@${(info.ip_address || hostData.ip || hostId)}</div>
-                                        <div class="text-xs termix-muted mt-1">Hostname: ${si.hostname || 'N/A'} • Last update: ${si.last_update || 'N/A'}</div>
+                                        <div class="text-xs termix-muted font-mono mt-2">${escapeHtml(info.ssh_user || hostData.user || 'root')}@${escapeHtml(info.ip_address || hostData.ip || hostId)}</div>
+                                        <div class="text-xs termix-muted mt-1">Hostname: ${escapeHtml(si.hostname || 'N/A')} • Last update: ${escapeHtml(si.last_update || 'N/A')}</div>
                                     </div>
                                 </div>
                             </div>
@@ -2292,7 +2292,7 @@ const showHostInfoMain = async () => {
                 }
 
             } catch (e) {
-                if (container) container.innerHTML = `<div class="text-sm text-red-400">Failed to load host info: ${e.message}</div>`;
+                if (container) container.innerHTML = `<div class="text-sm text-red-400">Failed to load host info: ${escapeHtml(e.message)}</div>`;
             }
         };
 
@@ -3024,7 +3024,7 @@ const showHostInfoMain = async () => {
                 
                 window.showToast(`Found ${openrouterModelsCache.length} model(s)`);
             } catch (error) {
-                modelsList.innerHTML = `<div class="col-span-1 text-sm text-red-400">Error: ${error.message}</div>`;
+                modelsList.innerHTML = `<div class="col-span-1 text-sm text-red-400">Error: ${escapeHtml(error.message)}</div>`;
                 window.showToast(`Error loading models: ${error.message}`, 'error');
             } finally {
                 openrouterGetModelsBtn.disabled = false;
@@ -3196,7 +3196,7 @@ const showHostInfoMain = async () => {
                 
                 window.showToast(`Found ${ollamaModelsCache.length} model(s)`);
             } catch (error) {
-                modelsList.innerHTML = `<div class="col-span-2 text-sm text-red-400">Error: ${error.message}</div>`;
+                modelsList.innerHTML = `<div class="col-span-2 text-sm text-red-400">Error: ${escapeHtml(error.message)}</div>`;
                 window.showToast(`Error loading models: ${error.message}`, 'error');
             } finally {
                 getModelsBtn.disabled = false;
@@ -3436,14 +3436,14 @@ const showHostInfoMain = async () => {
                     div.className = 'glass-container p-3 rounded-lg';
                     div.innerHTML = `
                         <div class="flex justify-between items-center">
-                            <span class="font-bold text-white">${host.friendly_name}</span>
+                            <span class="font-bold text-white">${escapeHtml(host.friendly_name)}</span>
                             <div class="flex space-x-2">
                                 <button class="edit-host-btn p-1 rounded hover:bg-white/5" data-host-id="${id}" title="Edit"><svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg></button>
                                 <button class="delete-host-btn p-1 rounded hover:bg-white/5" data-host-id="${id}" title="Delete"><svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
                             </div>
                         </div>
-                        <p class="text-sm termix-muted mt-1">${host.description || 'No description'}</p>
-                        <p class="text-xs termix-muted font-mono mt-2">${host.user}@${host.ip}</p>
+                        <p class="text-sm termix-muted mt-1">${escapeHtml(host.description || 'No description')}</p>
+                        <p class="text-xs termix-muted font-mono mt-2">${escapeHtml(host.user)}@${escapeHtml(host.ip)}</p>
                     `;
                     hostListDiv.appendChild(div);
                 }
@@ -4226,7 +4226,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                     <button id="retry-failed-hosts-btn" class="px-3 py-1 text-xs bg-yellow-600 hover:bg-yellow-500 text-white rounded transition-colors">Retry Failed Hosts</button>
                 </div>
                 <div class="max-h-20 overflow-y-auto bg-gray-900 rounded-md p-2 text-xs">
-                    ${failedHosts.map(host => `<div class="text-red-400">❌ ${host.host_name}: ${host.error}</div>`).join('')}
+                    ${failedHosts.map(host => `<div class="text-red-400">❌ ${escapeHtml(host.host_name)}: ${escapeHtml(host.error)}</div>`).join('')}
                 </div>
             `;
             
@@ -4374,7 +4374,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                     <details class="text-xs">
                         <summary class="cursor-pointer hover:text-yellow-100">Show failed hosts...</summary>
                         <ul class="mt-2 ml-4 list-disc">
-                            ${data.failed_hosts.map(h => `<li>${h.host_name}: ${h.error}</li>`).join('')}
+                            ${data.failed_hosts.map(h => `<li>${escapeHtml(h.host_name)}: ${escapeHtml(h.error)}</li>`).join('')}
                         </ul>
                     </details>
                 `;
@@ -4394,7 +4394,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
             // Header: Log Name + Host Names
             let headerHTML = '<th class="px-6 py-3 text-left text-xs font-medium termix-muted uppercase tracking-wider bg-white/5">Log Name</th>';
             data.hosts.forEach(host => {
-                headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium termix-muted uppercase tracking-wider bg-white/5">${host.host_name}</th>`;
+                headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium termix-muted uppercase tracking-wider bg-white/5">${escapeHtml(host.host_name)}</th>`;
             });
             headerRow.innerHTML = headerHTML;
             thead.appendChild(headerRow);
@@ -4406,7 +4406,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
             data.logs.forEach(log => {
                 const row = document.createElement('tr');
                 
-                let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${log.name}</td>`;
+                let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${escapeHtml(log.name)}</td>`;
                 
                 data.hosts.forEach(host => {
                     const hostData = log.hosts[host.host_id];
@@ -4633,7 +4633,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                         <details class="text-xs">
                             <summary class="cursor-pointer hover:text-yellow-100">Show failed hosts...</summary>
                             <ul class="mt-2 ml-4 list-disc">
-                                ${data.failed_hosts.map(h => `<li>${h.host_name}: ${h.error}</li>`).join('')}
+                                ${data.failed_hosts.map(h => `<li>${escapeHtml(h.host_name)}: ${escapeHtml(h.error)}</li>`).join('')}
                             </ul>
                         </details>
                     `;
@@ -4653,7 +4653,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 // Header: Log Name + Host Names
                 let headerHTML = '<th class="px-6 py-3 text-left text-xs font-medium termix-muted uppercase tracking-wider bg-white/5">Log Name</th>';
                 data.hosts.forEach(host => {
-                    headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium termix-muted uppercase tracking-wider bg-white/5">${host.host_name}</th>`;
+                    headerHTML += `<th class="px-6 py-3 text-left text-xs font-medium termix-muted uppercase tracking-wider bg-white/5">${escapeHtml(host.host_name)}</th>`;
                 });
                 headerRow.innerHTML = headerHTML;
                 thead.appendChild(headerRow);
@@ -4665,7 +4665,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 data.logs.forEach(log => {
                     const row = document.createElement('tr');
                     
-                    let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${log.name}</td>`;
+                    let rowHTML = `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${escapeHtml(log.name)}</td>`;
                     
                     data.hosts.forEach(host => {
                         const hostData = log.hosts[host.host_id];
@@ -4950,7 +4950,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
             } catch (error) {
                 searchResultsList.innerHTML = `
                     <div class="p-4 text-red-400 text-center">
-                        <p>Search failed: ${error.message}</p>
+                        <p>Search failed: ${escapeHtml(error.message)}</p>
                     </div>
                 `;
                 searchResultsContainer.classList.remove('hidden');
@@ -4995,11 +4995,11 @@ aiAnalyseBtn.addEventListener('click', async () => {
                         <div class="flex items-start justify-between mb-2">
                             <div class="flex-1">
                                 <div class="flex items-center space-x-2 mb-1">
-                                    <span class="font-medium termix-text">${result.log_name}</span>
+                                    <span class="font-medium termix-text">${escapeHtml(result.log_name)}</span>
                                     <span class="text-xs px-2 py-1 rounded ${
                                         result.log_type === 'file' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
                                     }">${result.log_type}</span>
-                                    <span class="text-xs termix-muted">on ${result.host_name}</span>
+                                    <span class="text-xs termix-muted">on ${escapeHtml(result.host_name)}</span>
                                 </div>
                                 <div class="text-sm termix-muted font-mono termix-panel p-2 rounded">
                                     ${result.line_number ? `Line ${result.line_number}: ` : ''}${highlightedContent}

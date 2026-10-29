@@ -24,13 +24,13 @@ Design notes
 
 from __future__ import annotations
 
-import datetime
 import json
 import logging
 import threading
 import time
 
 import requests
+from core.timeutil import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -312,7 +312,7 @@ def _fire(host_key, rule, value, now):
             metric=rule['metric'], value=float(value),
             threshold=float(rule['threshold']), op=rule['op'],
             severity=rule['severity'], state='firing', message=message,
-            started_at=datetime.datetime.utcnow(),
+            started_at=utcnow(),
         )
         db.session.add(event)
         db.session.commit()
@@ -344,7 +344,7 @@ def _resolve(event_id, value):
         if not event or event.state != 'firing':
             return
         event.state = 'resolved'
-        event.resolved_at = datetime.datetime.utcnow()
+        event.resolved_at = utcnow()
         event.resolved_value = float(value) if value is not None else None
         db.session.commit()
         notify(event.to_dict())
@@ -410,7 +410,7 @@ def notify(event):
         'description': body[:1900],
         'color': 3066993 if resolved else _colour(event.get('severity')),
         'footer': {'text': 'ailog alerts'},
-        'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+        'timestamp': utcnow().isoformat() + 'Z',
     }
     try:
         resp = requests.post(url, json={'embeds': [embed]}, timeout=8)

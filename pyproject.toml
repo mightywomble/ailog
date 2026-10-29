@@ -1,0 +1,30 @@
+[project]
+name = "homelab-manager"
+version = "2.20.0"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["venv", ".venv", "instance", "static/vendor"]
+
+[tool.ruff.lint]
+# F = real bugs (undefined names, unused imports). E9 = syntax/runtime errors.
+# Style rules are deliberately left out: the codebase predates a formatter and a
+# big-bang reformat would bury the real diffs.
+select = ["F", "E9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning:apscheduler.*"]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "venv/*", ".venv/*", "tests/*", "instance/*",
+    "monitoring/*", "serverreport/*", "dockermon/*", "alerting/*", "metrics/*",
+]
+
+[tool.coverage.report]
+skip_empty = true

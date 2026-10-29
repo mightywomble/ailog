@@ -5,7 +5,6 @@ These routes used to live in app.py and were extracted verbatim into the
 honest.
 """
 import json
-import os
 
 
 def _host_id(host_key):
@@ -120,7 +119,8 @@ def test_ssh_config_export(client, ctx, host):
     body = r.data.decode()
     assert body.startswith('# Auto-generated SSH config from Homelab Manager')
     assert 'Group: mainip' in body
-    assert 'StrictHostKeyChecking no' in body
+    assert 'StrictHostKeyChecking accept-new' in body
+    assert 'UserKnownHostsFile=/dev/null' not in body
 
 
 def test_db_backup_returns_sqlite_bytes(client):

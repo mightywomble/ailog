@@ -1,0 +1,21 @@
+    <!-- SSH terminal in a window: same xterm instance, moved here while expanded -->
+    <div id="ssh-terminal-overlay" class="app-modal hidden" role="dialog" aria-modal="true"
+         aria-labelledby="ssh-modal-title">
+        <div class="app-modal-panel app-modal-xl ssh-modal-panel">
+            <div class="app-modal-head">
+                <div class="app-modal-title" id="ssh-modal-title">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z"/></svg>
+                    SSH Terminal
+                    <span id="ssh-modal-host" class="ssh-modal-host"></span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div id="ssh-modal-status" data-ssh-status class="text-xs termix-muted">Disconnected</div>
+                    <button id="ssh-terminal-contract-btn" type="button" class="app-modal-close ssh-contract-btn"
+                            aria-label="Contract terminal back into the page" title="Contract terminal back into the page">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="ssh-modal-body" class="app-modal-body app-modal-body-flush ssh-modal-body"></div>
+        </div>
+    </div>

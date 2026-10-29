@@ -7,17 +7,10 @@ prefix so every URL stays exactly where it was.
 
 from __future__ import annotations
 
-import datetime
-import json
-import os
-import shutil
-import sqlite3
-import tempfile
 
-from flask import (Blueprint, Response, current_app, jsonify, request)
-from sqlalchemy import text as sql_text
+from flask import (Blueprint, jsonify, request)
 
-from database import db, AppSetting, Group, Host, Tag
+from database import db, Group, Host, Tag
 
 bp = Blueprint('inventory_groups', __name__)
 

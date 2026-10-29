@@ -32,7 +32,7 @@ def cleanup_key_cache():
 atexit.register(cleanup_key_cache)
 
 
-def _write_temp_ssh_key_file(plaintext: str) -> str:
+def write_temp_ssh_key_file(plaintext: str) -> str:
     """Write SSH key plaintext to a temp file in a way that avoids newline/encoding issues."""
     normalized = normalize_ssh_key_text(plaintext or '')
     if normalized and not normalized.endswith("\n"):
@@ -45,7 +45,7 @@ def _write_temp_ssh_key_file(plaintext: str) -> str:
     return tf.name
 
 
-def _sshkey_plaintext_from_model(key: SSHKey) -> str:
+def key_plaintext_from_model(key: SSHKey) -> str:
     """Return decrypted plaintext for a stored SSHKey row.
 
     Historical note: some rows ended up being encrypted multiple times due to earlier
@@ -81,6 +81,18 @@ def _sshkey_plaintext_from_model(key: SSHKey) -> str:
     return content or ''
 
 
+def evict_key_cache(ssh_key_id: Optional[int]) -> None:
+    """Forget (and delete) the cached temp file for a key that was deleted."""
+    if not ssh_key_id:
+        return
+    path = _ssh_key_file_cache.pop(int(ssh_key_id), None)
+    if path:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
 def materialize_ssh_key_path(ssh_key_id: Optional[int]) -> Optional[str]:
     """Return temp file path containing decrypted key; cached per key id."""
     if not ssh_key_id:
@@ -95,10 +107,15 @@ def materialize_ssh_key_path(ssh_key_id: Optional[int]) -> Optional[str]:
     if not key:
         return None
 
-    content = _sshkey_plaintext_from_model(key)
+    content = key_plaintext_from_model(key)
     if not content:
         return None
 
-    tf_name = _write_temp_ssh_key_file(content)
+    tf_name = write_temp_ssh_key_file(content)
     _ssh_key_file_cache[ssh_key_id] = tf_name
     return tf_name
+
+
+# backwards-compatible private aliases
+_write_temp_ssh_key_file = write_temp_ssh_key_file
+_sshkey_plaintext_from_model = key_plaintext_from_model

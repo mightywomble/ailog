@@ -1,5 +1,4 @@
 """Docker history, app grouping, swarm view and their routes."""
-import time
 
 import pytest
 
@@ -172,7 +171,6 @@ def test_swarm_sparklines_grow_per_build():
 
 def test_swarm_does_not_cache_failures(monkeypatch, ctx):
     dswarm.clear()
-    import dockermon.routes as routes
 
     class Info(dict):
         pass

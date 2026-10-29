@@ -1,11 +1,9 @@
-"""
-Helper functions for device onboarding wizard
-"""
+"""Helper functions for device onboarding wizard."""
 
-import subprocess
 import json
-from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
+
+from core.ssh import run_remote
 
 def test_ssh_connection(user: str, ip: str, ssh_key_path: str = None, timeout: int = 5) -> Dict:
     """
@@ -13,47 +11,32 @@ def test_ssh_connection(user: str, ip: str, ssh_key_path: str = None, timeout: i
     Returns dict with status, message, and connection details
     """
     try:
-        cmd = [
-            "ssh", 
-            "-o", "ConnectTimeout=5",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "BatchMode=yes",
-            "-o", "UserKnownHostsFile=/dev/null"
-        ]
-        
-        if ssh_key_path:
-            cmd.extend(["-i", ssh_key_path])
-        
-        cmd.append(f"{user}@{ip}")
-        cmd.append("echo 'SSH_SUCCESS'")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        
-        if result.returncode == 0 and "SSH_SUCCESS" in result.stdout:
+        ok, output = run_remote(user, ip, "echo 'SSH_SUCCESS'",
+                                ssh_key_path=ssh_key_path, timeout=timeout)
+        if ok and 'SSH_SUCCESS' in (output or ''):
             return {
                 'status': 'success',
                 'message': 'SSH connection successful',
                 'ip': ip,
                 'user': user
             }
-        elif "Permission denied" in result.stderr or "Authentication failed" in result.stderr:
+        if 'Permission denied' in (output or '') or 'Authentication failed' in (output or ''):
             return {
                 'status': 'auth_error',
                 'message': 'Authentication failed',
                 'ip': ip,
                 'user': user
             }
-        else:
+        if 'timed out' in (output or '').lower():
             return {
-                'status': 'failed',
-                'message': f'Connection failed: {result.stderr[:100]}',
+                'status': 'timeout',
+                'message': 'Connection timed out',
                 'ip': ip,
                 'user': user
             }
-    except subprocess.TimeoutExpired:
         return {
-            'status': 'timeout',
-            'message': 'Connection timed out',
+            'status': 'failed',
+            'message': f'Connection failed: {(output or "")[:100]}',
             'ip': ip,
             'user': user
         }
@@ -71,31 +54,7 @@ def execute_remote_command(user: str, ip: str, command: str, ssh_key_path: str =
     Execute a command on a remote host via SSH
     Returns (success, output)
     """
-    try:
-        cmd = [
-            "ssh",
-            "-o", "ConnectTimeout=5",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "BatchMode=yes",
-            "-o", "UserKnownHostsFile=/dev/null"
-        ]
-        
-        if ssh_key_path:
-            cmd.extend(["-i", ssh_key_path])
-        
-        cmd.append(f"{user}@{ip}")
-        cmd.append(command)
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        
-        if result.returncode == 0:
-            return (True, result.stdout)
-        else:
-            return (False, result.stderr)
-    except subprocess.TimeoutExpired:
-        return (False, "Command timed out")
-    except Exception as e:
-        return (False, str(e))
+    return run_remote(user, ip, command, ssh_key_path=ssh_key_path, timeout=timeout)
 
 
 def collect_system_info(user: str, ip: str, ssh_key_path: str = None) -> Dict:

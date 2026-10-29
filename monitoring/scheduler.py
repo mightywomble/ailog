@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from database import Monitor, MonitorCheck, db
 
-from .runner import execute_docker_container_check, execute_http_check, execute_tcp_check, execute_udp_listen_check
+from .runner import execute_http_check, execute_tcp_check
+from core.timeutil import utcnow
 
 
 def _monitor_due(m, now):
@@ -21,7 +22,7 @@ def _monitor_due(m, now):
 
 def run_due_monitors(limit=100):
     """Run up to limit due monitors inside a Flask app context."""
-    now = datetime.utcnow()
+    now = utcnow()
     monitors = Monitor.query.filter_by(enabled=True).order_by(Monitor.id.asc()).limit(2000).all()
     due = [m for m in monitors if _monitor_due(m, now)]
     due = due[:int(limit)]
@@ -41,13 +42,13 @@ def run_due_monitors(limit=100):
             else:
                 m.last_status = "error"
                 m.last_error_message = f"Unsupported monitor type: {m.type}"
-                m.last_checked_at = datetime.utcnow()
+                m.last_checked_at = utcnow()
                 db.session.commit()
                 errors += 1
                 continue
             chk = MonitorCheck(
                 monitor_id=m.id,
-                checked_at=datetime.utcnow(),
+                checked_at=utcnow(),
                 status=result.status,
                 response_time_ms=int(result.response_time_ms),
                 status_code=getattr(result, "status_code", None),
@@ -69,7 +70,7 @@ def run_due_monitors(limit=100):
             try:
                 m.last_status = "error"
                 m.last_error_message = str(e)[:500]
-                m.last_checked_at = datetime.utcnow()
+                m.last_checked_at = utcnow()
                 db.session.commit()
             except Exception:
                 pass

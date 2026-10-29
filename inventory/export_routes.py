@@ -7,17 +7,13 @@ prefix so every URL stays exactly where it was.
 
 from __future__ import annotations
 
-import datetime
 import json
-import os
-import shutil
-import sqlite3
-import tempfile
 
-from flask import (Blueprint, Response, current_app, jsonify, request)
-from sqlalchemy import text as sql_text
+from core.hostkeys import ssh_config_block
+from flask import (Blueprint, Response, jsonify)
 
-from database import db, AppSetting, Group, Host, Tag
+from database import Host
+from core.timeutil import utcnow
 
 bp = Blueprint('inventory_export', __name__)
 
@@ -72,7 +68,7 @@ def export_ssh_config():
         hosts = Host.query.all()
         
         ssh_config = "# Auto-generated SSH config from Homelab Manager\n"
-        ssh_config += f"# Generated: {datetime.datetime.utcnow().isoformat()}\n\n"
+        ssh_config += f"# Generated: {utcnow().isoformat()}\n\n"
         
         def _host_block(name, ip, host_obj):
             nonlocal ssh_config
@@ -81,8 +77,7 @@ def export_ssh_config():
             ssh_config += f'    User {host_obj.ssh_user}\n'
             if host_obj.ssh_key:
                 ssh_config += f'    IdentityFile ~/.ssh/{host_obj.ssh_key.key_name}\n'
-            ssh_config += '    StrictHostKeyChecking no\n'
-            ssh_config += '    UserKnownHostsFile=/dev/null\n'
+            ssh_config += ssh_config_block()
             ssh_config += '\n'
 
         ssh_config += '# ----------------------------------------\n'

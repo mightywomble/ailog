@@ -519,8 +519,10 @@ async function refresh() {
         summary.textContent =
             `${online}/${servers.length} servers reachable · ${docker} with Docker`;
         state.lastOk = Date.now();
+        state.failures = 0;
         setLive(state.paused ? 'paused' : 'live');
     } catch (err) {
+        state.failures = (state.failures || 0) + 1;
         setLive('error');
         summary.textContent = `Last update failed: ${err.message}`;
     } finally {
@@ -528,12 +530,24 @@ async function refresh() {
     }
 }
 
+// Polling interval is adaptive: each poll costs one SSH round trip per host,
+// so a big fleet (or a flaky host) is sampled less often than a single card
+// the user is actually watching.
+function effectiveInterval() {
+    const base = state.interval || 2000;
+    if ((state.failures || 0) >= 3) return Math.min(base * 4, 20000);
+    const anyExpanded = [...state.hosts.values()].some((entry) => entry.expanded);
+    if (anyExpanded || state.hosts.size <= 2) return base;
+    const scaled = base * Math.ceil(state.hosts.size / 4);
+    return Math.min(Math.max(base, scaled), 15000);
+}
+
 function schedule() {
-    clearInterval(state.timer);
-    state.timer = setInterval(() => {
-        if (document.hidden) return;
-        refresh();
-    }, state.interval);
+    clearTimeout(state.timer);
+    state.timer = setTimeout(async () => {
+        if (!document.hidden) await refresh();
+        schedule();
+    }, effectiveInterval());
 }
 
 const togglePause = () => {

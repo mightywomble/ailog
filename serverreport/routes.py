@@ -16,8 +16,7 @@ import queue
 import threading
 import time
 
-from flask import (Blueprint, Response, current_app, jsonify, redirect,
-                   render_template, request, stream_with_context, url_for)
+from flask import (Blueprint, Response, current_app, jsonify, render_template, request, stream_with_context, url_for)
 
 from database import LogReport, db
 from . import diff as rdiff
@@ -37,6 +36,7 @@ PROVIDER_LABELS = {'openai': 'OpenAI', 'ollama': 'Ollama', 'openrouter': 'OpenRo
 # A size check and the run that follows it should not collect the host twice.
 # Bundles are single-use and short-lived.
 BUNDLE_TTL_SECONDS = 300
+BUNDLE_MAX_ENTRIES = 32
 _bundle_lock = threading.Lock()
 _bundles = {}
 
@@ -56,6 +56,10 @@ def _bundle_put(key, payload):
         now = time.time()
         for stale in [k for k, v in _bundles.items() if now - v[0] > BUNDLE_TTL_SECONDS]:
             _bundles.pop(stale, None)
+        # Hard cap: a long-lived process must not grow without bound.
+        while len(_bundles) >= BUNDLE_MAX_ENTRIES:
+            oldest = min(_bundles, key=lambda k: _bundles[k][0])
+            _bundles.pop(oldest, None)
         _bundles[key] = (now, payload)
 
 

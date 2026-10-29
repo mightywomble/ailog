@@ -1,9 +1,10 @@
 /* Overview cards — the dashboard's card vocabulary (Option C).
  *
- * Everything here is read-only summarising of endpoints that already exist:
- *   GET /api/metrics/servers   fleet live stats + Docker presence
- *   GET /api/alerts/events     active + recent alert events
- *   GET /api/reports           recent server reports
+ * One read-only aggregate feeds all three cards:
+ *   GET /api/overview   fleet live stats + active/recent alerts + recent reports
+ *
+ * The server tags the response with an ETag, so an unchanged dashboard is a
+ * 304 with no body; failures back off exponentially up to a minute.
  *
  * It adds no state of its own: refresh replaces the card contents, and the
  * whole block is skipped while the dashboard is not the visible view.
@@ -152,9 +153,13 @@
 
     /* --------------------------------------------------------------- poll */
 
-    // keyed results so each card can appear the moment its endpoint answers
+    // The server aggregates all three cards into /api/overview and returns an
+    // ETag, so an unchanged dashboard answers 304 and costs no payload.
     const result = { servers: null, alerts: null, reports: null };
     let painted = false;
+    let etag = null;
+    let failures = 0;
+    let nextDelay = POLL_MS;
 
     function skeletonCard(title) {
         return `
@@ -192,49 +197,78 @@
         });
     }
 
+    /* Fetch the aggregate. Returns false when the server said "not modified". */
+    async function loadOverview() {
+        const headers = { Accept: 'application/json' };
+        if (etag) headers['If-None-Match'] = etag;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        let res;
+        try {
+            res = await fetch('/api/overview', { headers, signal: controller.signal });
+        } finally {
+            clearTimeout(timeout);
+        }
+
+        if (res.status === 304) return false;
+        if (!res.ok) throw new Error(`overview ${res.status}`);
+
+        etag = res.headers.get('ETag') || etag;
+        const payload = await res.json();
+        const section = (value) => (value && value.error ? { error: value } : { data: value });
+        result.servers = section(payload.servers);
+        result.alerts = section(payload.alerts);
+        result.reports = section(payload.reports);
+        return true;
+    }
+
     async function refresh() {
         if (busy || !dashboardVisible()) return;
         busy = true;
-
-        const load = async (key, url) => {
-            try {
-                const data = await getJson(url);
-                result[key] = { data };
-            } catch (error) {
-                result[key] = { error };
-            }
-            if (dashboardVisible()) paint();
-        };
 
         try {
             if (!painted) {
                 result.servers = result.alerts = result.reports = null;
                 paint();
             }
-            await Promise.all([
-                load('servers', '/api/metrics/servers'),
-                load('alerts', '/api/alerts/events?limit=8'),
-                load('reports', '/api/reports?limit=5'),
-            ]);
+            const changed = await loadOverview();
+            if (changed) {
+                failures = 0;
+                nextDelay = POLL_MS;
+                if (dashboardVisible()) paint();
+            }
+        } catch (error) {
+            // Back off instead of hammering a box that is already struggling.
+            failures += 1;
+            nextDelay = Math.min(Math.round(POLL_MS * Math.pow(1.6, failures)), 60000);
+            if (!painted) {
+                result.servers = result.alerts = result.reports = { error };
+                paint();
+            }
         } finally {
             busy = false;
         }
     }
 
     function schedule() {
-        clearInterval(timer);
-        timer = setInterval(() => {
-            if (!dashboardVisible()) return;
-            refresh();
-        }, POLL_MS);
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+            if (dashboardVisible()) await refresh();
+            schedule();
+        }, nextDelay);
     }
 
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && dashboardVisible()) refresh();
+        if (!document.hidden && dashboardVisible()) {
+            nextDelay = POLL_MS;
+            refresh();
+        }
     });
     window.addEventListener('themechange', () => refresh());
 
     window.refreshOverview = refresh;
+    window.overviewPollState = () => ({ delay: nextDelay, failures, etag });
     refresh();
     schedule();
 })();

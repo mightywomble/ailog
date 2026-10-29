@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any, Dict, List
 
 import requests
@@ -16,6 +15,7 @@ from .discovery import (
     generate_monitor_candidates,
 )
 from .sshkeys import materialize_ssh_key_path
+from core.timeutil import utcnow
 
 
 monitoring_bp = Blueprint('monitoring', __name__)
@@ -28,7 +28,7 @@ def _http_probe_ports(host_ip: str, ports: List[int]) -> Dict[int, Dict[str, Any
         for scheme in ('http', 'https'):
             url = f'{scheme}://{host_ip}:{port}/'
             try:
-                r = requests.get(url, timeout=2, allow_redirects=True, verify=False)
+                requests.get(url, timeout=2, allow_redirects=True, verify=False)
                 # If we got any HTTP status, it's HTTP.
                 results[port] = {'is_http': True, 'url': f'{scheme}://{host_ip}:{port}'}
                 break
@@ -161,8 +161,8 @@ def monitoring_wizard_apply():
                 interval_seconds=interval_seconds,
                 timeout_seconds=timeout_seconds,
                 config_json=cfg_json,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=utcnow(),
+                updated_at=utcnow(),
             )
             db.session.add(m)
             created += 1
@@ -212,7 +212,6 @@ def api_host_monitoring(host_id: int):
 
 def _execute_monitor_now(m: Monitor):
     """Execute a monitor immediately and persist a MonitorCheck + update monitor last_* fields."""
-    from datetime import datetime
     from monitoring.scheduler import db as _db
     from database import MonitorCheck
 
@@ -248,7 +247,7 @@ def _execute_monitor_now(m: Monitor):
 
         chk = MonitorCheck(
             monitor_id=m.id,
-            checked_at=datetime.utcnow(),
+            checked_at=utcnow(),
             status=result.status,
             response_time_ms=int(result.response_time_ms),
             status_code=getattr(result, 'status_code', None),
