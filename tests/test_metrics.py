@@ -301,12 +301,13 @@ def test_monitoring_button_opens_the_metrics_dialog(index_html):
     assert 'about:blank' in block.group(0)
     assert 'app-modal-close' in block.group(0)
 
-    button = re.search(r'<button[^>]*id="logs-action-monitor"[^>]*>(.*?)</button>', index_html, re.S)
+    button = re.search(r'<button[^>]*id="dashboard-open-monitoring"[^>]*>(.*?)</button>', index_html, re.S)
     assert button and 'Monitoring' in button.group(1)
 
 
 def test_old_monitoring_ui_is_gone(index_html):
     core = (ROOT / 'static' / 'js' / 'app-core.js').read_text()
+    assert 'logs-action-monitor' not in index_html   # moved off the host toolbar
 
     # the legacy monitor list/editor and its hand-rolled overlay
     assert 'showHostMonitoringMain' not in core

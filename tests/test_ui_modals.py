@@ -205,3 +205,45 @@ def test_short_forms_use_the_fit_modifier(index_html):
     for modal_id in ('dockerModal', 'reportsModal', 'ai-analysis-modal', 'server-report-modal'):
         block = _modal_block(index_html, modal_id)
         assert 'app-modal-fit' not in block, modal_id
+
+
+def test_dashboard_toolbar_owns_monitoring_add_devices_and_more(app_module):
+    """Monitoring is dashboard-wide, not per host, so it sits next to the
+    global actions instead of in the host toolbar."""
+    html = app_module.app.test_client().get('/').data.decode()
+
+    # locate #dashboard-view and check the toolbar is its child
+    start = html.index('<div id="dashboard-view"')
+    depth = 0
+    block = None
+    for m in re.finditer(r'<div\b|</div>', html[start:]):
+        depth += 1 if m.group(0) == '<div' else -1
+        if depth == 0:
+            block = html[start:start + m.end()]
+            break
+    assert block and 'id="dashboard-toolbar"' in block
+    assert 'id="dashboard-open-monitoring"' in block
+    assert 'id="add-devices-btn"' in block
+    assert 'id="toolbar-more-btn"' in block
+
+    # and they are no longer in the global header
+    header = re.search(r'<header.*?</header>', html, re.S).group(0)
+    for gone in ('add-devices-btn', 'toolbar-more-btn', 'toolbar-more-menu'):
+        assert gone not in header, gone
+    assert 'settings-btn' in header          # settings stays global
+
+    # the More menu kept its ids so its existing wiring still works
+    for kept in ('create-ansible-inventory-btn', 'create-ssh-config-btn', 'rescan-all-btn'):
+        assert kept in block
+
+    # host toolbar is host-specific only
+    start = html.index('<div id="logs-view"')
+    depth = 0
+    hostbar = None
+    for m in re.finditer(r'<div\b|</div>', html[start:]):
+        depth += 1 if m.group(0) == '<div' else -1
+        if depth == 0:
+            hostbar = html[start:start + m.end()]
+            break
+    assert hostbar and 'logs-action-pull' in hostbar
+    assert 'logs-action-monitor' not in hostbar
