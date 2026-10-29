@@ -14,11 +14,11 @@ is a true delta.
 
 from __future__ import annotations
 
-import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from core.ssh import run_host
 from dockermon.parse import parse_df_root, parse_meminfo, parse_netdev, parse_proc_stat
 
 MARK = '===AILOG_METRICS==='
@@ -84,16 +84,7 @@ def _split(output: str) -> Dict[str, str]:
 
 def _run(host: Dict[str, Any], command: str, timeout: int = SSH_TIMEOUT):
     """Run on ``local`` via a shell, everything else over SSH."""
-    if host.get('key') == 'local':
-        proc = subprocess.run(['bash', '-lc', command], capture_output=True,
-                              text=True, timeout=timeout)
-        return proc.returncode == 0, (proc.stdout or '') + (proc.stderr or '')
-
-    from dockermon import endpoints as ep
-    ok, out = ep.ssh_run(host.get('user') or 'root', host.get('ip'),
-                         command, ssh_key_id=host.get('ssh_key_id'),
-                         timeout=timeout)
-    return ok, out or ''
+    return run_host(host, command, timeout=timeout)
 
 
 def _number(value, default=0) -> float:

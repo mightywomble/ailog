@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - SDK missing is tolerated
         pass
 
 
-from wizard_helpers import execute_remote_command
+from core.ssh import run_remote as ssh_run_remote
 from monitoring.sshkeys import materialize_ssh_key_path
 
 SSH_TIMEOUT = 10
@@ -117,7 +117,7 @@ def ssh_key_path(ssh_key_id) -> Optional[str]:
 
 
 def ssh_run(user: str, ip: str, command: str, ssh_key_id=None, timeout: int = SSH_TIMEOUT):
-    return execute_remote_command(user, ip, command, ssh_key_path=ssh_key_path(ssh_key_id), timeout=timeout)
+    return ssh_run_remote(user, ip, command, ssh_key_path=ssh_key_path(ssh_key_id), timeout=timeout)
 
 
 # --------------------------------------------------------------------------

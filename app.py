@@ -371,15 +371,9 @@ def save_hosts(hosts):
         json.dump(hosts, f, indent=4)
 
 def get_ssh_prefix_args(user, ip, identity_file=None):
-    """Construct the SSH command prefix as a list of args."""
-    from core.hostkeys import ssh_cli_options
-    args = ["ssh", "-o", "ConnectTimeout=5"]
-    args += ssh_cli_options()
-    args += ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes"]
-    if identity_file:
-        args += ["-i", identity_file]
-    args.append(f"{user}@{ip}")
-    return args
+    """SSH argv prefix (host-key policy and timeouts live in core.ssh)."""
+    from core.ssh import ssh_argv
+    return ssh_argv(user, ip, identity_file=identity_file)
 
 
 
