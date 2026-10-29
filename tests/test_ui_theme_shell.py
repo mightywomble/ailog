@@ -199,6 +199,13 @@ def test_overview_polls_the_three_summary_endpoints():
     assert "skeletonCard" in js
 
 
+def test_offline_count_copy_matches_the_number():
+    js = (STATIC / "js" / "overview.js").read_text()
+    # 6 offline hosts must not be described as "all reachable"
+    assert "unreachable" in js
+    assert "servers.length === online.length ? 'all reachable'" in js
+
+
 def test_app_core_exposes_the_navigation_hooks():
     js = (STATIC / "js" / "app-core.js").read_text()
     assert "window.ailogOpenHost" in js
