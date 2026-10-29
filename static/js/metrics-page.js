@@ -10,13 +10,15 @@
  */
 
 const HISTORY = 90;                       // samples (~3 minutes at 2s)
-const SERIES_COLORS = {
-    cpu: '#38bdf8',
-    mem: '#a78bfa',
-    disk: '#f59e0b',
-    rx: '#22d3ee',
-    tx: '#fb7185',
+// Series colours come from the active theme's --chart-* tokens, so switching
+// theme re-colours the charts instead of leaving them on the old palette.
+const series = () => {
+    const tokens = window.themeColors ? window.themeColors() : null;
+    const list = tokens?.series || ['#38bdf8', '#a78bfa', '#f59e0b', '#22d3ee', '#fb7185'];
+    return { cpu: list[0], mem: list[1], disk: list[2], rx: list[3], tx: list[4] };
 };
+const SERIES_COLORS = { get cpu() { return series().cpu; }, get mem() { return series().mem; },
+    get disk() { return series().disk; }, get rx() { return series().rx; }, get tx() { return series().tx; } };
 const DOCKER_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.7 9.3c-.6-.4-1.9-.6-2.9-.4-.1-.9-.6-1.7-1.4-2.4l-.5-.4-.4.5c-.5.7-.7 1.8-.6 2.7.1.5.2 1 .5 1.4-.3.2-.9.4-1.1.4H1.4c-.2 1.6.3 3.6 1.7 5 1.4 1.4 3.4 2.1 6 2.1 6.5 0 11.2-3 13.4-8.4.9 0 2.4 0 3.2-1.6l.2-.4-.6-.4c-.5-.3-1.2-.5-1.6-.4zM3.2 10.7h1.9v1.9H3.2v-1.9zm2.6 0h1.9v1.9H5.8v-1.9zm2.7 0h1.9v1.9H8.5v-1.9zm2.6 0h1.9v1.9h-1.9v-1.9zm-7.9-2.6h1.9v1.9H3.2V8.1zm2.6 0h1.9v1.9H5.8V8.1zm2.7 0h1.9v1.9H8.5V8.1zm2.6 0h1.9v1.9h-1.9V8.1zm2.6 0h1.9v1.9h-1.9V8.1z"/></svg>';
 
 const state = {
@@ -227,14 +229,30 @@ async function fetchJson(url) {
     return res.json();
 }
 
+function renderSampleError(box, raw) {
+    const text = String(raw || 'Host unreachable').trim();
+    const lines = text.split(/\r?\n/);
+    box.textContent = '';
+    const head = document.createElement('strong');
+    head.textContent = lines[0] || 'Host unreachable';
+    box.appendChild(head);
+    if (lines.length > 1) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Command output';
+        const pre = document.createElement('pre');
+        pre.textContent = lines.slice(1).join('\n');
+        details.append(summary, pre);
+        box.appendChild(details);
+    }
+}
+
 function setLive(kind) {
     if (!liveBadge) return;
     liveBadge.classList.toggle('m-paused', kind === 'paused');
     liveBadge.classList.toggle('m-error', kind === 'error');
-    liveBadge.querySelector('span:last-child')?.remove();
-    const label = document.createElement('span');
-    label.textContent = kind === 'paused' ? 'paused' : (kind === 'error' ? 'disconnected' : 'live');
-    liveBadge.appendChild(label);
+    const label = liveBadge.querySelector('#m-live-label');
+    if (label) label.textContent = kind === 'paused' ? 'paused' : (kind === 'error' ? 'disconnected' : 'live');
 }
 
 function renderServer(server) {
@@ -286,7 +304,7 @@ function renderServer(server) {
     if (!online) {
         entry.series = { cpu: [], mem: [], disk: [], rx: [], tx: [] };
         refs.error.classList.remove('hidden');
-        refs.error.textContent = server.error || 'Host unreachable';
+        renderSampleError(refs.error, server.error);
         refs.containers.classList.add('hidden');
         ['cpu', 'mem', 'disk', 'net'].forEach((name) => {
             const box = refs.metrics[name];
@@ -546,6 +564,14 @@ window.addEventListener('resize', () => {
             { values: series.tx, color: SERIES_COLORS.tx, fill: false },
         ]);
     });
+});
+
+window.addEventListener('themechange', () => {
+    // Repaint every sparkline in the new palette.
+    state.hosts.forEach((entry) => {
+        if (entry.expanded) loadContainers(entry.server?.host_key);
+    });
+    refresh();
 });
 
 refresh();

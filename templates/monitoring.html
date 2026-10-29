@@ -5,6 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Monitoring - {{ host.friendly_name or host.hostname or host.ip_address }}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <script>
+    (function () {
+      try {
+        var r = document.documentElement;
+        var mode = localStorage.getItem('ui.mode') || 'system';
+        var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        r.dataset.theme = localStorage.getItem('ui.theme') || 'midnight';
+        r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
+        r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
+        r.dataset.motion = localStorage.getItem('ui.motion') || 'full';
+        r.style.colorScheme = r.dataset.mode;
+      } catch (e) {}
+    })();
+  </script>
+  <script type="module" src="/static/js/theme.js"></script>
 </head>
 <body class="bg-slate-950 text-slate-100">
   <div class="max-w-6xl mx-auto p-6">

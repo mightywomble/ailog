@@ -15,7 +15,27 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/theme.css">
+    <link rel="stylesheet" href="/static/css/shell.css">
+    <link rel="stylesheet" href="/static/css/ui.css">
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <!-- Apply the saved theme before first paint (theme.js re-applies later). -->
+    <script>
+      (function () {
+        try {
+          var r = document.documentElement;
+          var theme = localStorage.getItem('ui.theme') || 'midnight';
+          var mode = localStorage.getItem('ui.mode') || 'system';
+          var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          r.dataset.theme = theme;
+          r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
+          r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
+          r.dataset.motion = localStorage.getItem('ui.motion') || 'full';
+          r.style.colorScheme = r.dataset.mode;
+        } catch (e) { /* private mode */ }
+      })();
+    </script>
+    <script type="module" src="/static/js/theme.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -141,30 +161,52 @@
 .ai-markdown strong { color: #fff; }
 </style>
 </head>
-<body class="termix-text font-sans antialiased min-h-screen">
+<body class="app-shell-body termix-text font-sans antialiased">
+
+    <a class="skip-link" href="#dashboard-view">Skip to content</a>
 
     
-    <header class="glass-container mx-4 mt-4 p-4 shadow-lg flex items-center justify-between gap-3 relative z-50">
-        <div class="flex items-center gap-3 min-w-0">
-            <h1 class="text-2xl font-bold termix-text truncate">AI Log Viewer</h1>
-            <div id="ai-provider-indicator" class="termix-chip px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm hidden sm:inline-flex">
+    <header class="app-header glass-container" id="app-header">
+        <div class="app-brand">
+            <button id="mobile-menu-btn" class="icon-btn mobile-only" type="button"
+                    aria-label="Open hosts" aria-controls="hosts-sidebar" aria-expanded="false">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <span class="brand-mark" aria-hidden="true">
+                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/></svg>
+            </span>
+            <h1 class="termix-text">AI Log Viewer</h1>
+            <div id="ai-provider-indicator" class="termix-chip hidden sm:inline-flex">
                 <span id="provider-label">Loading...</span>
             </div>
         </div>
 
-        <div class="flex items-center gap-2 flex-wrap justify-end">
-            <button id="settings-btn" class="button text-sm px-4 py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-0 sm:mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                <span class="hidden sm:inline">Settings</span>
+        <div class="app-header-actions">
+            <button id="command-palette-btn" class="icon-btn" type="button" data-command-palette
+                    aria-label="Search and commands" title="Search and commands">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <span class="header-label" data-palette-hint>⌘K</span>
             </button>
-            <button id="suricata-stats-btn" class="bg-purple-700 hover:bg-purple-600 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors hidden">Suricata Stats</button>
+            <button id="theme-toggle-btn" class="icon-btn" type="button" data-theme-toggle
+                    aria-label="Switch to light theme" title="Switch to light theme">
+                <svg class="theme-icon-dark" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+                <svg class="theme-icon-light" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M3 12h2m14 0h2M5.6 18.4L7 17m10-10l1.4-1.4"/><circle cx="12" cy="12" r="4"/></svg>
+            </button>
+            <button id="settings-btn" class="icon-btn" type="button" aria-label="Settings" title="Settings">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <span class="header-label">Settings</span>
+            </button>
+            <button id="suricata-stats-btn" class="icon-btn hidden" type="button">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3l7 4v5c0 4-3 7-7 9-4-2-7-5-7-9V7l7-4z"/></svg>
+                <span class="header-label">Suricata</span>
+            </button>
 
-            <div id="sudo-mode-indicator" class="termix-chip px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm hidden sm:inline-flex">SUDO MODE ENABLED</div>
+            <div id="sudo-mode-indicator" class="termix-chip hidden sm:inline-flex">SUDO MODE ENABLED</div>
         </div>
     </header>
 
     <!-- Search Bar -->
-    <div class="glass-container mx-4 mt-4 p-4 shadow-lg relative z-10">
+    <div class="app-search glass-container" style="margin:0 0 0 0;border-radius:0;border-left:0;border-right:0;padding:10px 16px;">
         <div class="flex items-center space-x-4">
             <div class="flex-1">
                 <input type="text" id="search-input" 
@@ -206,7 +248,7 @@
     </div>
 
     <!-- Progress bar for journald services (10% height) -->
-    <div id="top-progress-container" class="h-10 glass-container mx-4 p-2 flex items-center justify-between hidden">
+    <div id="top-progress-container" class="glass-container p-2 flex items-center justify-between hidden" style="margin:0 16px;">
         <span id="top-progress-spinner" class="hidden top-progress-spinner shrink-0 mr-3" aria-hidden="true"></span>
         <p id="top-progress-message" class="text-xs termix-muted truncate">Fetching journald services...</p>
         <div class="w-full bg-gray-300 rounded-full h-2 mx-4 overflow-hidden">
@@ -214,7 +256,7 @@
         </div>
     </div>
 
-    <div class="flex flex-1 overflow-hidden m-4 gap-4" style="height: calc(100vh - 160px);">
+    <div class="app-body" id="app-body">
         <!-- Host List Sidebar -->
         <aside id="hosts-sidebar" class="w-1/4 glass-container p-4 flex flex-col transition-all duration-200">
             <div class="flex items-center justify-between mb-2">
@@ -260,19 +302,19 @@
                     <span class="text-sm font-semibold termix-text">Quick access</span>
                     <span class="text-xs termix-muted hidden sm:inline">— live metrics, onboarding and bulk tools</span>
                 </div>
-                <div class="flex items-center gap-2 flex-wrap justify-end">
+                <div class="qa-row">
                     <button id="dashboard-open-monitoring" type="button"
-                            class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+                            class="qa-btn qa-btn-primary"
                             title="Live CPU, RAM, disk and network for every server">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 15l3-4 3 3 4-6" /></svg>
                         <span>Monitoring</span>
                     </button>
-                    <button id="add-devices-btn" onclick="openWizard()" class="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2">
+                    <button id="add-devices-btn" onclick="openWizard()" class="qa-btn qa-btn-secondary">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
                         <span>Add Devices</span>
                     </button>
                     <div class="relative">
-                        <button id="toolbar-more-btn" class="bg-amber-500 hover:bg-amber-400 text-black text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" type="button" aria-haspopup="true" aria-expanded="false">
+                        <button id="toolbar-more-btn" class="qa-btn qa-btn-secondary" type="button" aria-haspopup="true" aria-expanded="false">
                             <span>More</span>
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
                         </button>
@@ -284,86 +326,34 @@
                     </div>
                 </div>
             </div>
-            <div class="termix-panel p-5">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <h1 class="text-2xl font-semibold termix-text">Dashboard</h1>
-                        <p class="text-sm termix-muted mt-1">Select a host on the left to open logs.</p>
+            <!-- Fleet overview: cards fed by /api/metrics/servers, /api/alerts/events, /api/reports -->
+            <section id="overview-cards" aria-label="Fleet overview" style="margin-top:4px;"></section>
+
+            <!-- Fleet stat strip: the counts app-core already maintains -->
+            <div class="termix-panel p-3">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <h1 class="text-base font-semibold termix-text">Instance</h1>
+                        <p class="text-xs termix-muted mt-0.5">Select a host in the sidebar, or press
+                            <kbd class="cmdk-foot-kbd" data-palette-hint>⌘K</kbd> to jump anywhere.</p>
                     </div>
-                    <div class="termix-chip" id="dashboard-db-status">Database: unknown</div>
-                </div>
-                <div class="mt-4 grid grid-cols-3 gap-3">
-                    <div class="termix-stat"><div class="termix-muted text-xs">Total Servers</div><div class="termix-text text-xl font-semibold" id="dashboard-total-hosts">-</div></div>
-                    <div class="termix-stat"><div class="termix-muted text-xs">Schedules</div><div class="termix-text text-xl font-semibold" id="dashboard-total-schedules">-</div></div>
-                    <div class="termix-stat"><div class="termix-muted text-xs">Selected Host</div><div class="termix-text text-xl font-semibold" id="dashboard-selected-host">(none)</div></div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <div class="termix-chip" id="dashboard-db-status">Database: unknown</div>
+                        <div class="ov-stat"><span>Servers</span><strong id="dashboard-total-hosts">-</strong></div>
+                        <div class="ov-stat"><span>Schedules</span><strong id="dashboard-total-schedules">-</strong></div>
+                        <div class="ov-stat"><span>Selected</span><strong id="dashboard-selected-host">(none)</strong></div>
+                    </div>
                 </div>
             </div>
-            <div class="grid grid-cols-2 gap-4" style="flex: 1; min-height: 0;">
-                <div class="termix-panel p-6 flex items-center justify-center col-span-2" style="min-height: 0;">
-                    <div class="w-full max-w-3xl">
-                        <div class="flex items-center gap-4">
-                            <div class="shrink-0">
-                                <svg width="92" height="92" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="AI Log Viewer logo">
-                                    <defs>
-                                        <linearGradient id="g1" x1="10" y1="12" x2="86" y2="84" gradientUnits="userSpaceOnUse">
-                                            <stop stop-color="#7C3AED"/>
-                                            <stop offset="1" stop-color="#22C55E"/>
-                                        </linearGradient>
-                                        <linearGradient id="g2" x1="20" y1="18" x2="78" y2="78" gradientUnits="userSpaceOnUse">
-                                            <stop stop-color="#A855F7"/>
-                                            <stop offset="1" stop-color="#3B82F6"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <rect x="10" y="10" width="76" height="76" rx="18" stroke="url(#g1)" stroke-width="3" fill="rgba(255,255,255,0.03)"/>
-                                    <path d="M26 34H52" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
-                                    <path d="M26 44H58" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
-                                    <path d="M26 54H46" stroke="url(#g2)" stroke-width="3" stroke-linecap="round"/>
-                                    <circle cx="66" cy="42" r="10" stroke="url(#g1)" stroke-width="3" fill="rgba(124,58,237,0.10)"/>
-                                    <circle cx="66" cy="42" r="2.5" fill="#A855F7"/>
-                                    <path d="M58 42H52" stroke="#A855F7" stroke-width="3" stroke-linecap="round"/>
-                                    <path d="M66 52V62" stroke="#22C55E" stroke-width="3" stroke-linecap="round"/>
-                                    <circle cx="66" cy="66" r="4" fill="#22C55E"/>
-                                    <path d="M28 70V64" stroke="#60A5FA" stroke-width="4" stroke-linecap="round"/>
-                                    <path d="M38 70V60" stroke="#A855F7" stroke-width="4" stroke-linecap="round"/>
-                                    <path d="M48 70V66" stroke="#22C55E" stroke-width="4" stroke-linecap="round"/>
-                                    <path d="M58 70V56" stroke="#F59E0B" stroke-width="4" stroke-linecap="round"/>
-                                </svg>
-                            </div>
-                            <div class="min-w-0">
-                                <div class="termix-text text-2xl font-semibold tracking-tight">AI Log Viewer</div>
-                                <div class="termix-muted mt-1">Logs + AI analysis + sensor data dashboards in a single, fast interface.</div>
-                                <div class="mt-3 flex flex-wrap gap-2">
-                                    <span class="termix-chip">Logs</span>
-                                    <span class="termix-chip">AI</span>
-                                    <span class="termix-chip">Data</span>
-                                    <span class="termix-chip">Suricata</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <div class="glass-container p-4 rounded-lg border border-white/10">
-                                <div class="termix-text font-semibold">Unified Logs</div>
-                                <div class="termix-muted text-sm mt-1">Local + remote log sources with fast search and viewing.</div>
-                            </div>
-                            <div class="glass-container p-4 rounded-lg border border-white/10">
-                                <div class="termix-text font-semibold">AI Analysis</div>
-                                <div class="termix-muted text-sm mt-1">On-demand and scheduled analysis with alert keywords.</div>
-                            </div>
-                            <div class="glass-container p-4 rounded-lg border border-white/10">
-                                <div class="termix-text font-semibold">Dashboards</div>
-                                <div class="termix-muted text-sm mt-1">Suricata stats, endpoint insights, and raw data tools.</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="termix-panel p-5 flex flex-col col-span-2">
-                    <h2 class="termix-text font-semibold">Quick Actions</h2>
-                    <div class="mt-4 grid grid-cols-2 gap-3">
-                        <button id="dashboard-open-settings" class="termix-action" type="button">Admin Settings</button>
-                        <button id="dashboard-rescan" class="termix-action" type="button">Rescan All</button>
-                        <button id="dashboard-export-ssh" class="termix-action" type="button">Export SSH Config</button>
-                    <a id="dashboard-open-monitoring-wizard" class="bg-sky-600 hover:bg-sky-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2" href="/monitoring/wizard" type="button">Monitoring Wizard</a>
-                    </div>
+
+            <!-- Quick actions: the same entry points as before, as cards -->
+            <div class="termix-panel p-3">
+                <h2 class="text-xs font-semibold termix-muted uppercase tracking-wider">Quick actions</h2>
+                <div class="mt-2 grid-cards">
+                    <button id="dashboard-open-settings" class="termix-action" type="button">⚙️ Admin Settings</button>
+                    <button id="dashboard-rescan" class="termix-action" type="button">🔄 Rescan All</button>
+                    <button id="dashboard-export-ssh" class="termix-action" type="button">🔑 Export SSH Config</button>
+                    <a id="dashboard-open-monitoring-wizard" class="termix-action" href="/monitoring/wizard">🔎 Monitoring Wizard</a>
                 </div>
             </div>
         </div>
@@ -806,10 +796,13 @@
             </div>
 
             <!-- Main Content -->
-            <div class="flex flex-1 overflow-hidden">
+            <div class="settings-layout flex flex-1 overflow-hidden">
                 <!-- Sidebar Navigation -->
-                <aside class="w-48 bg-white/5 border-r border-white/10 flex flex-col">
+                <aside class="settings-nav w-48 bg-white/5 border-r border-white/10 flex flex-col">
                     <nav class="flex-1 overflow-y-auto">
+                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="appearance">
+                            <span class="text-sm font-medium text-gray-200">🎨 Appearance</span>
+                        </button>
                         <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent active" data-section="ai-provider">
                             <span class="text-sm font-medium text-gray-200">🤖 AI Provider</span>
                         </button>
@@ -844,6 +837,20 @@
                 <div class="flex-1 overflow-y-auto p-6 space-y-4">
                     
                     <!-- AI Provider Section -->
+                    <section id="appearance-section" class="settings-section space-y-4 hidden">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h3 class="text-sm font-semibold termix-text">Appearance</h3>
+                                <p class="text-xs termix-muted mt-1">Theme, light/dark mode, density and motion. Saved in this browser.</p>
+                            </div>
+                            <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch to light theme">
+                                <svg class="theme-icon-dark" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+                                <svg class="theme-icon-light" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M3 12h2m14 0h2M5.6 18.4L7 17m10-10l1.4-1.4"/><circle cx="12" cy="12" r="4"/></svg>
+                            </button>
+                        </div>
+                        <div data-appearance-panel></div>
+                    </section>
+
                     <section id="ai-provider-section" class="settings-section space-y-4 hidden">
                         <h4 class="font-semibold text-lg text-white">AI Provider Selection</h4>
                         <div>
@@ -1412,6 +1419,30 @@
             </div>
         </div>
     </div>
+    <!-- Mobile navigation (hidden >= 641px) -->
+    <nav id="mobile-tabbar" class="mobile-tabbar" aria-label="Primary">
+        <button type="button" data-tab="overview" aria-current="page">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h7v7H4zM13 5h7v4h-7zM13 11h7v8h-7zM4 14h7v5H4z"/></svg>
+            <span>Overview</span>
+        </button>
+        <button type="button" data-tab="logs">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h12M4 18h8"/></svg>
+            <span>Logs</span>
+        </button>
+        <button type="button" data-tab="hosts">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/></svg>
+            <span>Hosts</span>
+        </button>
+        <button type="button" data-tab="monitor">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 15l3-4 3 3 4-6"/></svg>
+            <span>Monitor</span>
+        </button>
+        <button type="button" data-tab="alerts">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1"/></svg>
+            <span>Alerts</span>
+        </button>
+    </nav>
+
     <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg"></div>
 
     <script type="module" src="/static/js/main.js"></script>

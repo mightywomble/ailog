@@ -1721,14 +1721,19 @@ export function init() {
                 </div>
             ` : '';
 
+            const hostInitial = String(hostData.friendly_name || hostData.ip || hostId || '?').trim().charAt(0).toUpperCase() || '?';
+            if (!isReorderable) card.title = `${hostData.friendly_name || hostId} — ${hostData.user}@${hostData.ip}`;
             card.innerHTML = `
                 <div class="flex items-center justify-between">
                     <div class="flex items-center min-w-0 flex-1">
                         ${grabHandleHtml}
                         <div class="min-w-0 flex-1">
-                            <h3 class="font-bold termix-text truncate">${hostData.friendly_name}</h3>
-                            <p class="text-sm termix-muted truncate">Group: ${(hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none'}</p>
-                            <p class="text-xs termix-muted font-mono truncate">${hostData.user}@${hostData.ip}</p>
+                            <span class="host-monogram" aria-hidden="true">${hostInitial}</span>
+                            <h3 class="host-card-name font-bold termix-text truncate">${hostData.friendly_name}</h3>
+                            <div class="host-card-meta">
+                                <p class="text-sm termix-muted truncate">Group: ${(hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none'}</p>
+                                <p class="text-xs termix-muted font-mono truncate">${hostData.user}@${hostData.ip}</p>
+                            </div>
                         </div>
                     </div>
                     <div class="flex items-center space-x-3 shrink-0">
@@ -4996,6 +5001,21 @@ aiAnalyseBtn.addEventListener('click', async () => {
         window.fetchApi = fetchApi;
         window.showToast = showToast;
         window.showDashboard = showDashboard;
+        window.showLogs = showLogs;
+
+        // --- Shell integration (command palette, overview cards, mobile tabs) ---
+        // "Open host" means: select it, then show the logs view - the same path
+        // a sidebar click takes, so nothing can drift between the two.
+        window.ailogOpenHost = (hostId) => {
+            if (!hostId) return;
+            selectHost(hostId);
+        };
+        window.ailogHostActions = () => Object.entries(hosts).map(([id, host]) => ({
+            id,
+            name: host?.friendly_name || id,
+            ip: host?.ip || host?.ip_address || '',
+            group: host?.group_name || host?.group || '',
+        }));
 
         // Toggle Suricata Stats button based on whether Suricata is configured
         refreshSuricataConfiguredState();
