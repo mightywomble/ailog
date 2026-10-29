@@ -533,3 +533,11 @@ a.ov-row-main:hover { text-decoration: underline; }
 @media (max-width: 900px) {
   .ov-card[data-ov="hosts"] { max-height: none; }
 }
+
+/* drag handle: the dotted grip was invisible because stroke-width computed to 1px */
+.hosts-grab-handle svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
