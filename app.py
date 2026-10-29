@@ -2558,6 +2558,7 @@ def _run_report_schedule(schedule: Schedule, emit=None):
     include_journal = bool(scope.get('journal', True))
     include_docker = bool(scope.get('docker', True))
     include_stopped = bool(scope.get('stopped', False))
+    severities = scope.get('severities') or None
 
     window = int(schedule.report_window_minutes
                  or report_routes._defaults()['window_minutes'])
@@ -2582,7 +2583,7 @@ def _run_report_schedule(schedule: Schedule, emit=None):
                 host_key, label, window, provider, model, {},
                 include_files=include_files, include_journal=include_journal,
                 include_docker=include_docker, include_stopped=include_stopped,
-                depth=depth or None, emit=emit,
+                depth=depth or None, emit=emit, severities=severities,
             )
             results.append({'host': host_key, 'report_id': payload.get('id'),
                             'verdict': payload.get('verdict')})

@@ -102,19 +102,31 @@ def parse_timestamp(line, reference=None):
 
 SEV_CRIT, SEV_ERROR, SEV_WARN, SEV_INFO = 4, 3, 2, 1
 
-_SEV_LEVELS = (
-    (SEV_CRIT, re.compile(
-        r'\b(emerg|emergency|alert|crit|critical|panic|kernel\s+panic|segfault|'
-        r'oom[- ]?kill|out\s+of\s+memory|hard\s+lockup|machine\s+check)\b', re.I)),
-    (SEV_ERROR, re.compile(
-        r'\b(error|err|fail(?:ed|ure|ing)?|fatal|exception|traceback|refused|denied|'
+# Keyword tables as *data*, so the source-side pre-filter in collect.py can
+# build a grep pattern from exactly the same words this classifier uses
+# (serverreport/severity.py). Divergence here would mean the report silently
+# misses lines that a "filtered" grep run never shipped.
+SEVERITY_WORDS = {
+    SEV_CRIT: (
+        r'emerg|emergency|alert|crit|critical|panic|kernel\s+panic|segfault|'
+        r'oom[- ]?kill|out\s+of\s+memory|hard\s+lockup|machine\s+check'
+    ),
+    SEV_ERROR: (
+        r'error|err|fail(?:ed|ure|ing)?|fatal|exception|traceback|refused|denied|'
         r'timeout|timed\s+out|unreachable|corrupt(?:ed)?|abort(?:ed)?|'
         r'cannot|can\'t|unable\s+to|no\s+space\s+left|killed|exited\s+with|'
         r'exited\s+on\s+signal|signal\s+\d+|exit\s+code\s+[1-9]|'
-        r'segmentation\s+fault|broken\s+pipe)\b', re.I)),
-    (SEV_WARN, re.compile(
-        r'\b(warn|warning|deprecat(?:ed|ion)|retry|retrying|slow|degraded|'
-        r'throttl(?:ed|ing)|high\s+load|stale)\b', re.I)),
+        r'segmentation\s+fault|broken\s+pipe'
+    ),
+    SEV_WARN: (
+        r'warn|warning|deprecat(?:ed|ion)|retry|retrying|slow|degraded|'
+        r'throttl(?:ed|ing)|high\s+load|stale'
+    ),
+}
+
+_SEV_LEVELS = tuple(
+    (level, re.compile(r'\b(?:' + words + r')\b', re.I))
+    for level, words in SEVERITY_WORDS.items()
 )
 
 
@@ -126,6 +138,32 @@ def classify_severity(text):
 
 
 SEV_NAMES = {SEV_CRIT: 'crit', SEV_ERROR: 'error', SEV_WARN: 'warn', SEV_INFO: 'info'}
+SEV_BY_NAME = {name: level for level, name in SEV_NAMES.items()}
+
+
+def sev_level_set(values):
+    """Coerce a severity selection into a set of ``SEV_*`` constants.
+
+    Accepts either the constants themselves or their names, because both reach
+    this function from different callers (routes map names -> constants, tests
+    and stored configs sometimes do not). A name that is not understood is
+    dropped rather than guessed; an *empty* result means "no filter", so a typo
+    can never silently empty every report.
+    """
+    levels = set()
+    for value in values or ():
+        if isinstance(value, str):
+            name = value.strip().lower()
+            if name in SEV_BY_NAME:
+                levels.add(SEV_BY_NAME[name])
+            continue
+        try:
+            ivalue = int(value)
+        except (TypeError, ValueError):
+            continue
+        if ivalue in SEV_NAMES:
+            levels.add(ivalue)
+    return frozenset(levels)
 
 
 # ---------------------------------------------------------------------------
@@ -176,12 +214,21 @@ def _blank_event(ts, source, sev, message):
     }
 
 
-def normalize_source(source, raw_text, window_start, window_end, reference=None):
+def normalize_source(source, raw_text, window_start, window_end, reference=None,
+                     sev_levels=None):
     """Parse one collected source into events.
 
     Lines with no parseable timestamp inherit the previous timestamp, which is
     how multi-line stack traces stay attached to their parent event.
+
+    ``sev_levels`` is a set of ``SEV_*`` constants (empty/None = keep all). This
+    is the authoritative severity filter: collect.py already cut bytes on the
+    host, but a grep over raw text is a heuristic and this classifier is not, so
+    anything the pre-filter let through is dropped here. Dropping a line also
+    detaches ``previous`` so a stack trace can never attach to an unrelated
+    event that survived the filter.
     """
+    levels = sev_level_set(sev_levels)
     events = []
     stats = {
         'key': source['key'],
@@ -191,6 +238,7 @@ def normalize_source(source, raw_text, window_start, window_end, reference=None)
         'kept': 0,
         'out_of_window': 0,
         'no_timestamp': 0,
+        'filtered_out': 0,
     }
     if not raw_text:
         return events, stats
@@ -227,6 +275,10 @@ def normalize_source(source, raw_text, window_start, window_end, reference=None)
             continue
 
         sev = classify_severity(raw)
+        if levels and sev not in levels:
+            stats['filtered_out'] += 1
+            previous = None       # never let a later continuation attach here
+            continue
         # Events carry epoch seconds: every consumer compares/subtracts them.
         event = _blank_event(dt.timestamp(), source, sev, raw.strip())
         events.append(event)
@@ -277,13 +329,17 @@ def build_clusters(events):
     return clusters
 
 
-def normalize_all(collected, window_start, window_end):
+def normalize_all(collected, window_start, window_end, sev_levels=None):
     """Normalise every collected source.
 
     ``collected`` is the ``sources`` list from ``collect.collect_host_logs``.
+    ``sev_levels`` is the severity selection (``SEV_*`` constants); see
+    ``normalize_source``.
     """
+    levels = sev_level_set(sev_levels)
     all_events = []
     source_stats = []
+    filtered_out = 0
     for item in collected:
         if not item.get('ok'):
             source_stats.append({
@@ -291,14 +347,17 @@ def normalize_all(collected, window_start, window_end):
                 'label': item['source']['label'],
                 'kind': item['source']['kind'],
                 'lines': 0, 'kept': 0, 'out_of_window': 0, 'no_timestamp': 0,
+                'filtered_out': 0,
                 'status': item.get('status') or ('ok' if item.get('ok') else 'error'),
                 'error': item.get('error') if item.get('status') == 'error' else None,
             })
             continue
         events, stats = normalize_source(
-            item['source'], item['text'], window_start, window_end, reference=window_end
+            item['source'], item['text'], window_start, window_end, reference=window_end,
+            sev_levels=levels,
         )
         all_events.extend(events)
+        filtered_out += stats.get('filtered_out') or 0
         stats['status'] = 'ok'
         source_stats.append(stats)
 
@@ -314,4 +373,11 @@ def normalize_all(collected, window_start, window_end):
         'clusters': clusters,
         'source_stats': source_stats,
         'severity_counts': severity_counts,
+        'severity_filter': {
+            'levels': sorted(SEV_NAMES[lvl] for lvl in levels),
+            'active': bool(levels),
+            'events_kept': len(all_events),
+            'events_filtered': filtered_out,
+            'lines_kept': sum(s.get('kept') or 0 for s in source_stats),
+        },
     }

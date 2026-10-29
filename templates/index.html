@@ -674,6 +674,35 @@
                     <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-stopped" class="mr-2"> Include stopped containers</label>
                 </div>
 
+                <!-- Severity filter: the cheapest way to shrink the evidence pack.
+                     "All" keeps the classic behaviour; any subset is filtered on the
+                     host (journalctl --priority / grep) so the bytes never ship. -->
+                <div class="mt-4 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5">
+                    <div class="flex items-center justify-between">
+                        <span class="termix-muted text-xs">Only analyse these severities</span>
+                        <span id="server-report-sev-hint" class="text-xs termix-muted">All severities</span>
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                        <label class="flex items-center termix-muted">
+                            <input type="checkbox" id="server-report-sev-all" class="mr-2" checked> All
+                        </label>
+                        <label class="flex items-center text-rose-300">
+                            <input type="checkbox" id="server-report-sev-crit" class="mr-2"> Critical
+                        </label>
+                        <label class="flex items-center text-orange-300">
+                            <input type="checkbox" id="server-report-sev-error" class="mr-2"> Errors
+                        </label>
+                        <label class="flex items-center text-amber-300">
+                            <input type="checkbox" id="server-report-sev-warn" class="mr-2"> Warnings
+                        </label>
+                    </div>
+                    <p class="mt-1.5 text-xs termix-muted">
+                        Filtered on the host before transfer (<code class="text-xs">journalctl --priority</code>,
+                        <code class="text-xs">grep</code>), so a busy host sends far less evidence.
+                        Correlation is then computed on the selected subset.
+                    </p>
+                </div>
+
                 <!-- Report size: Auto lets the sizing engine decide from the evidence itself -->
                 <div class="mt-4">
                     <div class="flex items-center justify-between">

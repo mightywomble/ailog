@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.14.0 | **Severity filter for server reports**: analyse only Critical / Errors / Warnings (multi-select, or All for the classic behaviour). Filtering happens **on the host** — `journalctl --priority` where it is exact, one shared `grep -iE` everywhere else — and again authoritatively in the normaliser, so a busy host sends 70–99% fewer bytes and the model never sees INFO noise. The evidence pack states the filter so the model cannot read filtered-out lines as a healthy source | ✅ Complete |
 | 2026-10-29 | v2.13.1 | **Threshold alerting** (`alerting/`) evaluated on the metrics the samplers already collect, with debounce, cooldown, transitions-only Discord delivery and an `/alerts` page; **report-to-report diffs** ("Since last report" panel) computed from stored JSON; **scheduled reports** (`Schedule.kind = 'report'`); fairer source caps (`MAX_SOURCES` 60 → 120, per-kind shares, journal units ranked by activity); first **pytest suite** (108 tests); `app.py` split (`app_schema.py`, `inventory/`) and `index.html` split into ES modules | ✅ Complete |
 | 2026-10-28 | v2.13.0 | Docker monitoring grows up: a rolling **in-memory history** sampler so `/docker/<host_key>` charts survive a reload (plus a disk card), an **Apps** view that groups containers per stack/service across the cluster, a **Cluster** view with swarm-wide totals, per-node cards with sparklines and `docker system df`, all rendered as tabs on the existing Docker page | ✅ Complete |
 | 2026-10-28 | v2.12.1 | Docs: server-report usage walkthrough with depth guidance, report tuning settings/env table, endpoint reference, report-specific sudoers entries, blueprint and report-pipeline architecture notes | ✅ Complete |
@@ -111,6 +112,20 @@ This application is designed for use on a trusted, internal development network 
 * **Chunked for big hosts:** packs larger than the model can hold are split on section boundaries, summarised pass-by-pass (map) and merged into one reduced pack (reduce), with progress and the pass count shown
 * **Closing sections:** every report ends with an **Executive Summary** (plain-English, non-specialist) and **How to Resolve** (numbered remediation steps marked immediate / soon / preventive, with verification)
 * **Honest about blind spots:** truncation, source caps, failed sources and logging gaps are all stated in the report
+* **Severity filter (new):** choose **Critical**, **Errors** and/or **Warnings** — or **All** for the
+  unfiltered classic report. This is the cheapest way to shrink a run, and it is applied twice:
+  - **on the host, before transfer** — `journalctl --priority=N` for journald (native, so the journal
+    discards the lines itself; exact when the selection is a contiguous "N and above" set, with a
+    `grep` added when it is not), and one `grep -iE` from the *same keyword tables the classifier
+    uses* for log files and container logs. Filtered runs also scan a wider tail
+    (`tail -n 12000 | grep | tail -n 4000`) so a sparse error is still found rather than the last
+    4000 lines merely *containing* no errors
+  - **authoritatively in the normaliser** — `classify_severity` is the real decision; anything the
+    pre-filter let through is dropped, and a dropped line takes its stack trace with it
+  Measured on a 63-source host over a 60-minute window: **1.05 MB → 296 KB** of transferred log text
+  for errors+critical and **2.3 KB** for critical-only, with 8,046 events reduced to 229. Because
+  INFO provides the correlation baseline, the evidence pack says so explicitly and tells the model
+  that the absence of a severity is not evidence of health
 * **Since last report:** each report page diffs itself against the previous report for the same host — verdict transition, event delta (with %), new / gone / louder signature clusters ("louder" = ≥3× and ≥20 more events), new / gone cross-source correlations and per-source coverage change. The diff is computed from the stored `clusters_json` / `severity_json` / `correlations_json` of both rows, so opening a report never re-collects the host
 * **Scheduled reports:** a schedule can now be `kind = 'report'` instead of `'log'`. It stores its own window, depth, model and source scope, and each run produces one `/reports/<id>` per host in the schedule; the per-host outcome is recorded in `last_status` / `last_run_at` on the schedule
 
@@ -124,6 +139,10 @@ Tuning, in **Settings** (DB-backed) or as environment variables:
 | – | `AILOG_REPORT_MAX_SOURCES` | `120` | hard cap on sources per run (split fairly per kind, see below) |
 | – | `AILOG_REPORT_MAX_BYTES` | `25165824` (24 MB) | total log text collected per run |
 | – | `AILOG_REPORT_MAX_TOKENS` | `12000` | ceiling for the `fit_pack` trim path |
+| – | `AILOG_REPORT_FILE_SCAN_CAP` | `12000` | lines tailed before the severity `grep` on log files |
+| – | `AILOG_REPORT_JOURNAL_SCAN_CAP` | `20000` | journal lines fetched when a severity filter is active |
+| – | `AILOG_REPORT_DOCKER_SCAN_CAP` | `20000` | container lines fetched when a severity filter is active |
+| – | `AILOG_REPORT_SEVERITY_CONTEXT` | `3` | lines of context kept after a severity match (tracebacks) |
 | – | `AILOG_DOCKER_REFRESH_SECONDS` | `300` | Docker endpoint re-discovery cadence |
 | `docker.history_interval` | `AILOG_DOCKER_POLL_SECONDS` | `15` | seconds between history samples per Docker host |
 | `docker.history_minutes` | `AILOG_DOCKER_HISTORY_MINUTES` | `60` | rolling history window kept in memory |
@@ -799,7 +818,8 @@ The application provides detailed startup logs showing:
   - `dockermon/` – Docker endpoint discovery, live stats, swarm view
   - `serverreport/` – server-wide correlated reports:
     `collect` → `normalize` → `correlate` → `pack` → `sizing` → `llm` → `routes`,
-    plus `diff.py` (report-to-report comparison from stored JSON)
+    plus `diff.py` (report-to-report comparison from stored JSON) and `severity.py`
+    (severity selection: the shared keyword tables, journal priority mapping and grep pattern)
   - `alerting/` – threshold rules, evaluation state machine, `alert_events`, Discord delivery
   - `inventory/` – groups and tags, Ansible/SSH-config exports, SQLite backup and restore
     (split out of `app.py` so the core module only holds logs, search, AI, schedules and hosts)
@@ -855,6 +875,36 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v2.14.0 - Severity Filters for Server Reports
+- 🎯 **Multi-select severity filter** in the *Analyse All Logs* dialog: **Critical / Errors / Warnings**
+  (any combination) or **All** (default, byte-identical to the previous behaviour). The selection
+  travels with the request, the size check, the bundle cache key, the stored report and the
+  scheduled-report scope
+- ⚡ **Filtered on the host, so the saving is real**
+  - journald: `journalctl --priority=N` — the journal drops the lines itself, nothing enters the pipe.
+    Exact for the contiguous "N and above" selections (crit, crit+error), with a `grep` appended for
+    the rest (warn-only, error-only, error+warn, crit+warn)
+  - files / `.gz` / container logs: `grep -aiE` from the **same keyword tables**
+    (`normalize.SEVERITY_WORDS`) that `classify_severity` uses, so the pre-filter can never be
+    stricter than the classifier. `-i` matters: the classifier is case-insensitive, so a
+    case-sensitive grep would silently drop `ERROR:` lines. `-A 3` keeps traceback bodies and
+    `--no-group-separator` avoids grep's `--` junk lines
+  - filtered runs widen the scanned tail (`FILE_SCAN_CAP` 12000 / `JOURNAL_SCAN_CAP` 20000) because
+    only the matches are transferred: "the last 4000 errors" instead of "the last 4000 lines"
+- 🧪 **Two-stage filtering**: `normalize` re-applies the selection authoritatively and drops whatever
+  the grep heuristic let through. Dropping a line detaches it from `previous`, so a stack trace can
+  never attach to an unrelated event that survived
+- 📉 **Measured** on a 63-source host, 60-minute window: 1.05 MB → 296 KB (errors+critical) →
+  2.3 KB (critical only) of transferred text; 8,046 → 229 events. On hosts where the pack exceeds the
+  model context the fewer signatures also mean fewer chunk passes
+- 🛡 **Honest evidence:** the pack header gains `FILTER` / `FILTER NOTE` lines stating the subset and
+  that missing severities are *not* evidence of health, since correlation baselines are computed on
+  the filtered subset. The report page shows the filter next to the header, and the size check
+  reports events kept / context lines dropped
+- 🧹 `emergency.service` and `rescue.service` are no longer collected: the report's own
+  `sudo journalctl -u emergency.service` shows up in auth.log and the word "emergency" classifies as
+  CRIT, i.e. the filter was reporting on itself
 
 ### v2.13.1 - Alerts, Report Diffs, Scheduled Reports and a Smaller app.py
 - 🚨 **`alerting/` blueprint** - threshold rules over metrics that are already collected
@@ -1141,6 +1191,7 @@ fixture resets it between tests.
 | `test_schedule_reports.py` | `kind` defaulting and switching, report field coercion, per-host pipeline runs and failures, log schedules keeping the old path, one APScheduler job per enabled schedule |
 | `test_collect_sources.py` | the source cap: no kind can starve another, unused shares overflow, discovery order preserved, journal units ranked by activity, window clamping |
 | `test_dockermon.py` | `docker system df` / `df` parsing, app grouping, history buffer (hold-last, bounded, clear), core-weighted swarm totals, offline nodes, container rate deltas, history/swarm routes |
+| `test_severity_filter.py` | selection parsing/aliases, `--priority` exactness, the grep pattern agreeing with the classifier (and containing no `(?:` that GNU grep rejects), case-insensitive pre-filter, per-source commands for files/gz/journal/docker, normaliser filtering incl. traceback handling and continuation detach, collect plumbing, bundle-cache keying, preflight passthrough |
 | `test_inventory.py` | groups/tags CRUD and assignment, Ansible and SSH-config exports, SQLite backup/restore validation, blueprint registration of the extracted routes |
 
 Manual checks still matter for the parts that touch real hosts: SSH key auth, passwordless sudo,
