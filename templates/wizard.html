@@ -1,13 +1,13 @@
 <!-- Device Onboarding Wizard Modal - Complete Redesign -->
-<div id="wizardModal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50">
-    <div class="glass-container w-full max-w-3xl max-h-[95vh] overflow-hidden flex flex-col border border-white/10">
-        <!-- Header -->
-        <div class="px-6 py-4 border-b border-white/10 bg-white/5 flex justify-between items-center">
-            <div>
-                <h2 class="text-xl font-semibold termix-text">Add Devices Wizard</h2>
-                <p class="text-xs termix-muted mt-1" id="stepTitle">Step 1 of 5: Select SSH Key</p>
+<div id="wizardModal" class="app-modal hidden">
+    <div class="app-modal-panel app-modal-lg">
+        <div class="app-modal-head">
+            <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-purple-400"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+                <span>Add Devices Wizard
+                    <span class="app-modal-sub" id="stepTitle">Step 1 of 5: Select SSH Key</span>
+                </span>
             </div>
-            <button onclick="closeWizard()" class="termix-muted hover:termix-text text-2xl leading-none">&times;</button>
+            <button onclick="closeWizard()" type="button" class="app-modal-close">Close</button>
         </div>
 
         <!-- Progress Bar -->
@@ -206,7 +206,9 @@ function escapeHtml(str) {
 }
 
 function openWizard() {
-    document.getElementById('wizardModal').classList.remove('hidden');
+    // Shared dialog chrome (static/js/modals.js) when available.
+    if (typeof window.openAppModal === 'function') window.openAppModal('wizardModal');
+    else document.getElementById('wizardModal').classList.remove('hidden');
     wizardCurrentStep = 1;
     wizardState = {
         selectedKeyId: null,
@@ -232,7 +234,8 @@ function openWizard() {
 }
 
 function closeWizard() {
-    document.getElementById('wizardModal').classList.add('hidden');
+    if (typeof window.closeAppModal === 'function') window.closeAppModal('wizardModal');
+    else document.getElementById('wizardModal').classList.add('hidden');
 }
 
 function wizardShowStep(step) {

@@ -191,15 +191,15 @@ function openRule(rule) {
   $('r-cooldown').value = rule ? rule.cooldown_seconds : 1800;
   $('r-enabled').checked = rule ? rule.enabled : true;
   $('rule-error').classList.add('hidden');
-  const modal = $('rule-modal');
-  modal.classList.remove('hidden');
-  modal.classList.add('flex');
+  // Shared dialog chrome (static/js/modals.js): .app-modal is flex via CSS,
+  // so only the `hidden` class needs toggling and Escape/backdrop work for free.
+  if (typeof window.openAppModal === 'function') window.openAppModal('rule-modal');
+  else $('rule-modal').classList.remove('hidden');
 }
 
 function closeRule() {
-  const modal = $('rule-modal');
-  modal.classList.add('hidden');
-  modal.classList.remove('flex');
+  if (typeof window.closeAppModal === 'function') window.closeAppModal('rule-modal');
+  else $('rule-modal').classList.add('hidden');
 }
 
 async function saveRule() {
