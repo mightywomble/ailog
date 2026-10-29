@@ -229,6 +229,37 @@ Two details that matter:
 
 Behaviour that applies to all of them: `Escape` closes only the topmost dialog, clicking the dimmed backdrop closes it, the Close button is always the same text button in the header, and every dialog is focus-moved on open so keyboard users land inside it.
 
+**Adding a new dialog** — copy this shape, do not hand-roll classes:
+
+```html
+<div id="myModal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-lg">      <!-- -sm | -md | -lg | -xl -->
+    <div class="app-modal-head">
+      <div class="app-modal-title">
+        <svg ...></svg>
+        <span>My dialog
+          <span class="app-modal-sub">optional second line</span>
+        </span>
+      </div>
+      <button type="button" class="app-modal-close" data-modal-close>Close</button>
+    </div>
+    <div class="app-modal-body app-modal-body-flush">…</div>
+    <div class="app-modal-foot">…</div>            <!-- optional -->
+  </div>
+</div>
+```
+
+```js
+openAppModal('myModal');    // or openAppModal(element)
+closeAppModal('myModal');
+```
+
+`data-modal-close` on any element closes it, so no per-dialog click handler is needed. Use
+`app-modal-fit` on the panel for a short form (it will otherwise be 92vh tall) and
+`app-modal-body-flush` when the body is an iframe or a single scroll container that should
+provide its own padding. Listen for `appmodal:close` if the dialog owns something that must be
+torn down (an iframe, a poller, a chart).
+
 ### 💾 **Database Backup & Restore**
 * **One-Click Backup Download:** Download the sqlite database bundle
 * **Selective Restore:** Restore only selected categories (AI provider/key, Discord webhook, AI Search prompt/keywords, Hosts (replace all), legacy schedule interval/is_running)
@@ -859,10 +890,13 @@ The application provides detailed startup logs showing:
   in the same order the old inline `<script>` blocks ran, so `DOMContentLoaded` listeners register
   in the same relative order:
   - `boot.js` – `window.__appReady`, xterm readiness helper
+  - `modals.js` – the only owner of dialog state (`openAppModal` / `closeAppModal`, Escape stack,
+    backdrop close, `appmodal:*` events); imported early because everything else calls it
   - `groups.js` – group settings UI
   - `app-core.js` – the main UI closure (hosts, logs, search, AI modals, schedules); imports
     `suricata.js` and `sshkeys.js`
   - `toolbar.js`, `monitoring-wizard.js`, `wizard-fallback.js`
+  - `iframe-modals.js` – the Docker and Reports dialogs (iframe-backed full documents)
   - per-page modules: `alerts.js` (loaded by `alerts.html`)
   Everything the markup uses from `onclick` handlers stays on `window`. No bundler, no transpiler —
   the files are served as-is, which keeps deployment identical to before.
