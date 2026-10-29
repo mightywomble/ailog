@@ -6,7 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
-| 2026-10-29 | v2.17.0 | **Monitoring moved to a dashboard toolbar.** Monitoring is server-wide, not per host, so the button left the host toolbar and now sits in a new Quick access bar on the dashboard alongside **Add Devices** and **More** (which moved out of the global header, keeping its Ansible / SSH config / Rescan entries). The header keeps only Settings, Suricata Stats and the sudo chip | ✅ Complete |
+| 2026-10-29 | v2.17.0 | **Monitoring moved to a dashboard toolbar.** Monitoring is server-wide, not per host, so the button left the host toolbar and now sits in a new Quick access bar on the dashboard alongside **Add Devices** and **More** (which moved out of the global header, keeping its Ansible / SSH config / Rescan entries). The header keeps only Settings, Suricata Stats and the sudo chip. README now documents the three toolbars and which scope each control belongs to | ✅ Complete |
 | 2026-10-29 | v2.16.2 | Fix: container network counters crashed the expanded card (`TypeError: int() ... not 'tuple'`) because the SSH collector stored the whole `NetIO` pair in `net_rx`; the pair is now split into rx/tx and the metrics collector coerces counters defensively | ✅ Complete |
 | 2026-10-29 | v2.16.1 | Monitoring cards read Docker container counts from the same SSH round trip (`docker ps -a --format {{.State}}`) instead of a Docker discovery row, so the whale badge shows `running/total` and "engine not reachable" is accurate rather than stale | ✅ Complete |
 | 2026-10-29 | v2.16.0 | **Monitoring is a live netdata-style page in a dialog.** The Monitoring button no longer opens the old host-monitor list (that UI, its overlay and the monitor editor are deleted); it loads `/metrics?embed=1` in the shared modal chrome. One card per server with CPU %, RAM %, disk % and network rates drawn as canvas sparklines, refreshed every 2s, with a rolling 3-minute window kept in the browser. Hosts with Docker installed get a whale badge, and clicking such a card expands it to the same datapoints per container (CPU, RAM, writable disk, net rx/tx) | ✅ Complete |
@@ -62,6 +62,17 @@ This application is designed for use on a trusted, internal development network 
 * **Logs on demand:** Click any host in the left sidebar to switch into the Logs view for that host.
 * **Back button:** The Logs view has a Back button to return to the dashboard without reloading.
 
+### 🧰 **Toolbars — what lives where**
+There are three toolbars and the split is deliberate: a control sits in the one whose scope it matches.
+
+| Toolbar | Scope | Controls |
+|---|---|---|
+| **Header** (always visible) | This ailog instance | **Settings** (AI provider, Discord, hosts, themes), **Suricata Stats** (only when Suricata is configured), AI-provider badge, `SUDO MODE` chip |
+| **Dashboard → Quick access** (dashboard only) | All servers at once | **Monitoring** (live metrics dialog), **Add Devices** (onboarding wizard), **More ▾** (Create Ansible Inventory, Create SSH Config, Rescan All) |
+| **Host toolbar** (Logs view) | The selected host | **SSH**, **Pull Logs**, **Host Info**, **Docker** (only for hosts with a reachable engine) |
+
+Monitoring and Add Devices are server-wide, so they moved out of the header/host bar onto the dashboard: you should not have to select a host to look at the whole fleet.
+
 ### 📊 **Unified Log Management**
 * **Multi-Source Access:** View traditional syslog files from `/var/log`, systemd journal entries **and Docker container logs** in a unified interface
 * **Cross-Platform Compatibility:** Works seamlessly across Linux distributions with systemd support
@@ -79,7 +90,7 @@ This application is designed for use on a trusted, internal development network 
 
 ### 📡 **Live Monitoring** (`metrics/`)
 
-The **Monitoring** button on the dashboard's Quick access bar opens `/metrics?embed=1` in the shared dialog — the same chrome as Docker and Reports. There is no agent and no time-series database: one SSH command per host per poll, and the chart history lives in the browser.
+The **Monitoring** button on the dashboard's **Quick access** bar opens `/metrics?embed=1` in the shared dialog — the same chrome as Docker and Reports. There is no agent and no time-series database: one SSH command per host per poll, and the chart history lives in the browser.
 
 | Endpoint | Purpose |
 |---|---|
@@ -95,7 +106,7 @@ Container numbers come from the existing Docker collectors (`dockermon.routes.ho
 
 ### 🐳 **Docker Monitoring**
 * **Automatic discovery:** every configured host is probed for a Docker Engine endpoint — unix socket over SSH (preferred, no exposed port needed), plain TCP `2375`, or TLS `2376`. Hosts without Docker are skipped cleanly.
-* **Docker button:** appears in the Logs toolbar only for hosts with a reachable endpoint; opens a **standalone page** at `/docker/<host_key>` (not a modal).
+* **Docker button:** appears in the Logs toolbar only for hosts with a reachable endpoint; opens `/docker/<host_key>?embed=1` in the shared dialog chrome (v2.14.1). The standalone page still works for deep links, and the **Close** button unloads the iframe so its charts and pollers stop.
 * **Live charts:** CPU, RAM, network (rx/tx bytes per second) and root-filesystem usage, polled every 2 s. The cards **seed from a rolling in-memory history** (one sample every 15 s for 60 minutes by default) so a refresh no longer throws the graph away. History lives in process memory only — it is gone on restart by design, and nothing is written to the database.
 * **Containers:** name, state/health, stack/service, writable + rootfs size, image reference and version tag, ports and mounts. Click a container to expand its details.
 * **Swarm view:** cluster nodes with role/state, plus per-node drill-down that filters the container list.
@@ -648,7 +659,7 @@ The **Add Devices** wizard lets you onboard one or more remote Linux hosts in a 
 #### Wizard Stages
 
 1. **Device entry**
-   - Click the green **Add Devices** button in the top bar.
+   - Click the green **Add Devices** button on the dashboard's **Quick access** bar.
    - Paste one or more hostnames or IPs (one per line).
    - Enter the SSH username you want the app to use (for example `david`).
    - Either:
@@ -782,8 +793,8 @@ The interface features a clean, modern design with:
 - **📦 Compressed logs**: Automatic `.gz` decompression
 
 #### Docker Page (Overview / Apps / Cluster)
-The **Docker** button in the Logs toolbar opens `/docker/<host_key>` for hosts with a reachable
-Docker endpoint. The page has three tabs:
+The **Docker** button in the host toolbar opens `/docker/<host_key>` (in the dialog, or as a
+standalone page) for hosts with a reachable Docker endpoint. The page has three tabs:
 
 | Tab | Shows | Use it for |
 |---|---|---|
@@ -828,7 +839,7 @@ Reports answer "what happened on this server?" instead of "what does this file s
 5. Set **Report size / depth** — leave **Auto** on, or drag the slider from *Lite* to *Maximum*
 6. Press **Start analysis** and watch the stepper: *preparing → collecting → normalising →
    correlating → asking the model → saving*
-7. The report opens at `/reports/<id>`; **Reports** in the toolbar lists history
+7. The report opens at `/reports/<id>`; **Reports** next to the log list opens the history dialog
 
 Choosing a depth:
 
