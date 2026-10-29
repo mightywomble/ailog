@@ -89,7 +89,8 @@
                 <div class="ov-sub">${running} containers running</div></div>
               <div class="ov-metric"><span>Offline</span>
                 <strong class="${servers.length - online.length ? 'ov-bad' : ''}">${servers.length - online.length}</strong>
-                <div class="ov-sub">${online.length ? 'all reachable' : 'no hosts configured'}</div></div>
+                <div class="ov-sub">${!servers.length ? 'no hosts configured'
+                    : (servers.length === online.length ? 'all reachable' : `${servers.length - online.length} unreachable`)}</div></div>
             </div>
           </div>`;
     }
