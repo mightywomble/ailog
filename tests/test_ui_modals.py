@@ -174,3 +174,34 @@ def test_rule_editor_uses_shared_chrome(flask_app):
     assert 'id="rule-modal" class="app-modal hidden"' in body
     assert 'app-modal-panel' in body and 'app-modal-close' in body
     assert 'modals.js' in body
+
+
+def test_panels_are_tall_by_default():
+    """The Docker dialog looked right because its iframe filled a tall panel.
+    A max-height alone lets the panel shrink to its content, so every panel
+    now carries a height and short forms opt out with .app-modal-fit."""
+    import pathlib
+    css = (pathlib.Path(__file__).resolve().parents[1] / 'static' / 'css' / 'style.css').read_text()
+    panel = re.search(r'\.app-modal-panel \{[^}]*\}', css).group(0)
+    assert 'height: 92vh' in panel
+    assert 'max-height: 92vh' in panel
+    assert '.app-modal-panel.app-modal-fit' in css
+    fit = re.search(r'\.app-modal-panel\.app-modal-fit \{[^}]*\}', css).group(0)
+    assert 'height: auto' in fit
+    # phone layout fills the screen in both axes
+    mobile = re.search(r'@media \(max-width: 640px\) \{.*?\n\}', css, re.S).group(0)
+    assert 'height: 100vh' in mobile
+
+
+def test_short_forms_use_the_fit_modifier(index_html):
+    """Add/Edit Host, Edit Monitor and the alert rule editor are short forms;
+    they should not stretch to 92vh with empty space under the fields."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    assert index_html.count('app-modal-fit') == 2   # host + monitor edit
+    alerts = (root / 'templates' / 'alerts.html').read_text()
+    assert 'app-modal-panel app-modal-md app-modal-fit' in alerts
+    # rich dialogs stay tall
+    for modal_id in ('dockerModal', 'reportsModal', 'ai-analysis-modal', 'server-report-modal'):
+        block = _modal_block(index_html, modal_id)
+        assert 'app-modal-fit' not in block, modal_id
