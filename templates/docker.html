@@ -17,8 +17,12 @@
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
-  <div class="max-w-7xl mx-auto p-4 sm:p-6">
+{# The same page is served standalone (/docker/<host>) and embedded in the
+   index.html modal (?embed=1). Embedded: no Back link (the modal owns the
+   close button) and no page-level scroll container sizing. #}
+{% set embedded = request.args.get('embed') == '1' %}
+<body class="bg-slate-950 text-slate-100 {% if not embedded %}min-h-screen{% endif %}">
+  <div class="max-w-7xl mx-auto {% if embedded %}px-3 py-2.5{% else %}p-4 sm:p-6{% endif %}">
 
     <!-- header -->
     <div class="flex flex-wrap items-center justify-between gap-3">
@@ -29,7 +33,7 @@
           </svg>
         </div>
         <div>
-          <h1 class="text-xl font-semibold leading-tight">Docker &mdash; {{ host.friendly_name or host.name or host_key }}</h1>
+          <h1 class="{% if embedded %}text-base{% else %}text-xl{% endif %} font-semibold leading-tight">Docker &mdash; {{ host.friendly_name or host.name or host_key }}</h1>
           <div class="text-xs text-slate-400">
             <span id="host-ip">{{ host.ip or '' }}</span>
             <span id="engine-version" class="ml-2"></span>
@@ -44,7 +48,9 @@
         </span>
         <button id="btn-refresh" type="button"
                 class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg">Refresh</button>
-        <a class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg" href="/">Back</a>
+        {% if not embedded %}
+        <a id="btn-back" class="bg-white/10 hover:bg-white/20 text-sm px-3 py-2 rounded-lg" href="/">Back</a>
+        {% endif %}
       </div>
     </div>
 

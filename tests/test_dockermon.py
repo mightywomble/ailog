@@ -316,3 +316,36 @@ def test_container_rate_math():
     sshstats._container_rates(rows, {'c' * 64: {'net_bytes': (3000, 1500)}}, 1002.0)
     assert rows[0]['net_rx'] == 1000.0
     assert rows[0]['net_tx'] == 500.0
+
+
+# ---------------------------------------------------------------------------
+# the page doubles as a modal iframe source (?embed=1)
+# ---------------------------------------------------------------------------
+
+def test_docker_page_standalone_keeps_the_back_link(client):
+    res = client.get('/docker/db-1')
+    assert res.status_code == 200
+    body = res.data.decode()
+    assert 'id="btn-back"' in body
+    assert 'min-h-screen' in body
+
+
+def test_docker_page_embedded_drops_the_back_link(client):
+    """The modal owns the close button, so the embedded page must not render a
+    second navigation control that would replace the whole SPA."""
+    res = client.get('/docker/db-1?embed=1')
+    assert res.status_code == 200
+    body = res.data.decode()
+    assert 'btn-back' not in body
+    assert '>Back<' not in body
+    # and the page chrome is tightened for the smaller frame
+    assert 'px-3 py-2.5' in body
+    assert 'min-h-screen' not in body
+
+
+def test_index_page_has_the_docker_modal(client):
+    body = client.get('/').data.decode()
+    assert 'id="dockerModal"' in body
+    assert 'id="dockerModalFrame"' in body
+    assert 'id="dockerModalClose"' in body
+    assert 'docker-modal.js' in client.get('/static/js/main.js').data.decode()

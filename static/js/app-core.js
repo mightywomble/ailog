@@ -446,6 +446,7 @@ export function init() {
         // The Docker button is only shown for hosts with a reachable Docker endpoint
         // (unix socket over SSH, plain TCP 2375 or TLS 2376).
         let dockerReachableHosts = new Set();
+        let dockerHostLabels = {};
         let dockerEndpointsAt = 0;
         let dockerEndpointsPromise = null;
 
@@ -456,10 +457,14 @@ export function init() {
                 try {
                     const data = await window.fetchApi('/api/docker/endpoints');
                     const next = new Set();
+                    const labels = {};
                     (data?.endpoints || []).forEach(ep => {
-                        if (ep && ep.reachable) next.add(String(ep.host_key));
+                        if (!ep) return;
+                        if (ep.reachable) next.add(String(ep.host_key));
+                        if (ep.friendly_name) labels[String(ep.host_key)] = ep.friendly_name;
                     });
                     dockerReachableHosts = next;
+                    dockerHostLabels = labels;
                     dockerEndpointsAt = Date.now();
                 } catch (err) {
                     // Keep whatever we had; the button simply stays hidden.
@@ -483,7 +488,18 @@ export function init() {
 
         if (logsActionDocker) logsActionDocker.addEventListener('click', () => {
             if (!selectedHostId) return;
-            window.location.href = '/docker/' + encodeURIComponent(selectedHostId);
+            // A modal, not a navigation: the Docker page is chart-heavy and
+            // users flip back and forth between it and the logs. The label
+            // comes from the endpoint scan so the title reads "Docker — swarm1".
+            const label = dockerHostLabels[String(selectedHostId)]
+                || document.getElementById('logs-selected-host-title')?.textContent?.trim()
+                || '';
+            if (typeof window.openDockerModal === 'function') {
+                window.openDockerModal(selectedHostId, label);
+            } else {
+                // Fallback if the module failed to load: keep the old behaviour.
+                window.location.href = '/docker/' + encodeURIComponent(selectedHostId);
+            }
         });
 
         // --- SERVER-WIDE CORRELATED REPORT -----------------------------------

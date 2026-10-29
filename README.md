@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.14.1 | **Docker monitoring opens in a modal** instead of navigating away: the Docker button now loads `/docker/<host>?embed=1` in a large iframe dialog with its own close button (no page-level Back link), so flipping between the logs view and the Docker dashboard no longer loses your place. The standalone `/docker/<host>` page still works for deep links | ✅ Complete |
 | 2026-10-29 | v2.14.0 | **Severity filter for server reports**: analyse only Critical / Errors / Warnings (multi-select, or All for the classic behaviour). Filtering happens **on the host** — `journalctl --priority` where it is exact, one shared `grep -iE` everywhere else — and again authoritatively in the normaliser, so a busy host sends 70–99% fewer bytes and the model never sees INFO noise. The evidence pack states the filter so the model cannot read filtered-out lines as a healthy source | ✅ Complete |
 | 2026-10-29 | v2.13.1 | **Threshold alerting** (`alerting/`) evaluated on the metrics the samplers already collect, with debounce, cooldown, transitions-only Discord delivery and an `/alerts` page; **report-to-report diffs** ("Since last report" panel) computed from stored JSON; **scheduled reports** (`Schedule.kind = 'report'`); fairer source caps (`MAX_SOURCES` 60 → 120, per-kind shares, journal units ranked by activity); first **pytest suite** (108 tests); `app.py` split (`app_schema.py`, `inventory/`) and `index.html` split into ES modules | ✅ Complete |
 | 2026-10-28 | v2.13.0 | Docker monitoring grows up: a rolling **in-memory history** sampler so `/docker/<host_key>` charts survive a reload (plus a disk card), an **Apps** view that groups containers per stack/service across the cluster, a **Cluster** view with swarm-wide totals, per-node cards with sparklines and `docker system df`, all rendered as tabs on the existing Docker page | ✅ Complete |
@@ -875,6 +876,19 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v2.14.1 - Docker Monitoring in a Modal
+- 🪟 **The Docker button opens a dialog, not a new page** — a 95vw × 92vh panel with the
+  Docker dashboard inside an iframe, titled `Docker — <host>`, with a **Close** button (also
+  Escape and backdrop click). The logs view stays mounted underneath, so you no longer lose your
+  filter/scroll position by checking containers
+- 🔗 **One page, two modes** — `/docker/<host>` is unchanged for deep links and bookmarks; the modal
+  loads `/docker/<host>?embed=1`, which drops the page's own **Back** link (the dialog owns closing)
+  and tightens the chrome for the smaller frame
+- 🧹 **Nothing keeps sampling in a hidden frame** — closing the modal resets the iframe to
+  `about:blank`, which unloads the document and so tears down its chart timers and polling (the page
+  already hooked `beforeunload` / `visibilitychange` for this)
+- ↩️ Falls back to the old navigation if the modal module fails to load
 
 ### v2.14.0 - Severity Filters for Server Reports
 - 🎯 **Multi-select severity filter** in the *Analyse All Logs* dialog: **Critical / Errors / Warnings**
