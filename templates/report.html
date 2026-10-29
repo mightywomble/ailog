@@ -92,6 +92,104 @@
         </div>
       </div>
 
+      {% if diff and diff.get('has_previous') %}
+        {% set vd = diff.get('verdict') or {} %}
+        <section class="mt-5 card rounded-xl overflow-hidden">
+          <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-white/5">
+            <h2 class="text-sm font-medium text-slate-300">
+              Since last report
+              <span class="text-slate-500 font-normal">&middot; #{{ diff.get('previous_id') }}</span>
+            </h2>
+            <a class="text-xs text-sky-300 hover:text-sky-200"
+               href="/reports/{{ diff.get('previous_id') }}">view previous</a>
+          </div>
+
+          <div class="px-4 py-3 text-sm text-slate-300">{{ diff.get('summary') }}</div>
+
+          <div class="grid gap-3 px-4 pb-4 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+            <div class="rounded-lg bg-white/[0.03] px-3 py-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Verdict</div>
+              <div class="mt-0.5 {{ 'text-amber-300' if diff.get('verdict_changed') else 'text-slate-300' }}">
+                {{ vd.get('from')|upper }} &rarr; {{ vd.get('to')|upper }}
+              </div>
+            </div>
+            <div class="rounded-lg bg-white/[0.03] px-3 py-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Events</div>
+              {% set ev = diff.get('events') or {} %}
+              <div class="mt-0.5 tabular-nums">
+                {{ '{:,}'.format(ev.get('after') or 0) }}
+                {% if ev.get('delta') %}
+                  <span class="{{ 'text-rose-300' if ev.get('delta') > 0 else 'text-emerald-300' }}">
+                    {{ '{:+,}'.format(ev.get('delta')) }}{% if ev.get('pct') is not none %} ({{ '{:+.0f}'.format(ev.get('pct')) }}%){% endif %}
+                  </span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="rounded-lg bg-white/[0.03] px-3 py-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Signatures</div>
+              {% set cl = diff.get('clusters') or {} %}
+              <div class="mt-0.5 tabular-nums">
+                <span class="text-rose-300">+{{ cl.get('new', 0) }} new</span>
+                <span class="text-slate-500">&middot;</span>
+                <span class="text-emerald-300">&minus;{{ cl.get('gone', 0) }} gone</span>
+              </div>
+            </div>
+            <div class="rounded-lg bg-white/[0.03] px-3 py-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Correlations</div>
+              {% set co = diff.get('correlations') or {} %}
+              <div class="mt-0.5 tabular-nums">
+                <span class="text-rose-300">+{{ co.get('new', 0) }}</span>
+                <span class="text-slate-500">&middot;</span>
+                <span class="text-emerald-300">&minus;{{ co.get('gone', 0) }}</span>
+              </div>
+            </div>
+          </div>
+
+          {% if diff.get('new_clusters') %}
+            <div class="px-4 pb-4">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">New signatures</div>
+              <ul class="space-y-1 text-xs">
+                {% for c in diff.get('new_clusters') %}
+                  <li class="flex items-start gap-2">
+                    <span class="tabular-nums text-slate-500 w-12 shrink-0">&times;{{ c.get('count') }}</span>
+                    <span class="text-slate-300 break-all">{{ c.get('label') }}</span>
+                    <span class="text-slate-600 shrink-0">{{ c.get('src') }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          {% if diff.get('louder_clusters') %}
+            <div class="px-4 pb-4">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Got noisier (3x or more)</div>
+              <ul class="space-y-1 text-xs">
+                {% for c in diff.get('louder_clusters') %}
+                  <li class="flex items-start gap-2">
+                    <span class="tabular-nums text-slate-500 w-12 shrink-0">&times;{{ c.get('count') }}</span>
+                    <span class="text-amber-200 break-all">{{ c.get('label') }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          {% if diff.get('gone_clusters') %}
+            <div class="px-4 pb-4">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">No longer seen</div>
+              <ul class="space-y-1 text-xs text-slate-400">
+                {% for c in diff.get('gone_clusters') %}
+                  <li class="flex items-start gap-2">
+                    <span class="tabular-nums text-slate-600 w-12 shrink-0">&times;{{ c.get('count') }}</span>
+                    <span class="break-all">{{ c.get('label') }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+        </section>
+      {% endif %}
+
       {% if coverage.get('truncated') or coverage.get('pack_fitted') or report.sources_failed %}
         <div class="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm px-4 py-3">
           <strong>Partial view.</strong>

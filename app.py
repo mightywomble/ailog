@@ -44,6 +44,16 @@ app.register_blueprint(docker_bp)
 from serverreport import reports_bp
 app.register_blueprint(reports_bp)
 
+# Threshold alerting over the metrics the samplers collect (modular bolt-on)
+from alerting import alerts_bp
+app.register_blueprint(alerts_bp)
+
+# Groups, tags, inventory exports and DB backup/restore (modular bolt-on)
+from inventory import groups_bp as _inv_groups_bp, export_bp as _inv_export_bp, dbadmin_bp as _inv_dbadmin_bp
+app.register_blueprint(_inv_groups_bp)
+app.register_blueprint(_inv_export_bp)
+app.register_blueprint(_inv_dbadmin_bp)
+
 # --- DATABASE CONFIGURATION ---
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
@@ -53,38 +63,12 @@ db.init_app(app)
 # Create database tables on startup
 
 def _ensure_suricata_endpoint_columns():
-    """Lightweight SQLite migration: add endpoint/port columns used by Endpoint Stats."""
+    """Additive columns for endpoint statistics (see app_schema.COLUMNS)."""
     try:
-        uri = str(app.config.get('SQLALCHEMY_DATABASE_URI') or '')
-        if not uri.startswith('sqlite'):
-            return
+        import app_schema
+        app_schema.add_missing_columns(db)
     except Exception:
-        return
-
-    def _col_exists(table: str, col: str) -> bool:
-        try:
-            rows = db.session.execute(sql_text(f"PRAGMA table_info({table})")).fetchall()
-            return any(r[1] == col for r in rows)
-        except Exception:
-            return False
-
-    def _add_col(table: str, col: str, decl: str):
-        if _col_exists(table, col):
-            return
-        try:
-            db.session.execute(sql_text(f"ALTER TABLE {table} ADD COLUMN {col} {decl}"))
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-    for c, decl in [('src_ip','TEXT'),('dst_ip','TEXT'),('src_port','INTEGER'),('dst_port','INTEGER')]:
-        _add_col('suricata_fast_alert_buckets', c, decl)
-
-    for c, decl in [('src_ip','TEXT'),('dst_ip','TEXT'),('src_port','INTEGER'),('dst_port','INTEGER'),('proto','TEXT'),('app_proto','TEXT')]:
-        _add_col('suricata_alert_buckets', c, decl)
-
-
-
+        pass
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -100,32 +84,12 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _ensure_sshkey_encryption_columns():
-    """Lightweight SQLite migration: add encryption columns to ssh_keys and optionally encrypt legacy plaintext rows."""
+    """Additive columns for SSH key encryption, then migrate plaintext keys."""
     try:
-        uri = str(app.config.get('SQLALCHEMY_DATABASE_URI') or '')
-        if not uri.startswith('sqlite'):
-            return
+        import app_schema
+        app_schema.add_missing_columns(db)
     except Exception:
-        return
-
-    def _col_exists(table: str, col: str) -> bool:
-        try:
-            rows = db.session.execute(sql_text(f"PRAGMA table_info({table})")).fetchall()
-            return any(r[1] == col for r in rows)
-        except Exception:
-            return False
-
-    def _add_col(table: str, col: str, decl: str):
-        if _col_exists(table, col):
-            return
-        try:
-            db.session.execute(sql_text(f"ALTER TABLE {table} ADD COLUMN {col} {decl}"))
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-    _add_col('ssh_keys', 'is_encrypted', 'BOOLEAN DEFAULT 0')
-    _add_col('ssh_keys', 'enc_version', 'TEXT')
+        pass
 
     def _encryption_enabled() -> bool:
         try:
@@ -134,10 +98,10 @@ def _ensure_sshkey_encryption_columns():
                 try:
                     return bool(json.loads(row.value_json))
                 except Exception:
-                    return bool(row.value_json)
+                    return False
         except Exception:
-            pass
-        return _env_bool('AILOG_SSHKEY_ENCRYPTION_ENABLED', True)
+            return False
+        return False
 
     # Best-effort migration of legacy plaintext -> encrypted when master key is configured and encryption is enabled
     if not (sshkey_crypto_configured() and _encryption_enabled()):
@@ -165,6 +129,11 @@ with app.app_context():
     db.create_all()
     _ensure_suricata_endpoint_columns()
     _ensure_sshkey_encryption_columns()
+    try:
+        from alerting import engine as _alerts_engine
+        _alerts_engine.seed_defaults()
+    except Exception:
+        pass
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -2556,11 +2525,94 @@ def _do_analysis_task(emit=None):
 
     _emit({'status': 'complete', 'message': 'Scheduled analysis completed.', 'progress': 100})
 
+def _apply_schedule_report_fields(schedule: Schedule, data: dict):
+    """Copy kind + report parameters from an API payload onto a Schedule."""
+    if 'kind' in data:
+        kind = str(data.get('kind') or 'log').strip().lower()
+        schedule.kind = 'report' if kind == 'report' else 'log'
+    for field, cast in (('report_window_minutes', int), ('report_depth', int)):
+        if field in data:
+            raw = data.get(field)
+            try:
+                setattr(schedule, field, cast(raw) if raw not in (None, '') else None)
+            except (TypeError, ValueError):
+                pass
+    if 'report_model' in data:
+        schedule.report_model = (data.get('report_model') or '').strip() or None
+    if 'report_scope' in data:
+        scope = data.get('report_scope')
+        schedule.report_scope_json = json.dumps(scope) if isinstance(scope, dict) else None
+
+
+def _run_report_schedule(schedule: Schedule, emit=None):
+    """Run the server-wide report pipeline for every host in a schedule.
+
+    One report per host, because a report answers "what happened on *this*
+    server"; a schedule decides which servers and how often.
+    """
+    from serverreport import routes as report_routes
+
+    emit = emit or (lambda payload: None)
+    scope = schedule.report_scope() or {}
+    include_files = bool(scope.get('files', True))
+    include_journal = bool(scope.get('journal', True))
+    include_docker = bool(scope.get('docker', True))
+    include_stopped = bool(scope.get('stopped', False))
+
+    window = int(schedule.report_window_minutes
+                 or report_routes._defaults()['window_minutes'])
+    provider = report_routes._configured_provider()
+    defaults = report_routes._defaults()
+    model = (schedule.report_model or '').strip() or (
+        defaults['model'] if provider == defaults['provider'] else None)
+    depth = schedule.report_depth if schedule.report_depth is not None else 0
+
+    host_ids = [h.host_id for h in
+                ScheduleHost.query.filter_by(schedule_id=schedule.id).all()]
+    if not host_ids:
+        host_ids = ['local']
+
+    results = []
+    for index, host_key in enumerate(host_ids):
+        label = dict(_get_all_host_choices()).get(host_key, host_key)
+        emit({'status': 'log', 'progress': int(100 * index / max(1, len(host_ids))),
+              'message': f'Report: {label} ({window} min window)...'})
+        try:
+            payload = report_routes.run_pipeline(
+                host_key, label, window, provider, model, {},
+                include_files=include_files, include_journal=include_journal,
+                include_docker=include_docker, include_stopped=include_stopped,
+                depth=depth or None, emit=emit,
+            )
+            results.append({'host': host_key, 'report_id': payload.get('id'),
+                            'verdict': payload.get('verdict')})
+            emit({'status': 'log',
+                  'message': f'  {label}: {str(payload.get("verdict") or "unknown").upper()} '
+                             f'(report #{payload.get("id")})'})
+        except Exception as exc:
+            results.append({'host': host_key, 'error': str(exc)})
+            emit({'status': 'log', 'message': f'  {label}: FAILED - {exc}'})
+
+    emit({'status': 'progress', 'progress': 100,
+          'message': f'{len([r for r in results if r.get("report_id")])} report(s) stored.'})
+    return results
+
+
 def _run_schedule(schedule: Schedule, emit=None):
     """Run analysis for a specific Schedule by temporarily overriding legacy schedule.sources.
 
     This reuses the existing _do_analysis_task implementation while we complete the migration.
     """
+    if (schedule.kind or 'log') == 'report':
+        results = _run_report_schedule(schedule, emit=emit)
+        schedule.last_run_at = datetime.datetime.utcnow()
+        schedule.last_status = json.dumps(results)[:2000]
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return
+
     # Build sources list
     sources = []
     for ss in ScheduleSource.query.filter_by(schedule_id=schedule.id).all():
@@ -2705,6 +2757,7 @@ def api_schedules_collection():
     interval_hours = max(1, interval_hours)
 
     s = Schedule(name=name, enabled=enabled, interval_hours=interval_hours)
+    _apply_schedule_report_fields(s, data)
     db.session.add(s)
     db.session.flush()
 
@@ -2759,6 +2812,7 @@ def api_schedule_item(schedule_id: int):
         s.enabled = bool(data.get('enabled'))
     if 'interval_hours' in data:
         s.interval_hours = max(1, int(data.get('interval_hours') or s.interval_hours or 6))
+    _apply_schedule_report_fields(s, data)
 
     # Replace hosts if provided
     if 'hosts' in data:
@@ -4934,566 +4988,10 @@ def get_host_db(host_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/groups', methods=['GET'])
-def get_groups():
-    """Get all groups"""
-    try:
-        groups = Group.query.all()
-        return jsonify([g.to_dict() for g in groups])
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/groups', methods=['POST'])
-def create_group():
-    """Create a new group"""
-    try:
-        data = request.get_json()
-        name = data.get('name')
-        
-        if not name:
-            return jsonify({'error': 'Group name required'}), 400
-        
-        existing = Group.query.filter_by(name=name).first()
-        if existing:
-            return jsonify({'error': 'Group already exists'}), 400
-        
-        group = Group(
-            name=name,
-            description=data.get('description', '')
-        )
-        db.session.add(group)
-        db.session.commit()
-        
-        return jsonify(group.to_dict()), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+# Group / tag / export / DB-admin routes now live in the inventory package.
 
 
-
-@app.route('/groups/<int:group_id>', methods=['PUT'])
-def update_group(group_id):
-    """Update an existing group"""
-    try:
-        group = Group.query.get(group_id)
-        if not group:
-            return jsonify({'error': 'Group not found'}), 404
-
-        data = request.get_json() or {}
-        name = data.get('name')
-        description = data.get('description')
-
-        if name is not None:
-            name = name.strip()
-            if not name:
-                return jsonify({'error': 'Group name required'}), 400
-            existing = Group.query.filter(Group.name == name, Group.id != group_id).first()
-            if existing:
-                return jsonify({'error': 'Group already exists'}), 400
-            group.name = name
-
-        if description is not None:
-            group.description = description
-
-        db.session.commit()
-        return jsonify(group.to_dict())
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/groups/<int:group_id>', methods=['DELETE'])
-def delete_group(group_id):
-    """Delete a group"""
-    try:
-        group = Group.query.get(group_id)
-        if not group:
-            return jsonify({'error': 'Group not found'}), 404
-
-        # Detach from hosts first (association table)
-        group.hosts = []
-        db.session.delete(group)
-        db.session.commit()
-        return jsonify({'message': 'Group deleted'})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/groups/<int:group_id>/hosts', methods=['GET'])
-def get_group_hosts(group_id):
-    """List hosts assigned to a group"""
-    try:
-        group = Group.query.get(group_id)
-        if not group:
-            return jsonify({'error': 'Group not found'}), 404
-
-        hosts = []
-        for h in (group.hosts or []):
-            hosts.append({
-                'id': h.id,
-                'host_id': f"db-{h.id}",
-                'hostname': h.hostname,
-                'friendly_name': h.friendly_name,
-                'ip_address': h.ip_address,
-                'ssh_user': h.ssh_user,
-                'description': h.description,
-            })
-
-        return jsonify({'group': group.to_dict(), 'hosts': hosts})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-@app.route('/tags', methods=['GET'])
-def get_tags():
-    """Get all tags"""
-    try:
-        tags = Tag.query.all()
-        return jsonify([t.to_dict() for t in tags])
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/tags', methods=['POST'])
-def create_tag():
-    """Create a new tag"""
-    try:
-        data = request.get_json()
-        name = data.get('name')
-        
-        if not name:
-            return jsonify({'error': 'Tag name required'}), 400
-        
-        existing = Tag.query.filter_by(name=name).first()
-        if existing:
-            return jsonify({'error': 'Tag already exists'}), 400
-        
-        tag = Tag(
-            name=name,
-            color=data.get('color', '#3b82f6')
-        )
-        db.session.add(tag)
-        db.session.commit()
-        
-        return jsonify(tag.to_dict()), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/hosts/db/<int:host_id>/groups', methods=['POST'])
-def add_host_to_group(host_id):
-    """Add host to a group"""
-    try:
-        data = request.get_json()
-        group_ids = data.get('group_ids', [])
-        
-        host = Host.query.get(host_id)
-        if not host:
-            return jsonify({'error': 'Host not found'}), 404
-        
-        groups = Group.query.filter(Group.id.in_(group_ids)).all()
-        host.groups = groups
-        db.session.commit()
-        
-        return jsonify(host.to_dict())
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/hosts/db/<int:host_id>/tags', methods=['POST'])
-def add_host_to_tags(host_id):
-    """Add tags to a host"""
-    try:
-        data = request.get_json()
-        tag_ids = data.get('tag_ids', [])
-        
-        host = Host.query.get(host_id)
-        if not host:
-            return jsonify({'error': 'Host not found'}), 404
-        
-        tags = Tag.query.filter(Tag.id.in_(tag_ids)).all()
-        host.tags = tags
-        db.session.commit()
-        
-        return jsonify(host.to_dict())
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/export/ansible-inventory', methods=['POST'])
-def export_ansible_inventory():
-    '''Generate Ansible inventory JSON with mainip and netbirdip groups.'''
-    try:
-        hosts = Host.query.all()
-
-        inventory = {
-            'mainip':    {'hosts': []},
-            'netbirdip': {'hosts': []},
-            '_meta':     {'hostvars': {}}
-        }
-
-        for host in hosts:
-            host_name = host.friendly_name or host.hostname
-            si        = getattr(host, 'system_info', None)
-            main_ip   = getattr(si, 'main_ip',    None) if si else None
-            netbird_ip= getattr(si, 'netbird_ip', None) if si else None
-            base_ip   = main_ip or host.ip_address
-
-            inventory['mainip']['hosts'].append(host_name)
-            inventory['_meta']['hostvars'][host_name] = {
-                'ansible_host': base_ip,
-                'ansible_user': host.ssh_user,
-            }
-
-            if netbird_ip:
-                nb_name = f'{host_name}-netbird'
-                inventory['netbirdip']['hosts'].append(nb_name)
-                inventory['_meta']['hostvars'][nb_name] = {
-                    'ansible_host': netbird_ip,
-                    'ansible_user': host.ssh_user,
-                }
-
-        json_output = json.dumps(inventory, indent=2, sort_keys=True)
-
-        return Response(
-            json_output,
-            mimetype='application/json',
-            headers={'Content-Disposition': 'attachment; filename=inventory.json'}
-        )
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/export/ssh-config', methods=['POST'])
-def export_ssh_config():
-    """Generate SSH config file"""
-    try:
-        hosts = Host.query.all()
-        
-        ssh_config = "# Auto-generated SSH config from AI Log Viewer\n"
-        ssh_config += f"# Generated: {datetime.datetime.utcnow().isoformat()}\n\n"
-        
-        def _host_block(name, ip, host_obj):
-            nonlocal ssh_config
-            ssh_config += f'Host {name}\n'
-            ssh_config += f'    HostName {ip}\n'
-            ssh_config += f'    User {host_obj.ssh_user}\n'
-            if host_obj.ssh_key:
-                ssh_config += f'    IdentityFile ~/.ssh/{host_obj.ssh_key.key_name}\n'
-            ssh_config += '    StrictHostKeyChecking no\n'
-            ssh_config += '    UserKnownHostsFile=/dev/null\n'
-            ssh_config += '\n'
-
-        ssh_config += '# ----------------------------------------\n'
-        ssh_config += '# Group: mainip\n'
-        ssh_config += '# ----------------------------------------\n'
-        for host in hosts:
-            host_name  = host.friendly_name or host.hostname
-            si         = getattr(host, 'system_info', None)
-            main_ip    = getattr(si, 'main_ip', None) if si else None
-            base_ip    = main_ip or host.ip_address
-            _host_block(host_name, base_ip, host)
-
-        ssh_config += '# ----------------------------------------\n'
-        ssh_config += '# Group: netbirdip\n'
-        ssh_config += '# ----------------------------------------\n'
-        for host in hosts:
-            host_name  = host.friendly_name or host.hostname
-            si         = getattr(host, 'system_info', None)
-            netbird_ip = getattr(si, 'netbird_ip', None) if si else None
-            if netbird_ip:
-                _host_block(f'{host_name}-netbird', netbird_ip, host)
-        
-        return Response(
-            ssh_config,
-            mimetype='text/plain',
-            headers={'Content-Disposition': 'attachment; filename=ssh_config'}
-        )
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-def _get_sqlite_db_file_path():
-    '''Return sqlite file path if DATABASE_URL is sqlite:////... else None.'''
-    url = app.config.get('SQLALCHEMY_DATABASE_URI', '') or ''
-    if not url.startswith('sqlite:'):
-        return None
-    # sqlite:////absolute/path or sqlite:///relative/path
-    if url.startswith('sqlite:////'):
-        # Keep leading slash
-        return '/' + url[len('sqlite:////'):]
-    if url.startswith('sqlite:///'):
-        return url[len('sqlite:///'):]
-    if url == 'sqlite://':
-        return None
-    if url.startswith('sqlite:'):
-        return url.split('sqlite:', 1)[1]
-    return None
-
-
-@app.route('/admin/db/backup', methods=['GET'])
-def backup_database():
-    '''Download a copy of the current sqlite database.'''
-    try:
-        db_path = _get_sqlite_db_file_path()
-        if not db_path:
-            return jsonify({'error': 'Database backup only supported for sqlite'}), 400
-        if not os.path.exists(db_path):
-            return jsonify({'error': f'Database file not found: {db_path}'}), 404
-
-        ts = datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
-        filename = f"ailog-backup-{ts}.db"
-
-        with open(db_path, 'rb') as f:
-            data = f.read()
-
-        return Response(
-            data,
-            mimetype='application/octet-stream',
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
-        )
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/admin/db/restore', methods=['POST'])
-def restore_database():
-    '''Restore sqlite database from uploaded file.'''
-    try:
-        db_path = _get_sqlite_db_file_path()
-        if not db_path:
-            return jsonify({'error': 'Database restore only supported for sqlite'}), 400
-
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
-
-        upload = request.files['file']
-        if not upload or not upload.filename:
-            return jsonify({'error': 'No file selected'}), 400
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
-        tmp_path = tmp.name
-        tmp.close()
-        upload.save(tmp_path)
-
-        try:
-            with open(tmp_path, 'rb') as fh:
-                header = fh.read(16)
-            if header != b'SQLite format 3\x00':
-                return jsonify({'error': 'Uploaded file is not a valid sqlite database'}), 400
-
-            os.makedirs(os.path.dirname(db_path) or '.', exist_ok=True)
-
-            # Drop connections and replace DB file
-            try:
-                db.session.remove()
-            except Exception:
-                pass
-            try:
-                db.engine.dispose()
-            except Exception:
-                pass
-
-            shutil.copyfile(tmp_path, db_path)
-
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-
-        return jsonify({'message': 'Database restored successfully. Please refresh the page.'})
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-# --- SERVER-SENT EVENTS (SSE) STREAMING ENDPOINTS ---
-
-import uuid as uuid_lib
-from threading import Lock
-
-# Global dictionary to store event queues for each wizard session
-wizard_sessions = {}
-sessions_lock = Lock()
-
-
-
-@app.route('/admin/db/restore-selective', methods=['POST'])
-def restore_database_selective():
-    '''Selective restore from uploaded sqlite DB.
-
-    Flags (form fields):
-    - restore_ai
-    - restore_discord
-    - restore_hosts (replace-all)
-    - restore_schedule (interval/is_running only)
-    - restore_ai_search (prompt/keywords)
-    - restore_suricata (suricata sensors + prompt)
-    '''
-    try:
-        db_path = _get_sqlite_db_file_path()
-        if not db_path:
-            return jsonify({'error': 'Database restore only supported for sqlite'}), 400
-
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
-
-        upload = request.files['file']
-        if not upload or not upload.filename:
-            return jsonify({'error': 'No file selected'}), 400
-
-        def _flag(name: str) -> bool:
-            v = (request.form.get(name) or '').lower()
-            return v in ('1', 'true', 'yes', 'on')
-
-        restore_ai = _flag('restore_ai')
-        restore_discord = _flag('restore_discord')
-        restore_hosts = _flag('restore_hosts')
-        restore_schedule = _flag('restore_schedule')
-        restore_ai_search = _flag('restore_ai_search')
-        restore_suricata = _flag('restore_suricata')
-
-        if not any([restore_ai, restore_discord, restore_hosts, restore_schedule, restore_ai_search, restore_suricata]):
-            return jsonify({'error': 'No restore categories selected'}), 400
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
-        tmp_path = tmp.name
-        tmp.close()
-        upload.save(tmp_path)
-
-        try:
-            with open(tmp_path, 'rb') as fh:
-                header = fh.read(16)
-            if header != b'SQLite format 3\x00':
-                return jsonify({'error': 'Uploaded file is not a valid sqlite database'}), 400
-
-            src = sqlite3.connect(tmp_path)
-            src.row_factory = sqlite3.Row
-
-            def table_exists(conn, name: str) -> bool:
-                cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,))
-                return cur.fetchone() is not None
-
-            def read_table(conn, name: str):
-                cur = conn.execute(f"SELECT * FROM {name}")
-                rows = [dict(r) for r in cur.fetchall()]
-                return rows
-
-            def exec_many(stmt, rows):
-                if not rows:
-                    return
-                db.session.execute(stmt, rows)
-
-            # Avoid using a stale connection while mutating
-            try:
-                db.session.remove()
-            except Exception:
-                pass
-            try:
-                db.engine.dispose()
-            except Exception:
-                pass
-
-            # SETTINGS restore (app_settings)
-            if restore_ai or restore_discord or restore_schedule or restore_ai_search:
-                # Support both new and old backups: prefer app_settings
-                if table_exists(src, 'app_settings'):
-                    keys = set()
-                    if restore_ai:
-                        keys |= {'analysis_provider', 'openai_api_key', 'ollama_url', 'ollama_model'}
-                    if restore_discord:
-                        keys |= {'discord_webhook_url'}
-                    if restore_schedule:
-                        keys |= {'schedule.is_running', 'schedule.interval_hours'}
-                    if restore_suricata:
-                        keys |= {'suricata.prompt'}
-
-                    if keys:
-                        cur = src.execute(
-                            f"SELECT key, value_json FROM app_settings WHERE key IN ({','.join(['?']*len(keys))})",
-                            tuple(sorted(keys))
-                        )
-                        rows = cur.fetchall()
-                        for r in rows:
-                            _setting_set(r['key'], json.loads(r['value_json']) if r['value_json'] else None)
-                else:
-                    # Fallback: try legacy scheduler_config.json style keys in a settings-like table (none), so skip.
-                    pass
-
-            
-
-            # SURICATA restore (replace-all for suricata_* tables)
-            if restore_suricata:
-                suri_tables = [
-                    'suricata_sensors',
-                    'suricata_ingest_state',
-                    'suricata_alert_buckets',
-                    'suricata_fast_alert_buckets',
-                    'suricata_stats_counter_buckets',
-                ]
-                suri_tables = [t for t in suri_tables if table_exists(src, t)]
-                if not suri_tables:
-                    return jsonify({'error': 'Backup does not contain Suricata tables'}), 400
-
-                # Delete then insert
-                for t in suri_tables:
-                    db.session.execute(sql_text(f"DELETE FROM {t}"))
-
-                for t in suri_tables:
-                    rows = read_table(src, t)
-                    if not rows:
-                        continue
-                    cols = list(rows[0].keys())
-                    placeholders = ','.join([f":{c}" for c in cols])
-                    col_list = ','.join(cols)
-                    stmt = sql_text(f"INSERT INTO {t} ({col_list}) VALUES ({placeholders})")
-                    exec_many(stmt, rows)
-# HOSTS restore (replace-all)
-            if restore_hosts:
-                required_tables = ['hosts']
-                if not all(table_exists(src, t) for t in required_tables):
-                    return jsonify({'error': 'Backup does not contain required host tables'}), 400
-
-                # Determine which tables we can restore
-                tables = [
-                    'host_groups', 'host_tags',
-                    'system_info', 'services', 'host_logs',
-                    'hosts',
-                    'groups', 'tags',
-                    'ssh_keys',
-                ]
-                tables = [t for t in tables if table_exists(src, t)]
-
-                # Delete in FK-safe-ish order (association, dependents, base)
-                delete_order = [t for t in ['host_groups','host_tags','system_info','services','host_logs','hosts','groups','tags','ssh_keys'] if t in tables]
-                for t in delete_order:
-                    db.session.execute(sql_text(f"DELETE FROM {t}"))
-
-                # Insert rows
-                for t in tables:
-                    rows = read_table(src, t)
-                    if not rows:
-                        continue
-                    cols = list(rows[0].keys())
-                    placeholders = ','.join([f":{c}" for c in cols])
-                    col_list = ','.join(cols)
-                    stmt = sql_text(f"INSERT INTO {t} ({col_list}) VALUES ({placeholders})")
-                    exec_many(stmt, rows)
-
-            db.session.commit()
-
-        finally:
-            try:
-                src.close()
-            except Exception:
-                pass
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-
-        return jsonify({'message': 'Selective restore complete. Please refresh the page.'})
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
 @app.route('/wizard/session/create', methods=['POST'])
 def create_wizard_session():
     """Create a new wizard session ID for streaming"""

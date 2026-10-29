@@ -224,11 +224,26 @@ class Schedule(db.Model):
     name = db.Column(db.String(255), nullable=False, default='Schedule')
     enabled = db.Column(db.Boolean, default=False)
     interval_hours = db.Column(db.Integer, nullable=False, default=6)
+    # 'log'   - the original per-source AI analysis
+    # 'report' - the server-wide correlated report pipeline (one report per host)
+    kind = db.Column(db.String(16), nullable=False, default='log')
+    report_window_minutes = db.Column(db.Integer)
+    report_depth = db.Column(db.Integer)
+    report_model = db.Column(db.String(128))
+    report_scope_json = db.Column(db.Text)
+    last_run_at = db.Column(db.DateTime)
+    last_status = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     hosts = db.relationship('ScheduleHost', backref='schedule', cascade='all, delete-orphan')
     sources = db.relationship('ScheduleSource', backref='schedule', cascade='all, delete-orphan')
+
+    def report_scope(self):
+        try:
+            return json.loads(self.report_scope_json) if self.report_scope_json else {}
+        except Exception:
+            return {}
 
     def to_dict(self, include_children=False):
         d = {
@@ -236,6 +251,13 @@ class Schedule(db.Model):
             'name': self.name,
             'enabled': bool(self.enabled),
             'interval_hours': self.interval_hours,
+            'kind': self.kind or 'log',
+            'report_window_minutes': self.report_window_minutes,
+            'report_depth': self.report_depth,
+            'report_model': self.report_model,
+            'report_scope': self.report_scope(),
+            'last_run_at': self.last_run_at.isoformat() if self.last_run_at else None,
+            'last_status': self.last_status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -613,6 +635,7 @@ class LogReport(db.Model):
     correlations_json = db.Column(db.Text)
     containers_json = db.Column(db.Text)
     coverage_json = db.Column(db.Text)
+    clusters_json = db.Column(db.Text)   # compact cluster list, used for diffing
     evidence_text = db.Column(db.Text)
 
     tokens_in = db.Column(db.Integer)
@@ -644,6 +667,9 @@ class LogReport(db.Model):
     def coverage(self):
         return self._load(self.coverage_json, {})
 
+    def clusters(self):
+        return self._load(self.clusters_json, [])
+
     def to_dict(self, include_markdown=False):
         data = {
             'id': self.id,
@@ -674,3 +700,82 @@ class LogReport(db.Model):
         if include_markdown:
             data['report_markdown'] = self.report_markdown
         return data
+
+
+class AlertRule(db.Model):
+    """A threshold rule evaluated against the metrics ailog collects.
+
+    Additive table - created by ``db.create_all()``.
+    """
+    __tablename__ = 'alert_rules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, default='Rule')
+    metric = db.Column(db.String(64), nullable=False, default='mem_percent')
+    op = db.Column(db.String(8), nullable=False, default='>=')
+    threshold = db.Column(db.Float, nullable=False, default=0.0)
+    for_seconds = db.Column(db.Integer, nullable=False, default=0)
+    cooldown_seconds = db.Column(db.Integer, nullable=False, default=900)
+    severity = db.Column(db.String(16), nullable=False, default='warning')
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'metric': self.metric,
+            'op': self.op,
+            'threshold': self.threshold,
+            'for_seconds': self.for_seconds,
+            'cooldown_seconds': self.cooldown_seconds,
+            'severity': self.severity,
+            'enabled': bool(self.enabled),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class AlertEvent(db.Model):
+    """One firing/resolved episode for a rule on a host.
+
+    Additive table - created by ``db.create_all()``.
+    """
+    __tablename__ = 'alert_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    rule_id = db.Column(db.Integer, index=True)
+    rule_name = db.Column(db.String(120))
+    host_key = db.Column(db.String(64), index=True)
+    metric = db.Column(db.String(64))
+    op = db.Column(db.String(8))
+    value = db.Column(db.Float)
+    threshold = db.Column(db.Float)
+    resolved_value = db.Column(db.Float)
+    severity = db.Column(db.String(16), default='warning')
+    state = db.Column(db.String(16), default='firing', index=True)
+    message = db.Column(db.Text)
+    notified = db.Column(db.Boolean, default=False)
+    notify_error = db.Column(db.Text)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    resolved_at = db.Column(db.DateTime)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'rule_id': self.rule_id,
+            'rule_name': self.rule_name,
+            'host_key': self.host_key,
+            'metric': self.metric,
+            'op': self.op,
+            'value': self.value,
+            'threshold': self.threshold,
+            'resolved_value': self.resolved_value,
+            'severity': self.severity,
+            'state': self.state,
+            'message': self.message,
+            'notified': bool(self.notified),
+            'notify_error': self.notify_error,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+        }
