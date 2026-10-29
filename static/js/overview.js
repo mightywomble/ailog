@@ -73,7 +73,7 @@
         const running = servers.reduce((sum, s) => sum + (s.docker?.containers_running || 0), 0);
 
         return `
-          <div class="ov-card ov-card-wide" data-ov="fleet">
+          <div class="ov-card" data-ov="fleet">
             <div class="ov-card-head">
               <h3>Fleet</h3>
               <span class="ov-chip ${online.length === servers.length && servers.length ? 'is-ok' : 'is-warn'}">
@@ -92,38 +92,6 @@
                 <div class="ov-sub">${!servers.length ? 'no hosts configured'
                     : (servers.length === online.length ? 'all reachable' : `${servers.length - online.length} unreachable`)}</div></div>
             </div>
-          </div>`;
-    }
-
-    function renderHosts(servers) {
-        const tiles = servers.map((s) => {
-            const online = s.online !== false;
-            const cpu = s.cpu?.percent;
-            const mem = s.mem?.percent;
-            const disk = s.disk?.percent;
-            return `
-              <button type="button" class="ov-host" data-host="${esc(s.host_key)}" ${online ? '' : 'data-offline="1"'}>
-                <div class="ov-host-top">
-                  <span class="ov-dot ${online ? 'is-up' : 'is-down'}"></span>
-                  <span class="ov-host-name">${esc(s.name || s.host_key)}</span>
-                  ${s.docker?.installed ? `<span class="ov-docker" title="Docker installed">🐳 ${s.docker.containers_running || 0}</span>` : ''}
-                </div>
-                <div class="ov-host-ip">${esc(s.ip || '')}</div>
-                <div class="ov-host-bars">
-                  <span title="CPU">${fmtPct(cpu)}<i style="width:${Math.min(100, cpu || 0)}%;background:var(--chart-1)"></i></span>
-                  <span title="RAM">${fmtPct(mem)}<i style="width:${Math.min(100, mem || 0)}%;background:var(--chart-2)"></i></span>
-                  <span title="Disk">${fmtPct(disk)}<i style="width:${Math.min(100, disk || 0)}%;background:var(--chart-3)"></i></span>
-                </div>
-              </button>`;
-        }).join('');
-
-        return `
-          <div class="ov-card" data-ov="hosts">
-            <div class="ov-card-head">
-              <h3>Hosts</h3>
-              <span class="ov-sub">${servers.length} configured</span>
-            </div>
-            <div class="ov-host-grid">${tiles || '<div class="ov-sub">No hosts yet — use Add Devices.</div>'}</div>
           </div>`;
     }
 
@@ -206,7 +174,6 @@
         } else {
             const list = result.servers.data?.servers || [];
             cards.push(renderFleet(list));
-            cards.push(renderHosts(list));
         }
 
         if (result.alerts === null) cards.push(skeletonCard('Alerts'));
@@ -219,13 +186,6 @@
         mount.dataset.updated = new Date().toISOString();
         painted = true;
 
-        // Host tiles open that host's logs; the sidebar selection is what
-        // app-core actually drives, so go through the exported helper.
-        mount.querySelectorAll('.ov-host').forEach((tile) => {
-            tile.addEventListener('click', () => {
-                window.ailogOpenHost?.(tile.dataset.host);
-            });
-        });
         mount.querySelector('[data-ov-open-reports]')?.addEventListener('click', () => {
             if (typeof window.openReportsModal === 'function') window.openReportsModal(null, '');
             else window.open('/reports', '_blank', 'noopener');

@@ -1,5 +1,5 @@
 """
-Database models for AI Log Viewer using SQLAlchemy ORM
+Database models for Homelab Manager using SQLAlchemy ORM
 Supports SQLite3 (default) and PostgreSQL (via connection string)
 """
 

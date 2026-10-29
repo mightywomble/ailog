@@ -1,4 +1,4 @@
-# AI Log Viewer - Multi-Host Log Analysis Platform
+# Homelab Manager - Multi-Host Log Analysis Platform
 
 A comprehensive, modern web application for viewing and analyzing system logs from `/var/log`, `journalctl` and **Docker containers** across both **local** and **remote** servers, with live Docker/Swarm monitoring. This advanced platform combines real-time log viewing, powerful search capabilities, AI-powered analysis, and proactive alerting in a sleek, responsive interface designed for developers and system administrators.
 
@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.19.0 | **Renamed to Homelab Manager**, and the Overview is now three cards: **Fleet**, **Alerts** and **Recent reports**. The per-host Hosts card is gone — host browsing lives in the sidebar, the ⌘K palette and the Logs workspace, so the dashboard stays a fleet summary. Page titles, the SSH-config header, backup/import filenames and the Discord test message follow the new name | ✅ Complete |
 | 2026-10-29 | v2.18.2 | Fix: the Fleet card reported **"all reachable"** next to a non-zero Offline count; it now says `N unreachable` (and still says nothing configured when the fleet is empty) | ✅ Complete |
 | 2026-10-29 | v2.18.1 | Polish for the new Overview: the **Hosts card is capped at 372 px with internal scroll**, so a 16-host fleet no longer stretches the whole card row, and the sidebar drag-grip dots are visible again (`stroke-width` was computing to 1 px) | ✅ Complete |
 | 2026-10-29 | v2.18.0 | **Interface rework (Option A): fleet-first pages + a host workspace**, with a ⌘K command palette and a card-based Overview grid. Adds a responsive shell (desktop sidebar → tablet icon rail → phone drawer + bottom tab bar + bottom-sheet dialogs), a three-layer theme system with **6 themes × dark/light**, and Settings → **Appearance** (theme, mode, density, motion). Charts follow the theme; legacy Tailwind utilities are retargeted in light mode instead of rewriting 1,500 lines of markup | ✅ Complete |
@@ -63,10 +64,10 @@ This application is designed for use on a trusted, internal development network 
 ### 🧭 **Navigation (fleet first, then host)**
 There is one rule: **server-wide things live on pages, per-host things live in the host workspace.**
 
-* **Overview (fleet)** — the landing page. A **Fleet** card (online hosts, average CPU/RAM, Docker
-  host and container counts, offline count), a **Hosts** card with one tile per server, **Alerts**
-  and **Recent reports**. Every card is live: it polls `/api/metrics/servers`,
-  `/api/alerts/events` and `/api/reports` every 6 s and stops while the tab is hidden.
+* **Overview (fleet)** — the landing page: three live cards — **Fleet** (online hosts, average
+  CPU/RAM, Docker host and container counts, offline count), **Alerts** and **Recent reports**.
+  They poll `/api/metrics/servers`, `/api/alerts/events` and `/api/reports` every 6 s and stop
+  while the tab is hidden. Per-host browsing stays in the sidebar / ⌘K, not on the dashboard.
 * **Logs (host workspace)** — pick a host in the sidebar (or a tile in the Overview) and the Logs
   view opens for it, with the host toolbar: SSH, Pull Logs, Host Info, Docker.
 * **Back** returns to the fleet without reloading.
@@ -413,7 +414,7 @@ If a push is rejected
 
 ### Prerequisites
 
-* A Linux server to host the AI Log Viewer application
+* A Linux server to host the Homelab Manager application
 * Non-root user with sudo privileges (we'll use `david` in examples - replace with your username)
 * SSH key-based authentication configured for remote host access
 * OpenAI API key for AI analysis features (optional but recommended)
@@ -715,7 +716,7 @@ The **Add Devices** wizard lets you onboard one or more remote Linux hosts in a 
 #### Requirements
 
 - Passwordless sudo for the SSH user on the target hosts for commands used to read logs and systemd state.
-- SSH key-based login from the AI Log Viewer host to the remote hosts.
+- SSH key-based login from the Homelab Manager host to the remote hosts.
 
 #### Wizard Stages
 
@@ -1047,6 +1048,14 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v2.19.0 - Homelab Manager, and a leaner Overview
+- 🏷️ **Renamed to Homelab Manager** everywhere it is visible: header and brand mark, browser titles on
+  every page, the SSH-config header, the generated backup / host-import filenames, the Discord test
+  notification. Service, image and repository names are unchanged (`ailog_ailog`)
+- 🧹 **The Hosts card is gone from the Overview** — the dashboard is now Fleet + Alerts + Recent
+  reports in one row. Selecting a host is still the sidebar, a ⌘K entry, or the Logs workspace
+- 📱 The longer name fits the phone header (the brand mark yields its space below 430 px)
 
 ### v2.18.0 - Fleet-first UI, ⌘K and six themes
 - 🧭 **Option A navigation** — the dashboard is now a genuine fleet Overview

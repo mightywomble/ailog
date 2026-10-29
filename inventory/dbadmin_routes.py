@@ -61,7 +61,7 @@ def backup_database():
             return jsonify({'error': f'Database file not found: {db_path}'}), 404
 
         ts = datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
-        filename = f"ailog-backup-{ts}.db"
+        filename = f"homelab-manager-backup-{ts}.db"
 
         with open(db_path, 'rb') as f:
             data = f.read()

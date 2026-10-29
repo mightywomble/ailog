@@ -294,7 +294,7 @@ function renderServer(server) {
         const running = docker.containers_running || 0;
         refs.dockerCount.textContent = total ? `${running}/${total}` : '';
         refs.docker.title = docker.reachable === false
-            ? 'Docker installed — engine not reachable from ailog'
+            ? 'Docker installed — engine not reachable from Homelab Manager'
             : 'Docker installed — click to expand containers';
     }
     if (!entry.dockerInstalled) {

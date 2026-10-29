@@ -1536,7 +1536,7 @@ def hosts_import_template():
     return Response(
         payload,
         mimetype='application/json',
-        headers={'Content-Disposition': 'attachment; filename=ailog-host-import-template.json'}
+        headers={'Content-Disposition': 'attachment; filename=homelab-manager-host-import-template.json'}
     )
 
 
@@ -1861,7 +1861,7 @@ def discord_test():
         if not webhook_url:
             return jsonify({'success': False, 'error': 'No Discord webhook URL configured.'}), 400
 
-        payload = {'content': '✅ AI Log Viewer test notification.'}
+        payload = {'content': '✅ Homelab Manager test notification.'}
         r = requests.post(webhook_url, json=payload, timeout=10)
         if r.status_code in (200, 204):
             return jsonify({'success': True, 'message': 'Discord webhook test sent.'})
@@ -3167,7 +3167,7 @@ def startup_scheduler():
 # --- STARTUP INITIALIZATION ---
 def initialize_app():
     """Initialize application components on startup"""
-    print("=== AI Log Viewer Startup ===")
+    print("=== Homelab Manager Startup ===")
     # Migrate legacy scheduler_config.json into DB settings
     try:
         _migrate_scheduler_config_file_to_db()

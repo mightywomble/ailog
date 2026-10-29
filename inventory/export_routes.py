@@ -71,7 +71,7 @@ def export_ssh_config():
     try:
         hosts = Host.query.all()
         
-        ssh_config = "# Auto-generated SSH config from AI Log Viewer\n"
+        ssh_config = "# Auto-generated SSH config from Homelab Manager\n"
         ssh_config += f"# Generated: {datetime.datetime.utcnow().isoformat()}\n\n"
         
         def _host_block(name, ip, host_obj):

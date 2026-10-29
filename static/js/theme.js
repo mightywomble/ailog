@@ -13,7 +13,7 @@
  */
 
 export const THEMES = [
-    { id: 'midnight', label: 'Midnight', hint: 'The original ailog look', swatch: ['#0b0f14', '#6d28d9', '#22c55e'] },
+    { id: 'midnight', label: 'Midnight', hint: 'The original Homelab Manager look', swatch: ['#0b0f14', '#6d28d9', '#22c55e'] },
     { id: 'slate', label: 'Slate', hint: 'Neutral, low tint', swatch: ['#0b1120', '#2563eb', '#94a3b8'] },
     { id: 'nord', label: 'Nord', hint: 'Cool arctic blues', swatch: ['#2e3440', '#88c0d0', '#a3be8c'] },
     { id: 'solarized', label: 'Solarized', hint: 'Designed as a light/dark pair', swatch: ['#002b36', '#268bd2', '#b58900'] },
