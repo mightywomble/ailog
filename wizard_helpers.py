@@ -1,10 +1,10 @@
-"""
-Helper functions for device onboarding wizard
-"""
+"""Helper functions for device onboarding wizard."""
 
 import subprocess
 import json
 from typing import Dict, List, Tuple
+
+from core.hostkeys import ssh_cli_options
 
 def test_ssh_connection(user: str, ip: str, ssh_key_path: str = None, timeout: int = 5) -> Dict:
     """
@@ -15,9 +15,8 @@ def test_ssh_connection(user: str, ip: str, ssh_key_path: str = None, timeout: i
         cmd = [
             "ssh", 
             "-o", "ConnectTimeout=5",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "BatchMode=yes",
-            "-o", "UserKnownHostsFile=/dev/null"
+            *ssh_cli_options(),
+            "-o", "BatchMode=yes"
         ]
         
         if ssh_key_path:
@@ -74,9 +73,8 @@ def execute_remote_command(user: str, ip: str, command: str, ssh_key_path: str =
         cmd = [
             "ssh",
             "-o", "ConnectTimeout=5",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "BatchMode=yes",
-            "-o", "UserKnownHostsFile=/dev/null"
+            *ssh_cli_options(),
+            "-o", "BatchMode=yes"
         ]
         
         if ssh_key_path:

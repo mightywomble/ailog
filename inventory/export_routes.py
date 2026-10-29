@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import json
 
+from core.hostkeys import ssh_config_block
 from flask import (Blueprint, Response, jsonify)
 
 from database import Host
@@ -76,8 +77,7 @@ def export_ssh_config():
             ssh_config += f'    User {host_obj.ssh_user}\n'
             if host_obj.ssh_key:
                 ssh_config += f'    IdentityFile ~/.ssh/{host_obj.ssh_key.key_name}\n'
-            ssh_config += '    StrictHostKeyChecking no\n'
-            ssh_config += '    UserKnownHostsFile=/dev/null\n'
+            ssh_config += ssh_config_block()
             ssh_config += '\n'
 
         ssh_config += '# ----------------------------------------\n'

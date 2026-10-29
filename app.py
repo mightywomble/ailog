@@ -33,6 +33,11 @@ from core.sse_sessions import create_session as create_wizard_session_id
 
 # --- INITIALIZATION ---
 app = Flask(__name__, instance_path=None)
+
+# Security baseline: auth gate, security headers, upload cap, /healthz.
+from core.security import install_security  # noqa: E402
+install_security(app)
+
 sock = Sock(app)
 
 # Monitoring subsystem (modular bolt-on)
@@ -367,10 +372,10 @@ def save_hosts(hosts):
 
 def get_ssh_prefix_args(user, ip, identity_file=None):
     """Construct the SSH command prefix as a list of args."""
-    args = [
-        "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no",
-        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes"
-    ]
+    from core.hostkeys import ssh_cli_options
+    args = ["ssh", "-o", "ConnectTimeout=5"]
+    args += ssh_cli_options()
+    args += ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes"]
     if identity_file:
         args += ["-i", identity_file]
     args.append(f"{user}@{ip}")
@@ -3243,6 +3248,16 @@ def _paramiko_pkey_from_text(key_text: str) -> paramiko.PKey:
 
 @sock.route('/ssh/websocket')
 def ssh_terminal_socket(ws):
+    # Cross-site WebSocket hijacking guard: only same-origin upgrades are accepted.
+    from core.security import websocket_origin_allowed
+    if not websocket_origin_allowed():
+        try:
+            ws.send(json.dumps({'type': 'error', 'data': {'message': 'Origin not allowed'}}))
+            ws.close()
+        except Exception:
+            pass
+        return
+
     ssh_client = None
     ssh_channel = None
     stop_event = threading.Event()
@@ -3317,8 +3332,10 @@ def ssh_terminal_socket(ws):
                         raise ValueError('SSH key could not be loaded.')
 
                     pkey = _paramiko_pkey_from_text(key_text)
+                    from core import hostkeys as _hostkeys
                     ssh_client = paramiko.SSHClient()
-                    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    _hostkeys.load_known_hosts(ssh_client)
+                    ssh_client.set_missing_host_key_policy(_hostkeys.paramiko_policy())
                     ssh_client.connect(
                         hostname=host_cfg['ip'],
                         username=host_cfg['user'],
@@ -3327,6 +3344,7 @@ def ssh_terminal_socket(ws):
                         allow_agent=False,
                         timeout=10
                     )
+                    _hostkeys.save_known_hosts(ssh_client)
                     ssh_channel = ssh_client.invoke_shell(
                         term='xterm-256color',
                         width=cols,
@@ -5053,28 +5071,6 @@ def test_sse():
         'X-Accel-Buffering': 'no'
     })
 
-if __name__ == '__main__':
-    # Initialize application
-    initialize_app()
-    
-    # Start scheduler
-    scheduler.start()
-    startup_scheduler()
-    atexit.register(lambda: scheduler.shutdown())
-
-    # Docker history sampler: keeps a rolling in-memory window per Docker host
-    # so the /docker/<host_key> charts survive a page reload.
-    try:
-        from dockermon import history as docker_history
-        docker_history.start_sampler(app)
-        atexit.register(docker_history.stop_sampler)
-    except Exception:
-        app.logger.exception('could not start the docker history sampler')
-    
-    # Start Flask app
-    app.run(host='0.0.0.0', port=5001, debug=False)
-
-
 @app.route('/ssh-keys/verify-integrity', methods=['GET'])
 def verify_ssh_keys_integrity():
     """Verify integrity of all SSH keys by checking their checksums.
@@ -5122,3 +5118,29 @@ def verify_ssh_keys_integrity():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+if __name__ == '__main__':
+    # Initialize application
+    initialize_app()
+    
+    # Start scheduler
+    scheduler.start()
+    startup_scheduler()
+    atexit.register(lambda: scheduler.shutdown())
+
+    # Docker history sampler: keeps a rolling in-memory window per Docker host
+    # so the /docker/<host_key> charts survive a page reload.
+    try:
+        from dockermon import history as docker_history
+        docker_history.start_sampler(app)
+        atexit.register(docker_history.stop_sampler)
+    except Exception:
+        app.logger.exception('could not start the docker history sampler')
+    
+    # Start Flask app (loopback by default; set AILOG_BIND=0.0.0.0 to expose)
+    app.run(
+        host=os.getenv('AILOG_BIND', '127.0.0.1'),
+        port=int(os.getenv('AILOG_PORT', '5001')),
+        debug=False,
+    )

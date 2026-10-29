@@ -19,6 +19,8 @@ _DB_FD, _DB_PATH = tempfile.mkstemp(suffix='.db', prefix='ailog-test-')
 os.close(_DB_FD)
 os.environ.setdefault('DATABASE_URL', f'sqlite:///{_DB_PATH}')
 os.environ.setdefault('AILOG_TESTING', '1')
+# DB admin routes are opt-in; the suite exercises them, so switch them on here.
+os.environ.setdefault('AILOG_ALLOW_DB_ADMIN', '1')
 
 
 @pytest.fixture(scope='session')
