@@ -386,8 +386,11 @@ For the application to read logs, the user running it needs passwordless `sudo` 
     For the Docker monitoring/container-log features (optional, only on hosts that run Docker), also allow the read-only Docker commands — or add the user to the `docker` group instead:
 
     ```
-    david ALL=(ALL) NOPASSWD: /usr/bin/docker version --format *, /usr/bin/docker info --format *, /usr/bin/docker ps -a --no-trunc --size --format *, /usr/bin/docker stats --no-stream --no-trunc --format *, /usr/bin/docker node ls --format *, /usr/bin/docker inspect *, /usr/bin/docker logs --tail 500 *, /usr/bin/docker service logs --tail 500 *, /usr/bin/docker image inspect *
+    david ALL=(ALL) NOPASSWD: /usr/bin/docker version --format *, /usr/bin/docker info --format *, /usr/bin/docker ps -a --no-trunc --size --format *, /usr/bin/docker stats --no-stream --no-trunc --format *, /usr/bin/docker node ls --format *, /usr/bin/docker node inspect *, /usr/bin/docker system df --format *, /usr/bin/docker inspect *, /usr/bin/docker logs --tail 500 *, /usr/bin/docker service logs --tail 500 *, /usr/bin/docker image inspect *
     ```
+
+    `docker node inspect` and `docker system df` are what the Docker page's **Cluster** tab uses to
+    find each node's address and to report per-node disk usage. `df -B1 /` is read without sudo.
 
     **Server reports** (Analyse All Logs) need a few wider read-only commands than the log viewer
     uses, because it reads a time window rather than the last 500 lines:
@@ -630,6 +633,32 @@ The interface features a clean, modern design with:
 - **📄 File logs**: Traditional syslog files from `/var/log`
 - **🔧 Journal entries**: systemd journal units via `journalctl`
 - **📦 Compressed logs**: Automatic `.gz` decompression
+
+#### Docker Page (Overview / Apps / Cluster)
+The **Docker** button in the Logs toolbar opens `/docker/<host_key>` for hosts with a reachable
+Docker endpoint. The page has three tabs:
+
+| Tab | Shows | Use it for |
+|---|---|---|
+| **Overview** | CPU / RAM / Network / Disk cards seeded from the history window, the container list, swarm node chips | "is this host busy right now, and how has the last hour looked?" |
+| **Apps** | Containers grouped per stack (compose project or swarm stack) → service → container, with CPU/RAM totals, node spread and sparklines | "how much is the *media* stack using, and where is it running?" |
+| **Cluster** | Swarm-wide totals, per-node cards with utilisation bars and CPU sparklines, and a `docker system df` table per node | "which node is the hot one, and what is eating disk?" |
+
+Notes:
+
+- The **Cluster** tab only appears when the selected host is a swarm manager. The **Apps** tab
+  works everywhere; containers without a stack label are grouped into one `(standalone)` entry.
+- Overview charts start from the server's rolling history (one sample every 15 s, 60 minutes by
+  default) and then extend live every 2 s, so reloading the page does not blank the graph. App and
+  node sparklines accumulate per cluster refresh (every 10 s while a tab showing them is open).
+- History is **in-process only**. It is lost on restart and nothing is written to the database —
+  if you need something that survives a restart, use **Analyse All Logs** (a report is stored).
+- Tune it with `docker.history_interval` / `AILOG_DOCKER_POLL_SECONDS` and
+  `docker.history_minutes` / `AILOG_DOCKER_HISTORY_MINUTES`; `POST /api/docker/history/clear`
+  drops the buffers.
+- On a large swarm, opening the Cluster tab costs one SSH round trip per node (parallel, cached
+  10 s). A node that cannot be reached stays in the list marked **offline** with its error and is
+  excluded from the cluster totals, so the summary never pretends a dead node is idle.
 
 ### 🤖 AI Analysis & Monitoring
 
