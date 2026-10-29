@@ -12,8 +12,8 @@
     ::-webkit-scrollbar { width: 10px; height: 10px; }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 5px; }
   </style>
-  <link rel="stylesheet" href="/static/css/theme.css">
-  <link rel="stylesheet" href="/static/css/interfaces.css">
+  <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
   <script>
     (function () {
       try {
@@ -29,7 +29,7 @@
       } catch (e) {}
     })();
   </script>
-  <script type="module" src="/static/js/theme.js"></script>
+  <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
 </head>
 {# Served standalone (/reports) and embedded in the index.html modal
    (?embed=1). Embedded: no Back link, and report links open in a tab because

@@ -36,6 +36,10 @@ from core.timeutil import utcnow
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog.db')
 
+# Shown in Settings and appended to every static asset URL as ``?v=`` so a new
+# release can never be masked by a cached stylesheet or module.
+APP_VERSION = '3.1.1'
+
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
 core_routes = Blueprint('core_ui', __name__)
@@ -81,8 +85,15 @@ def create_app(config: dict | None = None) -> Flask:
 
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    # Static files must be revalidated: a stale theme.js is how a released
+    # interface can silently not appear for a user who "just reloaded".
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
     if config:
         app.config.update(config)
+
+    @app.context_processor
+    def _inject_version():
+        return {'app_version': APP_VERSION}
 
     # Security baseline: auth gate, security headers, upload cap, /healthz.
     from core.security import install_security

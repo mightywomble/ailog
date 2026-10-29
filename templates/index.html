@@ -14,11 +14,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="/static/css/theme.css">
-    <link rel="stylesheet" href="/static/css/shell.css">
-    <link rel="stylesheet" href="/static/css/ui.css">
-    <link rel="stylesheet" href="/static/css/interfaces.css">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ app_version }}">
+    <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
+    <link rel="stylesheet" href="/static/css/shell.css?v={{ app_version }}">
+    <link rel="stylesheet" href="/static/css/ui.css?v={{ app_version }}">
+    <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <!-- Apply the saved theme before first paint (theme.js re-applies later). -->
     <script>
@@ -37,7 +37,7 @@
         } catch (e) { /* private mode */ }
       })();
     </script>
-    <script type="module" src="/static/js/theme.js"></script>
+    <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -673,7 +673,7 @@
 
     <div id="toast-notification" class="hidden fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg"></div>
 
-    <script type="module" src="/static/js/main.js"></script>
+    <script type="module" src="/static/js/main.js?v={{ app_version }}"></script>
     {% include "wizard.html" %}
 
 

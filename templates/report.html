@@ -30,8 +30,8 @@
     .ai-markdown th, .ai-markdown td { border: 1px solid rgba(255,255,255,0.08); padding: 0.4rem 0.6rem; text-align: left; }
     .ai-markdown th { background: rgba(255,255,255,0.04); color: #e2e8f0; }
   </style>
-  <link rel="stylesheet" href="/static/css/theme.css">
-  <link rel="stylesheet" href="/static/css/interfaces.css">
+  <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
   <script>
     (function () {
       try {
@@ -47,7 +47,7 @@
       } catch (e) {}
     })();
   </script>
-  <script type="module" src="/static/js/theme.js"></script>
+  <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
   <div class="max-w-6xl mx-auto p-4 sm:p-6">

@@ -140,3 +140,26 @@ def test_rendered_page_ships_the_look(flask_app):
     body = flask_app.test_client().get('/').data.decode()
     assert '/static/css/interfaces.css' in body
     assert 'data-appearance-panel' in body
+
+
+def test_assets_are_versioned_so_a_deploy_cannot_be_masked_by_cache():
+    """A stale theme.js is exactly how the Interface picker went missing."""
+    html = open(os.path.join(TEMPLATES, 'index.html')).read()
+    assert '/static/css/interfaces.css?v={{ app_version }}' in html
+    assert '/static/js/theme.js?v={{ app_version }}' in html
+    assert '/static/js/main.js?v={{ app_version }}' in html
+
+
+def test_html_is_never_cached_and_static_assets_revalidate(flask_app):
+    client = flask_app.test_client()
+    page = client.get('/')
+    assert 'no-store' in page.headers.get('Cache-Control', '')
+    asset = client.get('/static/js/theme.js')
+    assert asset.status_code == 200
+    assert 'no-cache' in asset.headers.get('Cache-Control', '')
+
+
+def test_settings_footer_shows_the_version(flask_app):
+    body = flask_app.test_client().get('/').data.decode()
+    assert 'data-app-version' in body
+    assert 'v3.1.1' in body

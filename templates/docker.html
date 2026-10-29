@@ -16,8 +16,8 @@
     .spin { animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-  <link rel="stylesheet" href="/static/css/theme.css">
-  <link rel="stylesheet" href="/static/css/interfaces.css">
+  <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
   <script>
     (function () {
       try {
@@ -33,7 +33,7 @@
       } catch (e) {}
     })();
   </script>
-  <script type="module" src="/static/js/theme.js"></script>
+  <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
 </head>
 {# The same page is served standalone (/docker/<host>) and embedded in the
    index.html modal (?embed=1). Embedded: no Back link (the modal owns the

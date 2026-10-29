@@ -210,6 +210,13 @@ def install_security(app) -> SecurityConfig:
             resp.headers.setdefault('Content-Security-Policy', cfg.csp)
         if cfg.hsts or request.is_secure:
             resp.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+        # HTML is the shell that references versioned assets; never let a page
+        # (or the module URLs inside it) linger in a browser cache after a
+        # deploy. Static files keep their ETag but must revalidate.
+        if resp.mimetype == 'text/html':
+            resp.headers['Cache-Control'] = 'no-store, must-revalidate'
+        elif request.path.startswith('/static/'):
+            resp.headers.setdefault('Cache-Control', 'no-cache')
         return resp
 
     @app.errorhandler(413)
