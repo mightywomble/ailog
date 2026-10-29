@@ -3277,7 +3277,7 @@ const showHostInfoMain = async () => {
                     if (!resp.ok) throw new Error(`Template download failed (${resp.status})`);
 
                     const blob = await resp.blob();
-                    let filename = 'ailog-host-import-template.json';
+                    let filename = 'homelab-manager-host-import-template.json';
                     const cd = resp.headers.get('Content-Disposition') || resp.headers.get('content-disposition');
                     if (cd) {
                         const m = /filename\s*=\s*([^;]+)/i.exec(cd);
@@ -3540,7 +3540,7 @@ const showHostInfoMain = async () => {
                     }
 
                     const blob = await resp.blob();
-                    let filename = 'ailog-backup.db';
+                    let filename = 'homelab-manager-backup.db';
                     const cd = resp.headers.get('Content-Disposition') || resp.headers.get('content-disposition');
                     if (cd) {
                         const m = /filename\s*=\s*([^;]+)/i.exec(cd);

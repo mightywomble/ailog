@@ -307,3 +307,9 @@ body.app-shell-body {
 }
 .view-head h2 { margin: 0; font-size: .95rem; font-weight: 650; }
 .view-head p { margin: 2px 0 0; font-size: .74rem; color: var(--muted); }
+
+/* the longer brand name needs the mark's space on narrow phones */
+@media (max-width: 430px) {
+  .app-brand .brand-mark { display: none; }
+  .app-brand h1 { font-size: .92rem; letter-spacing: -0.01em; }
+}

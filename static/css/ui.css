@@ -294,70 +294,6 @@ a.ov-row-main:hover { text-decoration: underline; }
 }
 .ov-link:hover { text-decoration: underline; }
 
-.ov-host-grid {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-}
-
-.ov-host {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 10px;
-  text-align: left;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  min-width: 0;
-}
-.ov-host:hover { border-color: var(--border-strong); background: var(--surface-3); }
-.ov-host[data-offline] { opacity: .6; }
-
-.ov-host-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.ov-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--faint); flex: 0 0 auto; }
-.ov-dot.is-up { background: var(--ok); box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 55%, transparent); }
-.ov-dot.is-down { background: var(--bad); }
-.ov-host-name {
-  font-size: .8rem;
-  font-weight: 600;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ov-docker {
-  font-size: .62rem;
-  color: var(--info);
-  border: 1px solid color-mix(in srgb, var(--info) 40%, transparent);
-  border-radius: 5px;
-  padding: 1px 4px;
-  flex: 0 0 auto;
-}
-.ov-host-ip { font-size: .66rem; color: var(--faint); font-family: 'JetBrains Mono', monospace; }
-
-.ov-host-bars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-.ov-host-bars span {
-  position: relative;
-  display: block;
-  height: 16px;
-  border-radius: 4px;
-  background: var(--overlay);
-  font-size: .58rem;
-  line-height: 16px;
-  text-align: center;
-  color: var(--muted);
-  overflow: hidden;
-}
-.ov-host-bars span > i {
-  position: absolute;
-  left: 0; bottom: 0;
-  height: 3px;
-  border-radius: 99px;
-}
-
 /* fleet stat strip */
 .ov-stat {
   display: inline-flex;
@@ -517,21 +453,6 @@ a.ov-row-main:hover { text-decoration: underline; }
   .qa-row > .qa-btn { justify-content: center; }
   .qa-row > div { grid-column: 1 / -1; }
   .qa-row > div .qa-btn { width: 100%; justify-content: center; }
-}
-
-/* a big fleet must not stretch the whole overview row */
-.ov-card[data-ov="hosts"] {
-  display: flex;
-  flex-direction: column;
-  max-height: 372px;
-}
-.ov-card[data-ov="hosts"] .ov-host-grid {
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-@media (max-width: 900px) {
-  .ov-card[data-ov="hosts"] { max-height: none; }
 }
 
 /* drag handle: the dotted grip was invisible because stroke-width computed to 1px */

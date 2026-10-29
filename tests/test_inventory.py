@@ -118,7 +118,7 @@ def test_ssh_config_export(client, ctx, host):
     assert r.status_code == 200
     assert r.mimetype == 'text/plain'
     body = r.data.decode()
-    assert body.startswith('# Auto-generated SSH config from AI Log Viewer')
+    assert body.startswith('# Auto-generated SSH config from Homelab Manager')
     assert 'Group: mainip' in body
     assert 'StrictHostKeyChecking no' in body
 
@@ -126,7 +126,7 @@ def test_ssh_config_export(client, ctx, host):
 def test_db_backup_returns_sqlite_bytes(client):
     r = client.get('/admin/db/backup')
     assert r.status_code == 200
-    assert r.headers['Content-Disposition'].startswith('attachment; filename=ailog-backup-')
+    assert r.headers['Content-Disposition'].startswith('attachment; filename=homelab-manager-backup-')
     assert r.data[:15] == b'SQLite format 3'
 
 
