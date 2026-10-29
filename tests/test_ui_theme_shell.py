@@ -20,7 +20,12 @@ TEMPLATES = ROOT / "templates"
 
 @pytest.fixture(scope="module")
 def index_html():
-    return (TEMPLATES / "index.html").read_text()
+    """index.html plus its extracted partials (phase 5 keeps them in sync)."""
+    parts = [TEMPLATES / "index.html"]
+    partials = sorted((TEMPLATES / "partials").glob("*.html"))
+    assert partials, "templates/partials is missing"
+    parts.extend(partials)
+    return "\n".join(p.read_text() for p in parts)
 
 
 @pytest.fixture(scope="module")

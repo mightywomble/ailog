@@ -161,6 +161,7 @@ def test_every_dialog_route_goes_through_the_shared_helpers():
     assert 'openModal(serverReportModal)' in core
 
     wizard = (pathlib.Path(__file__).resolve().parents[1] / 'templates' / 'wizard.html').read_text()
+    wizard += (js_dir / 'wizard.js').read_text()
     assert "window.openAppModal('wizardModal')" in wizard
     assert "window.closeAppModal('wizardModal')" in wizard
 

@@ -13,7 +13,7 @@ async function loadSshKeys() {
         
         // Handle error responses
         if (!response.ok || (keys && keys.error)) {
-            listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${keys?.error || response.statusText}</p>`;
+            listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${(window.escapeHtml || String)(keys?.error || response.statusText)}</p>`;
             return;
         }
         
@@ -30,9 +30,9 @@ async function loadSshKeys() {
         listDiv.innerHTML = keys.map(key => `
             <div class="flex items-center justify-between p-3 rounded border border-white/10 bg-white/5 hover:bg-white/10 transition">
                 <div class="flex-1">
-                    <p class="font-medium text-white">${key.key_name}</p>
+                    <p class="font-medium text-white">${(window.escapeHtml || String)(key.key_name)}</p>
                     <div class="flex gap-3 text-xs termix-muted mt-1">
-                        <span>Type: ${key.key_type}</span>
+                        <span>Type: ${(window.escapeHtml || String)(key.key_type)}</span>
                         <span>Encrypted: ${key.is_encrypted ? '✓' : '✗'}</span>
                         <span>Created: ${new Date(key.created_at).toLocaleDateString()}</span>
                     </div>
@@ -70,7 +70,7 @@ async function loadSshKeys() {
             });
         });
     } catch (err) {
-        listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${err.message}</p>`;
+        listDiv.innerHTML = `<p class="text-sm text-red-400">Error loading keys: ${(window.escapeHtml || String)(err.message)}</p>`;
     }
 }
 

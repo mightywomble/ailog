@@ -1,0 +1,159 @@
+<!-- AI Analysis Modal -->
+    <div id="ai-analysis-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-lg">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-indigo-400"><path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg> AI Analysis Result</div>
+                <button id="close-ai-modal-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
+            </div>
+            <div id="ai-analysis-content" class="app-modal-body termix-muted"></div>
+        </div>
+    </div>
+
+    <!-- Server-wide report: analyse every log source on a host together -->
+    <div id="server-report-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-md">
+            <div class="app-modal-head">
+                <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-indigo-400"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M7 13l3 3 7-7"/></svg>
+                    <span>Analyse All Logs
+                        <span id="server-report-subtitle" class="app-modal-sub">Build one correlated report for this server.</span>
+                    </span>
+                </div>
+                <button id="close-server-report-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
+            </div>
+            <div class="app-modal-body">
+
+            <div id="server-report-form">
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                    <label class="flex flex-col gap-1">
+                        <span class="termix-muted text-xs">Time window</span>
+                        <select id="server-report-window" class="bg-gray-800 border border-white/10 rounded-lg px-3 py-2 text-gray-200">
+                            <option value="15">Last 15 minutes</option>
+                            <option value="30">Last 30 minutes</option>
+                            <option value="60">Last hour</option>
+                            <option value="120" selected>Last 2 hours</option>
+                            <option value="360">Last 6 hours</option>
+                            <option value="1440">Last 24 hours</option>
+                        </select>
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="termix-muted text-xs">Model</span>
+                        <input id="server-report-model" type="text" placeholder="gpt-3.5-turbo"
+                               class="bg-gray-800 border border-white/10 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs">
+                    </label>
+                </div>
+
+                <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+                    <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-files" class="mr-2" checked> Log files</label>
+                    <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-journal" class="mr-2" checked> Journald units</label>
+                    <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-docker" class="mr-2" checked> Docker container logs</label>
+                    <label class="flex items-center termix-muted"><input type="checkbox" id="server-report-stopped" class="mr-2"> Include stopped containers</label>
+                </div>
+
+                <!-- Severity filter: the cheapest way to shrink the evidence pack.
+                     "All" keeps the classic behaviour; any subset is filtered on the
+                     host (journalctl --priority / grep) so the bytes never ship. -->
+                <div class="mt-4 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5">
+                    <div class="flex items-center justify-between">
+                        <span class="termix-muted text-xs">Only analyse these severities</span>
+                        <span id="server-report-sev-hint" class="text-xs termix-muted">All severities</span>
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                        <label class="flex items-center termix-muted">
+                            <input type="checkbox" id="server-report-sev-all" class="mr-2" checked> All
+                        </label>
+                        <label class="flex items-center text-rose-300">
+                            <input type="checkbox" id="server-report-sev-crit" class="mr-2"> Critical
+                        </label>
+                        <label class="flex items-center text-orange-300">
+                            <input type="checkbox" id="server-report-sev-error" class="mr-2"> Errors
+                        </label>
+                        <label class="flex items-center text-amber-300">
+                            <input type="checkbox" id="server-report-sev-warn" class="mr-2"> Warnings
+                        </label>
+                    </div>
+                    <p class="mt-1.5 text-xs termix-muted">
+                        Filtered on the host before transfer (<code class="text-xs">journalctl --priority</code>,
+                        <code class="text-xs">grep</code>), so a busy host sends far less evidence.
+                        Correlation is then computed on the selected subset.
+                    </p>
+                </div>
+
+                <!-- Report size: Auto lets the sizing engine decide from the evidence itself -->
+                <div class="mt-4">
+                    <div class="flex items-center justify-between">
+                        <span class="termix-muted text-xs">Report size / depth</span>
+                        <label class="flex items-center text-xs termix-muted">
+                            <input type="checkbox" id="server-report-auto-depth" class="mr-1.5" checked>
+                            Auto (recommended)
+                        </label>
+                    </div>
+                    <input id="server-report-depth" type="range" min="1" max="5" step="1" value="3"
+                           class="w-full mt-1 accent-indigo-500" disabled>
+                    <div class="flex justify-between text-xs termix-muted mt-0.5">
+                        <span>Lite</span><span>Standard</span><span>Detailed</span><span>Deep</span><span>Maximum</span>
+                    </div>
+                    <div id="server-report-depth-hint" class="text-xs termix-muted mt-1"></div>
+                </div>
+
+                <div class="mt-3 flex items-center gap-2">
+                    <button id="server-report-size-check" type="button"
+                            class="bg-white/10 hover:bg-white/20 text-xs px-3 py-1.5 rounded-lg text-gray-200">
+                        Check size &amp; suggest
+                    </button>
+                    <span id="server-report-size-status" class="text-xs termix-muted"></span>
+                </div>
+
+                <div id="server-report-recommendation" class="hidden mt-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-200"></div>
+
+                <div id="server-report-estimate" class="mt-3 text-xs termix-muted"></div>
+                <div id="server-report-error" class="hidden mt-3 text-xs text-red-400"></div>
+
+                <div class="mt-4 flex justify-end gap-2">
+                    <button id="server-report-cancel" type="button" class="bg-white/10 hover:bg-white/20 text-sm px-4 py-2 rounded-lg text-gray-200">Cancel</button>
+                    <button id="server-report-start" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-sm px-4 py-2 rounded-lg text-white font-medium">Start analysis</button>
+                </div>
+            </div>
+
+            <div id="server-report-progress" class="hidden">
+                <div class="flex items-center gap-3 mb-3">
+                    <span class="top-progress-spinner" aria-hidden="true"></span>
+                    <span id="server-report-progress-message" class="text-sm termix-text">Starting...</span>
+                    <span id="server-report-progress-elapsed" class="text-xs termix-muted ml-auto">0s</span>
+                </div>
+                <div class="w-full bg-white/10 rounded-full h-1.5 overflow-hidden mb-4">
+                    <div id="server-report-progress-bar" class="bg-indigo-500 h-1.5 rounded-full transition-all duration-500" style="width: 6%"></div>
+                </div>
+                <ul id="server-report-steps" class="space-y-1.5 text-xs termix-muted"></ul>
+                <div id="server-report-log" class="mt-3 h-28 overflow-auto text-xs termix-muted bg-black/30 rounded-lg p-2 font-mono"></div>
+            </div>
+
+            <div id="server-report-result" class="hidden">
+                <div id="server-report-result-summary" class="text-sm termix-text"></div>
+                <div class="mt-4 flex justify-end gap-2">
+                    <button id="server-report-close-2" type="button" class="bg-white/10 hover:bg-white/20 text-sm px-4 py-2 rounded-lg text-gray-200">Close</button>
+                    <a id="server-report-open" href="#" target="_blank" rel="noopener"
+                       class="bg-indigo-600 hover:bg-indigo-500 text-sm px-4 py-2 rounded-lg text-white font-medium">Open report</a>
+                </div>
+            </div>
+            </div>
+        </div>
+    </div>
+
+<main class="hidden flex-1 flex flex-col bg-gray-900 overflow-auto p-4">
+            <div id="log-view-panel" class="flex-1 flex flex-col overflow-hidden">
+                <div class="p-4 border-b border-gray-700 bg-gray-800/30 flex justify-between items-center">
+                    <h2 id="log-title" class="text-lg font-semibold termix-muted truncate">Select a log source</h2>
+                    <div class="flex items-center space-x-3">
+                        <span id="truncation-warning" class="hidden text-xs text-yellow-400 font-semibold">Log will be truncated for analysis</span>
+                        <button id="ai-analyse-btn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">AI Analyse</button>
+                    </div>
+                </div>
+                <div id="log-content-wrapper" class="flex-1 p-4 overflow-auto bg-black/20"><pre><code id="log-content" class="text-sm termix-muted">Log content will appear here...</code></pre></div>
+            </div>
+            <div id="resize-handle" class="w-full h-2 bg-white/5 hover:bg-indigo-500 transition-colors duration-200 hidden"></div>
+            <div id="ai-view-panel" class="hidden flex-1 flex-col overflow-hidden">
+                <div class="p-4 border-b border-gray-700 bg-gray-800/30"><h2 class="text-lg font-semibold text-green-400">AI Analysis</h2></div>
+                <div id="ai-content-wrapper" class="flex-1 p-4 overflow-auto prose prose-invert max-w-none"></div>
+            </div>
+        </main>
+    </div>
