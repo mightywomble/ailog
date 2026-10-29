@@ -158,6 +158,17 @@ def test_dashboard_uses_token_quick_access_buttons(index_html):
     assert "bg-amber-500" not in dashboard
 
 
+def test_big_fleets_do_not_stretch_the_overview_row(ui_css):
+    block = re.search(r'\.ov-card\[data-ov="hosts"\] \{(.*?)\}', ui_css, re.S).group(1)
+    assert "max-height" in block
+    assert "overflow-y: auto" in ui_css
+
+
+def test_sidebar_drag_grip_is_visible(ui_css):
+    block = re.search(r"\.hosts-grab-handle svg \{(.*?)\}", ui_css, re.S).group(1)
+    assert "stroke-width" in block
+
+
 # ------------------------------------------------------------- interactions
 
 def test_command_palette_contract():
