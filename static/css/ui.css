@@ -518,3 +518,18 @@ a.ov-row-main:hover { text-decoration: underline; }
   .qa-row > div { grid-column: 1 / -1; }
   .qa-row > div .qa-btn { width: 100%; justify-content: center; }
 }
+
+/* a big fleet must not stretch the whole overview row */
+.ov-card[data-ov="hosts"] {
+  display: flex;
+  flex-direction: column;
+  max-height: 372px;
+}
+.ov-card[data-ov="hosts"] .ov-host-grid {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+@media (max-width: 900px) {
+  .ov-card[data-ov="hosts"] { max-height: none; }
+}
