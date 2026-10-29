@@ -172,12 +172,22 @@ input::placeholder, textarea::placeholder { color: rgba(229,231,235,0.45) !impor
   display: flex;
   flex-direction: column;
   width: 95vw;
+  /* Fixed height, not just a max: the panel then keeps the tall shape the
+     Docker dialog had, and the body / iframe fill it instead of the dialog
+     collapsing to whatever short content happens to be inside. */
+  height: 92vh;
   max-height: 92vh;
   overflow: hidden;
   background: #0f172a;
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 12px;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85);
+}
+
+/* Compact dialogs (short forms) opt out of the tall default. */
+.app-modal-panel.app-modal-fit {
+  height: auto;
+  max-height: 92vh;
 }
 
 /* width presets */
@@ -255,6 +265,7 @@ input::placeholder, textarea::placeholder { color: rgba(229,231,235,0.45) !impor
 @media (max-width: 640px) {
   .app-modal-panel {
     width: 100vw;
+    height: 100vh;
     max-height: 100vh;
     border-radius: 0;
   }
