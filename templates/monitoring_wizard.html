@@ -6,6 +6,7 @@
   <title>Monitoring Wizard - Homelab Manager</title>
   <script src="/static/vendor/tailwindcss-3.4.16.js" integrity="sha384-mS5Uq7sE90lgbBDN8xgf34ibEgbZo4gB3tfLY40ZRle+M188BQw8onzNHg6GUZaA"></script>
   <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/interfaces.css">
   <script>
     (function () {
       try {
@@ -13,6 +14,7 @@
         var mode = localStorage.getItem('ui.mode') || 'system';
         var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         r.dataset.theme = localStorage.getItem('ui.theme') || 'midnight';
+        r.dataset.ui = localStorage.getItem('ui.interface') || 'classic';
         r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
         r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
         r.dataset.motion = localStorage.getItem('ui.motion') || 'full';

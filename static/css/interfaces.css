@@ -1,0 +1,376 @@
+/* ==========================================================================
+   Interfaces ("look and feel")
+   --------------------------------------------------------------------------
+   A fourth appearance axis, independent of colour:
+
+     data-ui="classic"  the existing Homelab Manager shell (no overrides here)
+     data-ui="glass"     bento cards, pill navigation, blurred translucent panels
+     data-ui="console"   dense instrument grid, accent-topped cards, micro-labels
+
+   Only semantic tokens are used, so every interface works with all six colour
+   themes in both dark and light mode. Loaded last so it can re-shape the
+   primitives defined in theme.css / shell.css / ui.css by specificity alone.
+
+   Layout stays the same in every interface: this file changes radii, spacing,
+   surface treatment, typography scale and card chrome — never the navigation
+   model or the set of controls.
+   ========================================================================== */
+
+/* ------------------------------------------------------------------ glass */
+
+[data-ui="glass"] {
+  --radius: 22px;
+  --radius-sm: 14px;
+  --glass-blur: 18px;
+}
+
+[data-ui="glass"] body,
+  background-image:
+    radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 42%, transparent), transparent 62%),
+    radial-gradient(900px 540px at 100% -4%, color-mix(in srgb, var(--chart-4) 26%, transparent), transparent 66%),
+    radial-gradient(900px 620px at 48% 118%, color-mix(in srgb, var(--chart-2) 24%, transparent), transparent 72%),
+    linear-gradient(158deg, color-mix(in srgb, var(--accent) 14%, var(--bg)) 0%, var(--bg) 55%);
+  background-attachment: fixed;
+}
+
+/* Floating pill header instead of a full-bleed bar */
+[data-ui="glass"] .app-header {
+  margin: 12px 16px 0;
+  padding: 9px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 58%, transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.25);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .35);
+}
+
+[data-ui="glass"] .app-shell-body { gap: 14px; }
+
+/* Panels: translucent, softly lit, generous radius */
+[data-ui="glass"] .termix-panel,
+[data-ui="glass"] .glass-container,
+[data-ui="glass"] .ov-card,
+[data-ui="glass"] .m-card {
+  background-color: color-mix(in srgb, var(--surface) 55%, transparent);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .07), transparent 42%);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px) saturate(1.15);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .06),
+    0 18px 46px rgba(0, 0, 0, .38);
+}
+
+[data-ui="glass"] #hosts-sidebar {
+  border-radius: 26px;
+  padding: 18px;
+  background: color-mix(in srgb, var(--surface) 52%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+}
+
+[data-ui="glass"] #host-list-container .termix-host,
+[data-ui="glass"] #host-list-container .glass-container {
+  border-radius: 18px;
+  border-color: color-mix(in srgb, var(--accent) 14%, var(--border));
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
+[data-ui="glass"] #host-list-container .termix-host:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+/* Pill controls */
+[data-ui="glass"] .qa-btn,
+[data-ui="glass"] .termix-btn,
+[data-ui="glass"] .ov-chip,
+[data-ui="glass"] .termix-chip,
+[data-ui="glass"] .button,
+[data-ui="glass"] .mobile-tabbar,
+[data-ui="glass"] .app-search {
+  border-radius: 999px;
+}
+
+[data-ui="glass"] .app-search {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  backdrop-filter: blur(14px);
+}
+
+[data-ui="glass"] .termix-action {
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface-2) 62%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 16%, var(--border));
+}
+
+[data-ui="glass"] .termix-action:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/* Bento: the fleet card takes two of three tracks */
+[data-ui="glass"] #overview-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+[data-ui="glass"] #overview-cards > .ov-card:first-child { grid-column: span 2; }
+/* three cards: fleet wide, alerts beside it, reports across the bottom */
+[data-ui="glass"] #overview-cards > .ov-card:nth-child(3) { grid-column: 1 / -1; }
+[data-ui="glass"] #overview-cards > .ov-card { height: 100%; }
+[data-ui="glass"] .ov-metric strong { font-size: 1.45rem; }
+[data-ui="glass"] .ov-bar { height: 8px; border-radius: 999px; }
+[data-ui="glass"] .ov-bar i { border-radius: 999px; }
+
+@media (max-width: 1100px) {
+  [data-ui="glass"] #overview-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-ui="glass"] #overview-cards > .ov-card:first-child { grid-column: span 2; }
+}
+@media (max-width: 720px) {
+  [data-ui="glass"] #overview-cards { grid-template-columns: minmax(0, 1fr); }
+  [data-ui="glass"] #overview-cards > .ov-card:first-child,
+  [data-ui="glass"] #overview-cards > .ov-card:nth-child(3) { grid-column: auto; }
+  [data-ui="glass"] .app-header { margin: 0; border-radius: 0 0 var(--radius) var(--radius); }
+}
+
+[data-ui="glass"] .app-modal-panel {
+  border-radius: 26px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(20px);
+}
+
+/* ---------------------------------------------------------------- console */
+
+[data-ui="console"] {
+  --radius: 8px;
+  --radius-sm: 6px;
+}
+
+[data-ui="console"] body,
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px);
+  background-size: 34px 34px;
+  background-position: -1px -1px;
+}
+
+[data-ui="console"] .app-header {
+  border-radius: 0;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface);
+  backdrop-filter: none;
+  padding: 8px 14px;
+}
+
+[data-ui="console"] .app-brand h1 {
+  font-size: .82rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+[data-ui="console"] .app-body { grid-template-columns: 248px minmax(0, 1fr); gap: 10px; }
+[data-ui="console"] .ov-card { height: 100%; }
+
+/* Flat, tight, high-contrast cards with an accent top edge */
+[data-ui="console"] .termix-panel,
+[data-ui="console"] .glass-container,
+[data-ui="console"] .ov-card,
+[data-ui="console"] .m-card {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: none;
+  backdrop-filter: none;
+  padding: 10px 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+[data-ui="console"] .ov-card::before,
+[data-ui="console"] #dashboard-view > .termix-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--chart-1);
+  opacity: .9;
+}
+
+[data-ui="console"] #overview-cards > .ov-card:nth-child(2)::before { background: var(--chart-3); }
+[data-ui="console"] #overview-cards > .ov-card:nth-child(3)::before { background: var(--chart-2); }
+[data-ui="console"] #overview-cards > .ov-card:nth-child(4)::before { background: var(--chart-4); }
+
+/* Instrument-panel typography */
+[data-ui="console"] .ov-card-head h3,
+[data-ui="console"] .termix-panel > h2,
+[data-ui="console"] #dashboard-view > .termix-panel h1 {
+  font-size: .66rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+[data-ui="console"] .ov-metric > span,
+[data-ui="console"] .ov-stat > span,
+[data-ui="console"] .appearance-label {
+  font-size: .62rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+[data-ui="console"] .ov-metric strong,
+[data-ui="console"] .ov-stat strong,
+[data-ui="console"] .ov-big-number {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+[data-ui="console"] .ov-metric strong { font-size: 1.25rem; }
+[data-ui="console"] .ov-bar { height: 4px; border-radius: 2px; background: var(--surface-3); }
+[data-ui="console"] .ov-bar i { border-radius: 2px; }
+[data-ui="console"] .ov-rows { gap: 2px; }
+[data-ui="console"] .ov-row { padding: 4px 6px; border-radius: 4px; }
+
+[data-ui="console"] #overview-cards {
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  align-items: stretch;
+  gap: 10px;
+}
+
+/* Squared, compact controls */
+[data-ui="console"] .qa-btn,
+[data-ui="console"] .termix-btn,
+[data-ui="console"] .button,
+[data-ui="console"] .termix-chip,
+[data-ui="console"] .ov-chip,
+[data-ui="console"] .termix-action,
+[data-ui="console"] .app-search,
+[data-ui="console"] .mobile-tabbar {
+  border-radius: var(--radius-sm);
+}
+
+[data-ui="console"] .qa-btn {
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  font-size: .72rem;
+  padding: .45rem .8rem;
+}
+
+[data-ui="console"] .termix-action {
+  padding: 12px 10px;
+  text-align: left;
+  font-size: .8rem;
+}
+
+[data-ui="console"] #hosts-sidebar {
+  border-radius: var(--radius);
+  border-color: var(--border-strong);
+  padding: 10px;
+}
+
+[data-ui="console"] #host-list-container .termix-host,
+[data-ui="console"] #host-list-container .glass-container {
+  border-radius: 4px;
+  padding: 8px;
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+[data-ui="console"] #host-list-container .termix-host:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+[data-ui="console"] .app-modal-panel { border-radius: var(--radius); border: 1px solid var(--border-strong); }
+
+/* Dense tables (log table, settings lists) */
+[data-ui="console"] table th {
+  font-size: .62rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 720px) {
+  [data-ui="console"] .app-body { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Flex children in the dashboard must not be squashed below their content
+   (the console/glass panels are denser, so a 390px viewport exposes it). */
+[data-ui="glass"] #dashboard-view > *,
+[data-ui="console"] #dashboard-view > * { flex-shrink: 0; }
+
+@media (max-width: 430px) {
+  [data-ui="console"] .app-brand h1 { font-size: .72rem; letter-spacing: .09em; }
+}
+
+/* --------------------------------------------------- previews in settings */
+
+.ui-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ui-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease, transform .12s ease, background .15s ease;
+}
+
+.ui-card:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.ui-card.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.ui-card .ui-name { font-size: .78rem; font-weight: 650; }
+.ui-card .ui-hint { font-size: .66rem; color: var(--muted); line-height: 1.3; }
+
+.ui-preview {
+  height: 62px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  overflow: hidden;
+}
+
+/* classic: sidebar + two stacked bars */
+.ui-preview-classic { grid-template-columns: 22px 1fr; grid-template-rows: 10px 1fr; }
+.ui-preview-classic i { background: var(--surface); border: 1px solid var(--border); border-radius: 2px; display: block; }
+.ui-preview-classic i:nth-child(1) { grid-column: 1 / -1; }
+.ui-preview-classic i:nth-child(2) { grid-row: 2; }
+.ui-preview-classic i:nth-child(3) { grid-row: 2; background: var(--overlay); }
+
+/* glass: pill header + rounded tiles */
+.ui-preview-glass { grid-template-columns: repeat(3, 1fr); grid-template-rows: 8px 1fr; }
+.ui-preview-glass i {
+  display: block;
+  background: color-mix(in srgb, var(--accent) 26%, var(--surface-3));
+  border-radius: 8px;
+}
+.ui-preview-glass i:nth-child(1) { grid-column: 1 / -1; border-radius: 999px; }
+
+/* console: accent-topped dense cells */
+.ui-preview-console { grid-template-columns: repeat(4, 1fr); grid-template-rows: 12px 1fr; }
+.ui-preview-console i { display: block; background: var(--surface); border: 1px solid var(--border); border-radius: 2px; }
+.ui-preview-console i:nth-child(1) { grid-column: 1 / -1; background: var(--chart-1); }
+.ui-preview-console i:nth-child(2) { border-top: 2px solid var(--chart-3); }
+.ui-preview-console i:nth-child(3) { border-top: 2px solid var(--chart-2); }
+
+@media (max-width: 720px) {
+  .ui-grid { grid-template-columns: minmax(0, 1fr); }
+  .ui-preview { height: 48px; }
+}
