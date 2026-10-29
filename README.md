@@ -6,7 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
-| 2026-10-29 | v2.20.0 | **Audit phases 0–6 implemented.** Dead code removed and `ruff`/coverage CI added; security baseline (opt-in auth gate, loopback bind, DB-admin gate + integrity-checked restores, CSP/nosniff/HSTS headers, vendored Tailwind/Chart.js/marked/DOMPurify with SRI, WebSocket origin check, pinned SSH host keys); one SSH transport (`core/ssh.py`); `create_app()` factory plus `core/bootstrap.py`; every HTML sink escaped and `index.html` split into `templates/partials/` (1,542 → 737 lines) with the wizard JS extracted; and performance work (`/api/overview` aggregate with ETag/304, adaptive polling, bounded caches, SQLite WAL). Four real `ruff` bugs fixed on the way (undefined `emit`, `tf_name`, `_ssh_key_file_cache`, wizard `sessions_lock`) | ✅ Complete |
+| 2026-10-29 | v3.0.0 | **Audit phases 0–6 implemented.** Dead code removed and `ruff`/coverage CI added; security baseline (opt-in auth gate, loopback bind, DB-admin gate + integrity-checked restores, CSP/nosniff/HSTS headers, vendored Tailwind/Chart.js/marked/DOMPurify with SRI, WebSocket origin check, pinned SSH host keys); one SSH transport (`core/ssh.py`); `create_app()` factory plus `core/bootstrap.py`; every HTML sink escaped and `index.html` split into `templates/partials/` (1,542 → 737 lines) with the wizard JS extracted; and performance work (`/api/overview` aggregate with ETag/304, adaptive polling, bounded caches, SQLite WAL). Four real `ruff` bugs fixed on the way (undefined `emit`, `tf_name`, `_ssh_key_file_cache`, wizard `sessions_lock`) | ✅ Complete |
 | 2026-10-29 | v2.19.1 | **SSH terminal can expand into a window.** An icon in the terminal header promotes it to a 92 vh dialog and a contract icon (or backdrop click) returns it to its slot. The same xterm instance is moved rather than re-created, so the session, scrollback and running commands are untouched | ✅ Complete |
 | 2026-10-29 | v2.19.0 | **Renamed to Homelab Manager**, and the Overview is now three cards: **Fleet**, **Alerts** and **Recent reports**. The per-host Hosts card is gone — host browsing lives in the sidebar, the ⌘K palette and the Logs workspace, so the dashboard stays a fleet summary. Page titles, the SSH-config header, backup/import filenames and the Discord test message follow the new name | ✅ Complete |
 | 2026-10-29 | v2.18.2 | Fix: the Fleet card reported **"all reachable"** next to a non-zero Offline count; it now says `N unreachable` (and still says nothing configured when the fleet is empty) | ✅ Complete |
@@ -1089,6 +1089,36 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.0.0 - Audit implementation: security baseline, one SSH path, split module tree, faster dashboard
+This release is the six-phase audit implemented end to end. There are behaviour changes worth reading
+before upgrading — they are all in the *Security and hardening* and *Performance* sections above.
+
+- 🔐 **Opt-in authentication** (`AILOG_AUTH_MODE=none|proxy|local`) with a single `before_request` gate, plus
+  `/healthz`. `none` keeps today's trusted-network behaviour, so nothing breaks by default
+- 🛡️ **Security headers everywhere** — CSP, `nosniff`, `Referrer-Policy`, `SAMEORIGIN`, `Permissions-Policy`,
+  optional HSTS — and the app now binds **127.0.0.1** unless `AILOG_BIND` says otherwise (the image sets it)
+- 📦 **Front-end assets are vendored** in `static/vendor/` with **SRI hashes**; a CDN compromise can no longer
+  inject script into the UI. `GET /` no longer touches the internet
+- 🔑 **SSH host keys are pinned** (`StrictHostKeyChecking=accept-new` + a real `known_hosts`); the exported
+  `~/.ssh/config` no longer disables host checking either
+- 🗄️ **DB backup/restore is opt-in** (`AILOG_ALLOW_DB_ADMIN=1`) and restores are validated
+  (`PRAGMA integrity_check`, required tables, size cap) with a `<db>.pre-restore-<ts>` copy kept
+- 🚪 **WebSocket origin check** on `/ssh/websocket` (cross-site hijacking)
+- 🧵 **One SSH transport** — `core/ssh.py` replaces five near-duplicate remote-exec paths; `core/hostkeys.py`
+  owns the policy
+- 🏗️ **`create_app()` factory** and `core/bootstrap.py`; app routes live on the `core_ui` blueprint. Routes and
+  URLs are unchanged
+- 🧼 **Every HTML sink is escaped** (host names, descriptions, errors, log/container names, group attributes)
+  and a test walks all JS to keep it that way; `index.html` is 737 lines with dialogs in `templates/partials/`,
+  and the wizard's inline script is `static/js/wizard.js`
+- ⚡ **`/api/overview`** aggregates the dashboard into one ETag'd request (`304` when nothing changed), polling
+  backs off on failure, caches are size-capped, and SQLite runs in WAL with a busy timeout
+- 🐛 **Four latent crashes fixed** (found by `ruff`): undefined `emit` in `get_ollama_models`, undefined
+  `tf_name` in the Suricata SSH read, undefined `_ssh_key_file_cache` on key delete, and undefined
+  `sessions_lock` in `/wizard/session/create` — plus a `/ssh-keys/verify-integrity` route that never
+  registered because `app.run()` sat above it
+- 🧪 **CI**: `ruff --select F,E9`, `pytest` with a coverage floor, and `node --check` on every JS module
 
 ### v2.19.1 - Expandable SSH terminal
 - ⤢ **Expand / contract** icon in the SSH terminal header: the session pops out to a 92 vh window using the
