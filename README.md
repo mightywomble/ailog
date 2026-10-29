@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.17.0 | **Monitoring moved to a dashboard toolbar.** Monitoring is server-wide, not per host, so the button left the host toolbar and now sits in a new Quick access bar on the dashboard alongside **Add Devices** and **More** (which moved out of the global header, keeping its Ansible / SSH config / Rescan entries). The header keeps only Settings, Suricata Stats and the sudo chip | ✅ Complete |
 | 2026-10-29 | v2.16.2 | Fix: container network counters crashed the expanded card (`TypeError: int() ... not 'tuple'`) because the SSH collector stored the whole `NetIO` pair in `net_rx`; the pair is now split into rx/tx and the metrics collector coerces counters defensively | ✅ Complete |
 | 2026-10-29 | v2.16.1 | Monitoring cards read Docker container counts from the same SSH round trip (`docker ps -a --format {{.State}}`) instead of a Docker discovery row, so the whale badge shows `running/total` and "engine not reachable" is accurate rather than stale | ✅ Complete |
 | 2026-10-29 | v2.16.0 | **Monitoring is a live netdata-style page in a dialog.** The Monitoring button no longer opens the old host-monitor list (that UI, its overlay and the monitor editor are deleted); it loads `/metrics?embed=1` in the shared modal chrome. One card per server with CPU %, RAM %, disk % and network rates drawn as canvas sparklines, refreshed every 2s, with a rolling 3-minute window kept in the browser. Hosts with Docker installed get a whale badge, and clicking such a card expands it to the same datapoints per container (CPU, RAM, writable disk, net rx/tx) | ✅ Complete |
@@ -78,7 +79,7 @@ This application is designed for use on a trusted, internal development network 
 
 ### 📡 **Live Monitoring** (`metrics/`)
 
-The **Monitoring** button in the toolbar opens `/metrics?embed=1` in the shared dialog — the same chrome as Docker and Reports. There is no agent and no time-series database: one SSH command per host per poll, and the chart history lives in the browser.
+The **Monitoring** button on the dashboard's Quick access bar opens `/metrics?embed=1` in the shared dialog — the same chrome as Docker and Reports. There is no agent and no time-series database: one SSH command per host per poll, and the chart history lives in the browser.
 
 | Endpoint | Purpose |
 |---|---|
