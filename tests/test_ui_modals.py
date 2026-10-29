@@ -17,10 +17,10 @@ MODALS = {
     'settings-modal': 'Settings',
     'host-modal': 'New Host',            # title is rewritten at runtime
     'log-selection-modal': 'Select Logs to Monitor',
-    'monitor-edit-modal': 'Edit Monitor',
     'monitoringWizardModal': 'Monitoring Wizard',
     'dockerModal': 'Docker',
     'reportsModal': 'Reports',
+    'metricsModal': 'Monitoring',
 }
 
 
@@ -198,7 +198,7 @@ def test_short_forms_use_the_fit_modifier(index_html):
     they should not stretch to 92vh with empty space under the fields."""
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
-    assert index_html.count('app-modal-fit') == 2   # host + monitor edit
+    assert index_html.count('app-modal-fit') == 1   # host (monitor edit was removed)
     alerts = (root / 'templates' / 'alerts.html').read_text()
     assert 'app-modal-panel app-modal-md app-modal-fit' in alerts
     # rich dialogs stay tall

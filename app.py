@@ -40,6 +40,10 @@ app.register_blueprint(monitoring_bp)
 from dockermon import docker_bp
 app.register_blueprint(docker_bp)
 
+# Live system/container metrics behind the Monitoring button
+from metrics import metrics_bp
+app.register_blueprint(metrics_bp)
+
 # Server-wide correlated log reports (modular bolt-on)
 from serverreport import reports_bp
 app.register_blueprint(reports_bp)

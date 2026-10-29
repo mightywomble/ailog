@@ -1407,24 +1407,6 @@
 
 
 
-<div id="monitor-edit-modal" class="app-modal hidden">
-  <div class="app-modal-panel app-modal-md app-modal-fit">
-    <div class="app-modal-head">
-      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-sky-400"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12h4l3 8 4-16 3 8h4"/></svg> Edit Monitor</div>
-      <button id="monitor-edit-close" class="app-modal-close" type="button" data-modal-close>Close</button>
-    </div>
-    <div id="monitor-edit-body" class="app-modal-body"></div>
-    <div class="mt-4 flex items-center justify-between">
-      <div class="text-xs text-slate-400" id="monitor-edit-status"></div>
-      <div class="flex gap-2">
-        <button id="monitor-edit-test" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded" type="button">Test now</button>
-        <button id="monitor-edit-save" class="bg-sky-600 hover:bg-sky-700 px-3 py-2 rounded" type="button">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-
 <div id="monitoringWizardModal" class="app-modal hidden">
   <div class="app-modal-panel app-modal-xl">
     <div class="app-modal-head">
@@ -1432,6 +1414,23 @@
       <button id="monitoringWizardClose" class="app-modal-close" type="button" data-modal-close>Close</button>
     </div>
     <iframe id="monitoringWizardFrame" class="flex-1 w-full" src="about:blank" referrerpolicy="no-referrer"></iframe>
+  </div>
+</div>
+
+<!-- Live monitoring (netdata-style cards), embedded in a dialog.
+     /metrics?embed=1 renders the page without its Back link; the iframe is
+     unloaded on close so its polling loop stops. -->
+<div id="metricsModal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-xl">
+    <div class="app-modal-head">
+      <div class="app-modal-title">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-emerald-400"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M7 15l3-4 3 3 4-6"/></svg>
+        <span id="metricsModalTitle" class="truncate">Monitoring</span>
+        <span class="app-modal-sub" id="metricsModalSub">Live CPU, RAM, disk and network for every server</span>
+      </div>
+      <button id="metricsModalClose" type="button" class="app-modal-close" data-modal-close>Close</button>
+    </div>
+    <iframe id="metricsModalFrame" class="flex-1 w-full" src="about:blank" referrerpolicy="no-referrer" title="Monitoring"></iframe>
   </div>
 </div>
 

@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-29 | v2.16.0 | **Monitoring is a live netdata-style page in a dialog.** The Monitoring button no longer opens the old host-monitor list (that UI, its overlay and the monitor editor are deleted); it loads `/metrics?embed=1` in the shared modal chrome. One card per server with CPU %, RAM %, disk % and network rates drawn as canvas sparklines, refreshed every 2s, with a rolling 3-minute window kept in the browser. Hosts with Docker installed get a whale badge, and clicking such a card expands it to the same datapoints per container (CPU, RAM, writable disk, net rx/tx) | ✅ Complete |
 | 2026-10-29 | v2.15.1 | **Dialogs are tall again**: panels carry a `height` (92vh, 100vh on phones) instead of only a `max-height`, so they no longer collapse to the height of their content — the body and iframes fill the panel the way the Docker dialog always did. The three short forms (Add/Edit Host, Edit Monitor, alert rule editor) opt out with `.app-modal-fit` so they stay snug | ✅ Complete |
 | 2026-10-29 | v2.15.0 | **Every dialog shares one chrome.** A single `.app-modal` stylesheet block plus `static/js/modals.js` now own all popups (AI analysis, server report, settings, host, log selection, monitor edit, monitoring wizard, Docker, Reports and the alert rule editor): same head/title/close/body markup, an open-order stack so **Escape** closes the topmost dialog, backdrop-click close, and iframes unloaded (`about:blank`) on close so their timers and EventSource stop. The **Reports** button next to a server now opens the report history in a modal instead of a new tab (`/reports?embed=1`, links still open in a new tab) | ✅ Complete |
 | 2026-10-29 | v2.14.1 | **Docker monitoring opens in a modal** instead of navigating away: the Docker button now loads `/docker/<host>?embed=1` in a large iframe dialog with its own close button (no page-level Back link), so flipping between the logs view and the Docker dashboard no longer loses your place. The standalone `/docker/<host>` page still works for deep links | ✅ Complete |
@@ -72,6 +73,22 @@ This application is designed for use on a trusted, internal development network 
 * **Dynamic Host Switching:** Seamlessly switch between configured servers with real-time log loading
 * **Connection Status Monitoring:** Visual indicators show host connectivity status
 * **SSH Terminal:** Click the green **SSH** button to open an interactive terminal to the selected host (UI inspired by the Termix project on GitHub)
+
+### 📡 **Live Monitoring** (`metrics/`)
+
+The **Monitoring** button in the toolbar opens `/metrics?embed=1` in the shared dialog — the same chrome as Docker and Reports. There is no agent and no time-series database: one SSH command per host per poll, and the chart history lives in the browser.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /metrics` | The page (`?embed=1` drops the Back link for the dialog) |
+| `GET /api/metrics/servers` | Every host in parallel: CPU %, cores/load, RAM + swap, root-fs disk, network rx/tx rates, uptime, Docker presence. Cached ~1.5s so many views cost one collection round (`?refresh=1` bypasses it) |
+| `GET /api/metrics/containers?host=<key>` | Containers on one host with the same datapoints plus mem used/limit and writable-layer size |
+
+**How it collects.** A single marker-delimited command (`cat /proc/stat`, `/proc/meminfo`, `/proc/net/dev`, `df -kP /`, `/proc/loadavg`, `/proc/uptime`, `hostname`, `command -v docker`) is run per host — `local` through a shell, everything else over SSH. CPU and network are counters, so the *first* sample of a host has no percentage and no rate: it seeds a per-host delta cache and the card shows `–` for one interval. `df -kP` rather than `-B1` because the app also runs on macOS in development.
+
+Container numbers come from the existing Docker collectors (`dockermon.routes.host_snapshot`), so there is one definition of "what is this container doing"; their network counters are cumulative and are turned into bytes/second by a per-container delta cache.
+
+**In the page.** Cards are a CSS grid, charts are hand-drawn `<canvas>` sparklines (no Chart.js, no CDN, no build step) with a 90-sample window — about 3 minutes at the 2s default. Polling pauses while the tab is hidden, stops entirely when the dialog closes (the iframe is blanked, which unloads the document), and the interval is selectable 2s/5s/10s. Hosts that have Docker installed get a whale badge with a `running/total` count; clicking such a card expands it full-width and lists its containers, each with CPU %, RAM % (bar), RAM used/limit, and a net rx/tx sparkline. Hosts where the Docker *binary* exists but the engine is not reachable still show the badge — the expansion then explains why it is empty.
 
 ### 🐳 **Docker Monitoring**
 * **Automatic discovery:** every configured host is probed for a Docker Engine endpoint — unix socket over SSH (preferred, no exposed port needed), plain TCP `2375`, or TLS `2376`. Hosts without Docker are skipped cleanly.
