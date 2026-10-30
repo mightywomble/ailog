@@ -749,9 +749,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-29): `zot.safehomelan.com/ailog:v2.15.1`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.2.0`
 (`:latest` points at the same manifest), digest
-`sha256:c0c8a5a5bb691b36dd74b10c16b0521bc72941ac8c267199f71da2c68df69cd2`, running as
+`sha256:662b6218c367ce4cacae4dd3dd3a4f0b6c3f12cbb27fa2597cf2bb91f830c931`, running as
 `ailog_ailog.1` on `swarm-worker1`. Redeploy after a push with:
 
 ```bash
@@ -763,8 +763,43 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v2.15.1 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.2.0 -t zot.safehomelan.com/ailog:latest .
 ```
+
+#### Self-healing remediation in the swarm
+
+The image ships `ansible-core`, `ansible-runner` and the collections the catalog
+uses (`ansible.posix`, `community.docker`, `community.general`), plus the whole
+`remediations/` tree, so plans and dry runs work with no extra setup.
+
+**Execution is off by default.** Cards and the catalog are visible, but `plan`
+and `apply` return 403 until the service is told otherwise:
+
+```yaml
+# stacks/ailog/stack.yml -> environment
+- AILOG_ALLOW_REMEDIATION=dry_run   # --check --diff only, nothing changes
+# - AILOG_ALLOW_REMEDIATION=on      # real changes
+```
+
+Then `docker service update --with-registry-auth --force ailog_ailog`.
+
+Two things are required for a run to actually reach a host:
+
+1. **Reachable SSH and a stored key.** Remediation reuses the same `ssh_user` and
+   uploaded key as the terminal, so a host that works in the SSH tab works here.
+2. **Passwordless sudo for that user.** The generated inventory uses `sudo -n`
+   (`become_flags: -n`), so a password prompt is a failure rather than a hang.
+
+Verify the deployment:
+
+```bash
+curl -s http://<node>:5001/api/remediation/settings \
+  | jq '{mode: .policy.mode, runner: .policy.runner_available, catalog: (.catalog|length)}'
+# => {"mode":"off","runner":true,"catalog":12}
+```
+
+`runner: false` means the image was built without the Ansible extras — rebuild
+from `requirements.txt` rather than lowering the mode.
 
 Plain Docker host equivalent:
 
@@ -1160,6 +1195,10 @@ The application provides detailed startup logs showing:
 - 🧪 Tests: six modules — catalog validation, matcher determinism, planner/token tampering, the runner state
   machine against a fake Ansible, the HTTP contract and the flag gate, policy and windows — plus UI guards for
   tokens, stylesheet order and escaping.
+- 🚀 **Deployed as `v3.2.0`** (`sha256:662b6218…f830c931`) on `swarm-worker1`; the image now installs
+  `ansible-core`/`ansible-runner` and the `ansible.posix` / `community.docker` / `community.general`
+  collections, and carries `remediations/` verbatim. Execution stays `off` in production until
+  `AILOG_ALLOW_REMEDIATION` is set.
 
 ### v3.1.2 - SSH terminal works behind proxies again
 - 🔓 **Fixed:** the websocket origin guard introduced in the audit compared `Origin` with `request.host_url`

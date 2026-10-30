@@ -12,8 +12,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
+# ansible-runner drives the remediation catalog; the collections back the
+# roles in remediations/. --no-cache is ansible-galaxy's flag (not pip's).
 RUN pip install --no-cache-dir -r /app/requirements.txt \
-    && ansible-galaxy collection install --no-cache-dir \
+    && ansible-galaxy collection install --no-cache \
         ansible.posix:1.5.4 community.docker:3.10.4 community.general:8.6.0
 
 COPY . /app
