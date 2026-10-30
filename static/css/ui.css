@@ -214,15 +214,53 @@
 .ov-card-head h3 { margin: 0; font-size: .82rem; font-weight: 650; letter-spacing: .01em; }
 
 .ov-chip {
+  font: inherit;
   font-size: .66rem;
   font-weight: 700;
   padding: 3px 7px;
   border-radius: 999px;
   border: 1px solid var(--border);
+  background: none;
   color: var(--muted);
+  cursor: pointer;
 }
+.ov-chip:hover { color: var(--text); border-color: var(--border-strong); }
+.ov-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ov-chip.is-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .ov-chip.is-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.ov-chip.is-warn:hover { border-color: var(--warn); }
+
+/* the offline card the chip jumps to */
+.ov-card:focus { outline: none; }
+.ov-card.is-flash { animation: ov-flash 1.6s ease-out 1; }
+@keyframes ov-flash {
+  0% { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  100% { border-color: var(--border); box-shadow: var(--shadow-1); }
+}
+
+.ov-row-stack { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ov-row-sub { font-size: .62rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-when {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.ov-when strong { font-size: .72rem; font-weight: 650; color: var(--text); }
+.ov-when span { font-size: .62rem; color: var(--faint); }
+
+/* A fleet with a lot of outages must not stretch the row it shares with the
+ * other cards: the list scrolls once it is longer than the card beside it. */
+[data-ov="offline"] .ov-rows { max-height: 200px; overflow-y: auto; padding-right: 2px; }
+[data-ov="offline"] .ov-rows:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* When a sibling card sets the row height, the fleet card hugs its own content
+ * instead of showing a tall empty box. */
+[data-ui="glass"] #overview-cards > .ov-card[data-ov="fleet"],
+[data-ui="console"] #overview-cards > .ov-card[data-ov="fleet"] { height: auto; align-self: start; }
 
 .ov-metrics {
   display: grid;
