@@ -6,7 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
-| 2026-10-30 | v3.5.1 | **The fleet card answers "which ones are down?".** `10/16 online` is now a button, and the dashboard has an *Offline devices* card of its own: every unreachable host with how long it has been out and the moment it was last seen. The collector now records `Host.last_seen` whenever a probe succeeds (at most once a minute per host), so the time is real rather than the moment the poll noticed. | ✅ Complete |
+| 2026-10-30 | v3.6.0 | **The fleet card answers "which ones are down?".** `10/16 online` is now a button, and the dashboard has an *Offline devices* card of its own: every unreachable host with how long it has been out and the moment it was last seen. The collector now records `Host.last_seen` whenever a probe succeeds (at most once a minute per host), so the time is real rather than the moment the poll noticed. | ✅ Complete |
 | 2026-10-30 | v3.4.2 | **Fixed: the dashboard came up empty.** v3.4.1 deleted a `const dashboardOpenMonitoringBtn` that a surviving listener still used, so `init()` threw a `ReferenceError` and everything after it - the host list, the toolbar, every modal - silently stopped wiring. The declaration is restored, and a test now fails if any `*Btn` variable is used but never declared. | ✅ Complete |
 | 2026-10-30 | v3.4.1 | **Quick actions removed from the dashboard.** The panel of four cards (Admin Settings, Rescan All, Export SSH Config, Monitoring Wizard) duplicated the header, the *More* menu and the command palette, so it is gone along with its wiring. | ✅ Complete |
 | 2026-10-30 | v3.4.0 | **Reports are dialogs.** A report opens inside the Reports dialog - from the dashboard list, from *Analyse All Logs* when the analysis finishes, and from the report list - and every link inside a report (*All reports*, *Remediation*, *view previous*) stays in that dialog instead of loading a new page. The self-healing card now takes the full width, with model *Unverified suggestions* in a column beside it rather than a half-width card with empty space. The header *Remediation* button is back to a plain green link. | ✅ Complete |
@@ -756,7 +756,7 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.5.1`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.6.0`
 (`:latest` points at the same manifest), digest
 `sha256:4014902c7b88c788f78305df0d0c812a40453e532aa1567e6b55484303c6c1f3`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
@@ -767,7 +767,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.5.1 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.6.0 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -775,7 +775,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.5.1 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.6.0 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -1175,9 +1175,28 @@ The application provides detailed startup logs showing:
    map/reduce passes), verdict parsed
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
-## 📝 Recent Updates
+### v3.6.0 - Homescreen: logo goes home, honest host cards
+- 🏠 **The logo is the way home.** `Homelab Manager` (mark + title) is now an anchor to `/` that is intercepted in JS:
+  it switches back to the dashboard without a reload, scrolls to the top and closes the mobile drawer. Without JS the
+  href still works.
+- 🎴 **One card shape for every host.** Fixed 88px tiles: the name centred with `user@ip` under it, the reachability dot
+  and an OS glyph (🐧 Linux, 🍎 macOS, 😈 BSD, 🪟 Windows) in the top-left, a 🐳 Docker mark in the bottom-left (only when
+  Docker is installed) and a green `>_` prompt in the bottom-right that selects the host and opens the existing SSH
+  terminal. The app's own localhost card has no prompt (there is no SSH session to open).
+- 🟢 **The dot is real.** It used to be a hard-coded pulsing green dot on every card. It now reflects the last poll
+  (`/api/metrics/servers`, every 20s, paused while the tab is hidden) with a tooltip carrying the actual error; the poll
+  only decorates cards, so drag order, focus and selection survive a refresh.
+- 🐛 **Six "offline" hosts answered SSH all along.** `build_command()` ends with a Docker probe, and `ok` means "exit
+  status 0", so on any host without Docker the whole SSH command exited 1 and the collector called a perfectly healthy
+  box offline. The command now ends with `; true`; reachability is decided by the SSH round trip, not by Docker.
+- 🍎 **A reachable host with no `/proc` is not offline.** macOS/BSD hosts answer SSH but have no `/proc`, which used to
+  raise `no /proc data returned`. They are now online with `metrics_error` set and empty CPU/RAM/network, so the fleet
+  count, the Monitoring page and the sidebar agree with reality.
+- 📡 **`os` is part of the same SSH round trip** (`uname -s` + `/etc/os-release`), so the OS glyph costs nothing extra.
+- 🧪 **12 new tests** (`tests/test_homescreen_cards.py`) plus the updated metrics test; verified in headless Edge on
+  desktop, tablet rail and phone, and the SSH prompt opens the terminal on a real click.
 
-### v3.5.1 - The fleet card tells you who is offline
+### v3.6.0 - The fleet card tells you who is offline
 - 🖱️ **`10/16 online` is a button.** Clicking it scrolls to the *Offline devices* card and flashes it; it is a real
   `<button>` with `aria-controls`, so the keyboard can ask the same question.
 - 🗂️ **Offline devices has its own square card** beside the fleet summary: one row per unreachable host with its name,
@@ -1194,8 +1213,8 @@ The application provides detailed startup logs showing:
 - 🧱 **Layout guarded on all three interfaces:** the list scrolls past 200px so a large outage cannot stretch the card
   row, and the fleet card hugs its own content instead of showing an empty box next to a long list.
 - 🔍 **Checked in a real browser against production:** 4 cards, `10/16 online · see offline`, 6 rows in the offline card,
-  and a click moves focus to the card and flashes it - on v3.5.1, with no console errors.
-- 🚀 **Deployed as `v3.5.1`** (`sha256:4014902c…c6c1f3`); production reports `Homelab Manager · v3.5.1`.
+  and a click moves focus to the card and flashes it - on v3.6.0, with no console errors.
+- 🚀 **Deployed as `v3.6.0`** (`sha256:4014902c…c6c1f3`); production reports `Homelab Manager · v3.6.0`.
 
 ### v3.4.2 - Fixed: no hosts, no buttons
 - 🐛 **The dashboard was dead, not empty.** v3.4.1 removed the *Quick actions* panel and deleted four element

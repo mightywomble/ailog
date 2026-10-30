@@ -151,11 +151,16 @@ def test_system_snapshot_offline_on_command_failure(monkeypatch):
     assert snap['host_key'] == 'h3'
 
 
-def test_system_snapshot_offline_when_no_proc_data(monkeypatch):
+def test_a_reachable_host_without_proc_is_online_with_no_metrics(monkeypatch):
+    # macOS, a BSD, or a container without procfs: SSH answered, so the host is
+    # up. Calling it offline was a lie - say so and leave the numbers empty.
     monkeypatch.setattr(collect, '_run', lambda host, cmd, timeout=20: (True, ''))
     snap = collect.system_snapshot({'key': 'h4', 'name': 'weird', 'ip': '10.0.0.8'})
-    assert snap['online'] is False
-    assert 'no /proc data' in snap['error']
+    assert snap['online'] is True
+    assert snap['error'] is None
+    assert 'no /proc' in snap['metrics_error']
+    assert snap['cpu']['percent'] is None
+    assert snap['mem']['percent'] is None
 
 
 # ----------------------------------------------------------- containers

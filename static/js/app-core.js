@@ -1772,6 +1772,8 @@ export function init() {
                 console.log('[DEBUG] Selecting localhost by default...');
                 window.showDashboard();
                 updateDashboardStats();
+                // First paint is honest: unknown dots until the poll answers.
+                syncHostStatuses();
                 // Do not auto-open logs on load; default to dashboard
                 // selectHost('local');
                 console.log('[DEBUG] populateHostCards() completed successfully');
@@ -1784,6 +1786,60 @@ export function init() {
 
         // Expose a refresh hook for the Add Devices wizard to update the sidebar without a full page reload
         window.refreshHostsSidebar = populateHostCards;
+
+        // --- host card status: reachability, OS, Docker -------------------
+        // The sidebar used to paint every host with a hard-coded green dot.
+        // This reads the same snapshot the Monitoring page uses (/api/metrics/
+        // servers) and only decorates the cards - it never re-renders them, so
+        // drag order, focus and selection survive a refresh.
+        const HOST_STATUS_POLL_MS = 20000;
+        const OS_GLYPHS = { linux: '🐧', darwin: '🍎', bsd: '😈', windows: '🪟', unknown: '🖥' };
+
+        const applyHostStatus = (card, snapshot) => {
+            const dot = card.querySelector('.hc-dot');
+            if (!dot) return;
+            if (!snapshot) {
+                dot.dataset.state = 'unknown';
+                dot.title = 'Not polled yet';
+                return;
+            }
+            const up = snapshot.online !== false;
+            dot.dataset.state = up ? 'up' : 'down';
+            dot.title = up
+                ? (snapshot.metrics_error ? `Reachable — ${snapshot.metrics_error}` : 'Reachable')
+                : `Unreachable: ${snapshot.error || 'no answer in the last poll'}`;
+
+            const family = snapshot.os?.family || 'unknown';
+            const os = card.querySelector('.hc-os');
+            if (os && os.dataset.hostOs !== family) {
+                os.dataset.hostOs = family;
+                os.textContent = OS_GLYPHS[family] || OS_GLYPHS.unknown;
+                os.title = snapshot.os?.name ? `${snapshot.os.name} (${family})` : family;
+            }
+
+            const docker = card.querySelector('.hc-docker');
+            if (docker) docker.hidden = !(snapshot.docker && snapshot.docker.installed);
+        };
+
+        const syncHostStatuses = async () => {
+            if (document.hidden) return;
+            if (!hostListContainer || !hostListContainer.children.length) return;
+            let payload;
+            try {
+                const res = await fetch('/api/metrics/servers', { headers: { Accept: 'application/json' } });
+                if (!res.ok) return;
+                payload = await res.json();
+            } catch (_) {
+                return;      // a dead poll must not break the sidebar
+            }
+            const byKey = new Map((payload?.servers || []).map((s) => [s.host_key, s]));
+            hostListContainer.querySelectorAll('.host-card').forEach((card) => {
+                applyHostStatus(card, byKey.get(card.dataset.hostId));
+            });
+        };
+        window.refreshHostStatuses = syncHostStatuses;
+        setInterval(syncHostStatuses, HOST_STATUS_POLL_MS);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) syncHostStatuses(); });
         const createHostCard = (hostId, hostData) => {
             const card = document.createElement('div');
             card.className = 'host-card termix-host';
@@ -1806,25 +1862,32 @@ export function init() {
                 </div>
             ` : '';
 
-            const hostInitial = String(hostData.friendly_name || hostData.ip || hostId || '?').trim().charAt(0).toUpperCase() || '?';
-            if (!isReorderable) card.title = `${hostData.friendly_name || hostId} — ${hostData.user}@${hostData.ip}`;
+            // One card shape for every host: name in the middle, OS glyph and
+            // reachability dot in the top-left, a Docker mark bottom-left and
+            // the SSH prompt bottom-right. Status starts as "unknown" until the
+            // metrics poll says otherwise (see syncHostStatuses).
+            const groupLabel = (hostData.group_names && hostData.group_names.length)
+                ? hostData.group_names.join(', ') : 'none';
+            const hostName = hostData.friendly_name || hostData.ip || hostId;
+            if (!isReorderable) {
+                card.title = `${hostName} — ${hostData.user}@${hostData.ip} (group: ${groupLabel})`;
+            }
             card.innerHTML = `
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center min-w-0 flex-1">
-                        ${grabHandleHtml}
-                        <div class="min-w-0 flex-1">
-                            <span class="host-monogram" aria-hidden="true">${hostInitial}</span>
-                            <h3 class="host-card-name font-bold termix-text truncate">${escapeHtml(hostData.friendly_name)}</h3>
-                            <div class="host-card-meta">
-                                <p class="text-sm termix-muted truncate">Group: ${(hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none'}</p>
-                                <p class="text-xs termix-muted font-mono truncate">${escapeHtml(hostData.user)}@${escapeHtml(hostData.ip)}</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-3 shrink-0">
-                        <div class="connection-indicator w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
-                    </div>
+                ${grabHandleHtml}
+                <span class="hc-corner">
+                    <span class="hc-dot" data-state="unknown" title="Checking reachability…" aria-hidden="true"></span>
+                    <span class="hc-os" data-host-os="unknown" title="Operating system unknown" aria-hidden="true">🖥</span>
+                </span>
+                <div class="hc-main">
+                    <h3 class="host-card-name font-bold termix-text">${escapeHtml(hostName)}</h3>
+                    <p class="hc-sub">${escapeHtml(hostData.user)}@${escapeHtml(hostData.ip)}</p>
                 </div>
+                <span class="hc-docker" title="Docker host" aria-hidden="true" hidden>🐳</span>
+                ${hostId === 'local' ? '' : `
+                    <button type="button" class="hc-ssh" data-hc-ssh
+                            title="Open an SSH terminal on ${escapeHtml(hostName)}"
+                            aria-label="Open an SSH terminal on ${escapeHtml(hostName)}">&gt;_</button>
+                `}
             `;
 
             // Clicking the card selects a host but does NOT automatically pull logs
@@ -1832,6 +1895,14 @@ export function init() {
                 // Avoid click-select while dragging
                 if (card.dataset.dragging === '1') return;
                 selectHost(hostId);
+            });
+
+            // ">_" opens the SSH window that already exists, for this host.
+            card.querySelector('[data-hc-ssh]')?.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (card.dataset.dragging === '1') return;
+                selectHost(hostId);
+                openSshTerminal();
             });
 
             // Drag/drop reordering (manual mode only)
@@ -5085,6 +5156,19 @@ aiAnalyseBtn.addEventListener('click', async () => {
         window.showToast = showToast;
         window.showDashboard = showDashboard;
         window.showLogs = showLogs;
+
+        // The brand is the way home: the same view switch as the tab bar, so a
+        // click never reloads the page (href="/" is the no-JS fallback).
+        document.querySelectorAll('[data-brand-home]').forEach((el) => {
+            el.addEventListener('click', (event) => {
+                event.preventDefault();
+                showDashboard();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                if (document.body.classList.contains('sidebar-open')) {
+                    document.body.classList.remove('sidebar-open');
+                }
+            });
+        });
 
         // --- Shell integration (command palette, overview cards, mobile tabs) ---
         // "Open host" means: select it, then show the logs view - the same path
