@@ -2,5 +2,5 @@ apiVersion: v2
 name: ailog
 description: Ailog deployment (recovered from live cluster release)
 type: application
-version: 0.6.2
-appVersion: "v3.4.2"
+version: 0.7.0
+appVersion: "v3.5.0"

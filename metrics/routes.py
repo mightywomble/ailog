@@ -12,6 +12,7 @@ which means no server-side storage and no per-view memory growth.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -23,13 +24,24 @@ from . import collect
 
 metrics_bp = Blueprint('metrics', __name__)
 
+logger = logging.getLogger(__name__)
+
 # Collapse the burst of requests a page load (or several open tabs) produces
 # into one collection round per interval.
 SNAPSHOT_TTL = 1.5
 SNAPSHOT_WORKERS = 8
 
+# "Last online" comes from the hosts table, but a successful probe is itself
+# evidence that a host is up, so the collector refreshes ``Host.last_seen``.
+# Every host answers at most once a minute: plenty for a card that shows hours
+# or days, and no write amplification from a two-second poll.
+LAST_SEEN_WRITE_INTERVAL = 60
+
 _lock = threading.Lock()
 _cache: Dict[str, Any] = {'ts': 0.0, 'payload': None}
+
+_seen_lock = threading.Lock()
+_seen_written: Dict[str, float] = {}
 
 
 def _host_list() -> List[Dict[str, Any]]:
@@ -60,6 +72,58 @@ def _docker_block(snap: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _last_seen_map() -> Dict[str, Any]:
+    """``{'db-<id>': iso8601 | None}`` for every host we have a record for.
+
+    Config-file hosts (``hosts.json``) and ``local`` have no row, so they get
+    no ``last_seen`` and the dashboard says so rather than inventing a time.
+    """
+    try:
+        from database import Host
+        return {
+            f'db-{h.id}': h.last_seen.isoformat() if h.last_seen else None
+            for h in Host.query.all()
+        }
+    except Exception:  # a metrics round must never fail over a badge
+        logger.debug('metrics: could not read last_seen', exc_info=True)
+        return {}
+
+
+def _note_online(results: List[Dict[str, Any]]) -> None:
+    """Persist ``Host.last_seen`` for hosts that just answered, throttled."""
+    now = time.time()
+    due: List[int] = []
+    with _seen_lock:
+        for snap in results:
+            key = str(snap.get('host_key') or '')
+            if not key.startswith('db-') or snap.get('online') is not True:
+                continue
+            if now - _seen_written.get(key, 0.0) < LAST_SEEN_WRITE_INTERVAL:
+                continue
+            _seen_written[key] = now
+            try:
+                due.append(int(key[3:]))
+            except ValueError:
+                continue
+    if not due:
+        return
+
+    from core.timeutil import utcnow
+    try:
+        from database import Host, db
+        seen = utcnow()
+        for host in Host.query.filter(Host.id.in_(due)).all():
+            host.last_seen = seen
+        db.session.commit()
+    except Exception:
+        logger.warning('metrics: could not record last_seen', exc_info=True)
+        try:
+            from database import db
+            db.session.rollback()
+        except Exception:
+            pass
+
+
 def collect_servers() -> Dict[str, Any]:
     """One round: every host in parallel, system stats for each."""
     hosts = _host_list()
@@ -73,6 +137,13 @@ def collect_servers() -> Dict[str, Any]:
     if hosts:
         with ThreadPoolExecutor(max_workers=min(SNAPSHOT_WORKERS, len(hosts))) as pool:
             results = list(pool.map(one, hosts))
+
+    # Read last_seen before recording this round, so an offline host shows the
+    # last time it *was* up instead of the moment we noticed it was down.
+    seen = _last_seen_map()
+    for snap in results:
+        snap['last_seen'] = seen.get(str(snap.get('host_key') or ''))
+    _note_online(results)
 
     results.sort(key=lambda s: (not s.get('online'), str(s.get('name')).lower()))
     return {'success': True, 'ts': time.time(), 'servers': results}

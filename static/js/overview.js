@@ -30,15 +30,40 @@
 
     const fmtPct = (v) => (v === null || v === undefined ? '–' : `${Number(v).toFixed(0)}%`);
 
+    // The API sends naive UTC timestamps ("2026-10-30T21:12:00"), which a
+    // browser would read as local time — eleven hours out in Australia. Treat
+    // a stamp without a zone as UTC.
+    const parseServerTime = (value) => {
+        if (!value) return null;
+        const text = String(value).trim();
+        if (!text) return null;
+        const zoned = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(text) ? text : `${text}Z`;
+        const then = new Date(zoned).getTime();
+        return Number.isNaN(then) ? null : then;
+    };
+
     const timeAgo = (value) => {
-        if (!value) return '';
-        const then = new Date(value).getTime();
-        if (Number.isNaN(then)) return '';
+        const then = parseServerTime(value);
+        if (then === null) return '';
         const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
         if (secs < 60) return `${secs}s ago`;
         if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
         if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
         return `${Math.round(secs / 86400)}d ago`;
+    };
+
+    // "30 Oct, 21:12" in the viewer's own timezone, for people who need the
+    // actual moment rather than "3h ago".
+    const fmtWhen = (value) => {
+        const then = parseServerTime(value);
+        if (then === null) return '';
+        try {
+            return new Date(then).toLocaleString(undefined, {
+                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+            });
+        } catch (error) {
+            return new Date(then).toISOString().slice(0, 16).replace('T', ' ');
+        }
     };
 
     const esc = (value) => String(value ?? '')
@@ -72,14 +97,20 @@
         const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
         const docker = servers.filter((s) => s.docker?.installed).length;
         const running = servers.reduce((sum, s) => sum + (s.docker?.containers_running || 0), 0);
+        const down = servers.length - online.length;
+        const allUp = !!servers.length && down === 0;
 
         return `
           <div class="ov-card" data-ov="fleet">
             <div class="ov-card-head">
               <h3>Fleet</h3>
-              <span class="ov-chip ${online.length === servers.length && servers.length ? 'is-ok' : 'is-warn'}">
-                ${online.length}/${servers.length} online
-              </span>
+              <button type="button"
+                      class="ov-chip ${allUp ? 'is-ok' : 'is-warn'}"
+                      data-ov-offline-jump
+                      aria-controls="ov-card-offline"
+                      title="${down ? 'Show the devices that are offline' : 'Every device answered the last probe'}">
+                ${online.length}/${servers.length} online${down ? ' &middot; see offline' : ''}
+              </button>
             </div>
             <div class="ov-metrics">
               <div class="ov-metric"><span>CPU</span><strong>${fmtPct(avg(cpu))}</strong>
@@ -93,6 +124,41 @@
                 <div class="ov-sub">${!servers.length ? 'no hosts configured'
                     : (servers.length === online.length ? 'all reachable' : `${servers.length - online.length} unreachable`)}</div></div>
             </div>
+          </div>`;
+    }
+
+    /* Its own card: "which ones, and since when?" is a different question from
+     * "how is the fleet doing", so it gets a square of its own instead of being
+     * squeezed into the fleet metrics. */
+    function renderOffline(servers) {
+        const down = servers.filter((s) => s.online === false);
+        const rows = down.map((s) => {
+            const when = fmtWhen(s.last_seen);
+            const ago = timeAgo(s.last_seen);
+            return `<li class="ov-row" title="${esc(s.error || '')}">
+                <span class="ov-sev is-critical"></span>
+                <span class="ov-row-stack">
+                  <span class="ov-row-main">${esc(s.name || s.host_key || 'unknown host')}</span>
+                  <span class="ov-row-sub">${esc(s.ip || '')}${s.host_key ? ` &middot; ${esc(s.host_key)}` : ''}</span>
+                </span>
+                <span class="ov-when">
+                  ${ago ? `<strong>${esc(ago)}</strong>` : '<strong class="ov-sub">no record</strong>'}
+                  <span>${when ? `last online ${esc(when)}` : 'last online unknown'}</span>
+                </span>
+              </li>`;
+        }).join('');
+
+        return `
+          <div class="ov-card" id="ov-card-offline" data-ov="offline" tabindex="-1">
+            <div class="ov-card-head">
+              <h3>Offline devices</h3>
+              <a href="/metrics" class="ov-link">Monitor</a>
+            </div>
+            ${down.length
+                ? `<div class="ov-big-number ov-bad">${down.length}<span>offline</span></div>
+                   <ul class="ov-rows" tabindex="0" aria-label="Offline devices and when they were last online">${rows}</ul>`
+                : `<div class="ov-big-number ov-good">0<span>offline</span></div>
+                   <p class="ov-sub">${servers.length ? 'Every configured device answered the last probe.' : 'No hosts configured yet.'}</p>`}
           </div>`;
     }
 
@@ -179,6 +245,7 @@
         } else {
             const list = result.servers.data?.servers || [];
             cards.push(renderFleet(list));
+            cards.push(renderOffline(list));
         }
 
         if (result.alerts === null) cards.push(skeletonCard('Alerts'));
@@ -198,6 +265,19 @@
                 event.preventDefault();
                 window.openReportModal(link.dataset.ovReport);
             });
+        });
+
+        // "10/16 online" is a question, so the chip is a button: it takes you to
+        // the card that answers it and flashes it, without moving the layout.
+        mount.querySelector('[data-ov-offline-jump]')?.addEventListener('click', () => {
+            const card = document.getElementById('ov-card-offline');
+            if (!card) return;
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            card.classList.remove('is-flash');
+            void card.offsetWidth;               // restart the highlight
+            card.classList.add('is-flash');
+            card.focus({ preventScroll: true });
+            setTimeout(() => card.classList.remove('is-flash'), 1600);
         });
 
         mount.querySelector('[data-ov-open-reports]')?.addEventListener('click', () => {
