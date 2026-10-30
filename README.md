@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.2.1 | **Remediation is actually reachable now.** `source:` rules were compared against the whole cluster key, so `source: syslog` never matched the real `file:syslog` and **no report could ever produce a card**; sources now match by key segment and may list several families (`[syslog, journal]`). A report with no match shows an explanation instead of an empty strip, and `/remediation` gained a **Start a run** form so a remedy can be planned against one host without waiting for a matching report. | ✅ Complete |
 | 2026-10-30 | v3.2.0 | **Self-healing remediation.** Reports now produce remedy cards from a validated Ansible catalog: a plan you approve (click for one host, typed `RUN` for more), wave-limited execution, independent post-apply verification, mandatory rollback above low risk, in-app maintenance windows and per-host protection, full audit trail. Model output is demoted to a non-executable *Unverified suggestion* card; promotion is a PR. Execution is off by default (`AILOG_ALLOW_REMEDIATION=off\|dry_run\|on`). | ✅ Complete |
 | 2026-10-30 | v3.1.2 | **SSH terminal fixed behind proxies.** The websocket origin guard compared `Origin` with `request.host_url` exactly, so any deployment reached over https through a reverse proxy (or by a different hostname) had every terminal rejected with "Origin not allowed". The check now compares hosts, honours `X-Forwarded-Host`, and accepts extra origins via `AILOG_WS_ALLOWED_ORIGINS`. | ✅ Complete |
 | 2026-10-29 | v3.1.1 | **Cache-proof releases.** Every stylesheet and module is linked with a version query string; HTML is served with Cache-Control no-store and static files must revalidate. Settings shows the running version in its footer, so a deployed build can be identified at a glance. | ✅ Complete |
@@ -1163,6 +1164,23 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.2.1 - Remediation is reachable (and honest when it has nothing to offer)
+- 🐛 **Fixed: no card could ever appear.** Rules declare `source: syslog`, but clusters carry a qualified key
+  (`file:syslog`, `journal:nginx.service`, `docker:web.1.abc`). The comparison was against the whole string, so
+  every source-filtered rule was skipped and every report produced zero remedies. Sources now match by key
+  segment and a rule may list several families.
+- 📚 **Catalog sources widened** to `[syslog, journal]` for the systemd/disk/kernel/docker-daemon remedies:
+  a failed unit is equally visible in `journal:<unit>`, and restricting to syslog silently hid it.
+- 📊 **Severity is numeric in clusters** (2 warn, 3 error, 4 crit); the confidence bonus now reads it as an int
+  instead of comparing against the strings `error`/`crit`.
+- 🧭 **You can start a run without a report.** `/remediation` has a **Start a run** form (remedy + host + dry
+  run) that opens the same reviewed plan dialog; previously the only entry point was a matched card.
+- 💬 **Empty state that explains itself.** A report with no matches now says why (informational findings, not a
+  fixable fault), links to the catalog, and offers **Re-match**. Report and reports-list pages link to
+  `/remediation`.
+- 🧪 Tests use the **real cluster shape** (`file:syslog`, integer severity) plus explicit regressions for
+  segment matching and multi-family sources, so this cannot silently regress again.
 
 ### v3.2.0 - Self-healing remediation (approval-gated, catalog-only)
 - 🩺 **Remedy cards on every report.** The correlation stage already clusters the evidence; a deterministic

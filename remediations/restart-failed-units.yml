@@ -10,7 +10,7 @@ requires: []
 match:
   any:
   - signature_regex: Failed to start|entered failed state|Main process exited, code=exited
-    source: syslog
+    source: [syslog, journal]
     min_count: 2
 blast_radius:
   changes:

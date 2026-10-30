@@ -12,7 +12,7 @@ match:
   any:
   - signature_regex: dockerd.*(hang|unresponsive|timeout)|Cannot connect to the Docker
       daemon
-    source: docker
+    source: [docker, journal]
     min_count: 1
 blast_radius:
   changes:

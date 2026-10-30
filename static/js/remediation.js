@@ -92,7 +92,18 @@ function render() {
             <button type="button" class="rem-btn" data-refresh style="margin-left:auto">Re-match</button>
         </div>
         ${state.policy && !state.policy.enabled ? '<div class="rem-empty">Remediation is in read-only mode. Cards are visible (and copyable); applying requires <code>AILOG_ALLOW_REMEDIATION=dry_run</code> or <code>on</code>.</div>' : ''}
-        ${cards.length ? `<div class="rem-grid">${cards.map(cardHtml).join('')}</div>` : '<div class="rem-empty">No remediation suggestions for this report. That can mean the finding is already healthy, or that no catalog entry matches it yet.</div>'}
+        ${cards.length ? `<div class="rem-grid">${cards.map(cardHtml).join('')}</div>` : `<div class="rem-empty">
+            No catalog remedy matches this report's evidence.
+            <div class="rem-empty-sub">
+                That is normal when the findings are informational (sessions, accepted logins,
+                routine container stats) rather than a fixable fault. A remedy appears only when a
+                reviewed catalog entry's signature matches a cluster in this report.
+            </div>
+            <div class="rem-actions" style="margin-top:.6rem">
+                <a class="rem-btn" href="/remediation">Browse the reviewed remedies</a>
+                <button type="button" class="rem-btn" data-refresh>Re-match this report</button>
+            </div>
+        </div>`}
     `;
 }
 

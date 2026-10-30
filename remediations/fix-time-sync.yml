@@ -10,7 +10,7 @@ requires: []
 match:
   any:
   - signature_regex: clock (skew|jump|went backwards)|time.*(out of sync|not synchronised)|NTP
-    source: syslog
+    source: [syslog, journal]
     min_count: 2
 blast_radius:
   changes:

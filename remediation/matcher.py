@@ -23,12 +23,38 @@ def _clusters(report) -> list[dict]:
         return []
 
 
+def _wanted_sources(rule: dict) -> set[str]:
+    """The source families a rule accepts.
+
+    Real clusters carry a qualified source key (`file:syslog`,
+    `journal:nginx.service`, `docker:web.1.abc`), not a bare family name, so
+    `source: syslog` has to be compared against the *parts*, not the whole key.
+    """
+    raw = rule.get('source') or rule.get('sources') or []
+    if isinstance(raw, str):
+        raw = [raw]
+    out = set()
+    for item in raw:
+        text = str(item or '').strip().lower()
+        if text:
+            out.add(text)
+    return out
+
+
+def _source_matches(cluster_src, wanted: set[str]) -> bool:
+    if not wanted:
+        return True
+    src = str(cluster_src or '').lower()
+    parts = {part for part in src.split(':') if part}
+    return bool(wanted & parts)
+
+
 def _rule_match(rule: dict, clusters: list[dict]) -> dict | None:
     pattern = re.compile(rule['signature_regex'], re.IGNORECASE)
-    wanted_src = (rule.get('source') or '').strip().lower()
+    wanted_src = _wanted_sources(rule)
     best = None
     for cluster in clusters:
-        if wanted_src and str(cluster.get('src') or '').lower() != wanted_src:
+        if not _source_matches(cluster.get('src'), wanted_src):
             continue
         haystack = ' '.join(str(cluster.get(k) or '') for k in ('sig', 'label'))
         if not pattern.search(haystack):
@@ -51,7 +77,12 @@ def _confidence(entry: dict, hit: dict, report) -> float:
         score += 0.05
     if (report.verdict or '') in ('failing', 'degraded'):
         score += 0.1
-    if str(hit.get('sev') or '').lower() in ('crit', 'critical', 'error'):
+    sev = hit.get('sev')
+    if isinstance(sev, (int, float)):
+        # normalize.py grades numerically: 2 warn, 3 error, 4 crit.
+        if sev >= 3:
+            score += 0.1
+    elif str(sev or '').lower() in ('crit', 'critical', 'error'):
         score += 0.1
     return round(min(0.95, score), 2)
 
