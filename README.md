@@ -758,7 +758,7 @@ by the `stacks/ailog/stack.yml` stack file.
 
 **Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.5.1`
 (`:latest` points at the same manifest), digest
-`sha256:4257bcc27bddf9b43f90ff29a6d2e71e36ba64140a88e1c1b84850624d795471`, running as
+`sha256:4014902c7b88c788f78305df0d0c812a40453e532aa1567e6b55484303c6c1f3`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -1193,6 +1193,9 @@ The application provides detailed startup logs showing:
   instead of saying `no record` everywhere.
 - 🧱 **Layout guarded on all three interfaces:** the list scrolls past 200px so a large outage cannot stretch the card
   row, and the fleet card hugs its own content instead of showing an empty box next to a long list.
+- 🔍 **Checked in a real browser against production:** 4 cards, `10/16 online · see offline`, 6 rows in the offline card,
+  and a click moves focus to the card and flashes it - on v3.5.1, with no console errors.
+- 🚀 **Deployed as `v3.5.1`** (`sha256:4014902c…c6c1f3`); production reports `Homelab Manager · v3.5.1`.
 
 ### v3.4.2 - Fixed: no hosts, no buttons
 - 🐛 **The dashboard was dead, not empty.** v3.4.1 removed the *Quick actions* panel and deleted four element
