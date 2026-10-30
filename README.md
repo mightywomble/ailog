@@ -759,7 +759,10 @@ by the `stacks/ailog/stack.yml` stack file.
 playbook only executes with `--check --diff`. Redeploy after a push with:
 
 ```bash
-docker service update --with-registry-auth --force ailog_ailog
+# --force alone reuses the image the node already has; name the tag so the
+# node actually resolves and pulls the new digest.
+docker service update --with-registry-auth --force \
+  --image zot.safehomelan.com/ailog:v3.3.0 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
