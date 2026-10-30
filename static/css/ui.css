@@ -509,8 +509,8 @@ a.ov-row-main:hover { text-decoration: underline; }
   line-height: 1;
 }
 #hosts-sidebar .host-card .hc-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 999px;
   flex: 0 0 auto;
   background: var(--faint);
@@ -518,14 +518,21 @@ a.ov-row-main:hover { text-decoration: underline; }
 #hosts-sidebar .host-card .hc-dot[data-state="up"] { background: var(--ok); }
 #hosts-sidebar .host-card .hc-dot[data-state="down"] { background: var(--bad); }
 #hosts-sidebar .host-card .hc-dot[data-state="unknown"] { background: var(--faint); }
-#hosts-sidebar .host-card .hc-os { font-size: .74rem; line-height: 1; }
+#hosts-sidebar .host-card .hc-os {
+  font-size: 1.1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text);
+}
+#hosts-sidebar .host-card .hc-os svg { width: 18px; height: 18px; display: block; }
 
 /* bottom-left: Docker mark, only on Docker hosts */
 #hosts-sidebar .host-card .hc-docker {
   position: absolute;
-  bottom: .45rem;
+  bottom: .4rem;
   left: .55rem;
-  font-size: .76rem;
+  font-size: 1.05rem;
   line-height: 1;
 }
 #hosts-sidebar .host-card .hc-docker[hidden] { display: none; }

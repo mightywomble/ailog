@@ -1123,10 +1123,7 @@ export function init() {
 
             sshConnectedHost = null;
 
-            try {
-                if (sshSocket) sshSocket.close();
-            } catch (_) {}
-            sshSocket = null;
+            closeSshSocket();
 
             // Hide the SSH view and return to host info.
             // (Do this after state reset to avoid accidental resume.)
@@ -1166,10 +1163,7 @@ export function init() {
             sshConnectedHost = null;
 
             // Close websocket so next SSH click starts a fresh session
-            try {
-                if (sshSocket && sshSocket.readyState === WebSocket.OPEN) sshSocket.close();
-            } catch (_) {}
-            sshSocket = null;
+            closeSshSocket();
 
             // Remove the tab if it was explicitly ended
             if (endedHost) {
@@ -1301,10 +1295,20 @@ export function init() {
         });
 
         const closeSshSocket = () => {
-            if (sshSocket) {
-                try { sshSocket.close(); } catch (_) {}
-                sshSocket = null;
-            }
+            const sock = sshSocket;
+            sshSocket = null;
+            if (!sock) return;
+            // Detach before closing. A closing socket still fires its handlers,
+            // and those handlers used to run against the *shared* sshSocket
+            // variable - so the old socket's error/close could tear down the
+            // connection we had just opened for another host.
+            try {
+                sock.onopen = null;
+                sock.onmessage = null;
+                sock.onerror = null;
+                sock.onclose = null;
+                sock.close();
+            } catch (_) {}
         };
 
         const connectSshSocket = (hostId) => {
@@ -1314,8 +1318,13 @@ export function init() {
             setSshStatus('Connecting...', 'muted');
             closeSshSocket();
 
-            sshSocket = new WebSocket(wsUrl);
-            sshSocket.onopen = () => {
+            // Everything below closes over `sock`, never over `sshSocket`:
+            // a late event from a previous host must not touch this session.
+            const sock = new WebSocket(wsUrl);
+            sshSocket = sock;
+            const isCurrent = () => sshSocket === sock;
+            sock.onopen = () => {
+                if (!isCurrent()) return;
                 sshConnectedHost = hostId;
                 sshSessionActive = true;
                 sshSessionEnded = false;
@@ -1324,12 +1333,13 @@ export function init() {
 
                 upsertSshTab(hostId);
                 setSshStatus('Connected', 'ok');
-                sshSocket.send(JSON.stringify({
+                sock.send(JSON.stringify({
                     type: 'connectToHost',
                     data: { hostId, cols: sshTerm.cols, rows: sshTerm.rows }
                 }));
             };
-            sshSocket.onmessage = (event) => {
+            sock.onmessage = (event) => {
+                if (!isCurrent()) return;
                 try {
                     const msg = JSON.parse(event.data);
                     if (msg.type === 'data' && msg.data) {
@@ -1380,7 +1390,8 @@ export function init() {
                     sshTerm.write(event.data);
                 }
             };
-            sshSocket.onclose = () => {
+            sock.onclose = () => {
+                if (!isCurrent()) return;      // a replaced session is not our business
                 setSshStatus('Disconnected', 'muted');
 
                 // If the socket closes without an explicit 'disconnected' message,
@@ -1398,7 +1409,8 @@ export function init() {
                     handleSshExitEnded();
                 }
             };
-            sshSocket.onerror = (error) => {
+            sock.onerror = () => {
+                if (!isCurrent()) return;
                 setSshStatus('Connection error', 'error');
                 // Close socket to allow reconnection
                 closeSshSocket();
@@ -1456,7 +1468,7 @@ export function init() {
 
             // If the socket is not open, drop it so we can reconnect cleanly.
             if (sshSocket && sshSocket.readyState !== WebSocket.OPEN) {
-                sshSocket = null;
+                closeSshSocket();
             }
 
             // Start a fresh session when the previous one ended via `exit`, or if switching hosts.
@@ -1795,6 +1807,29 @@ export function init() {
         const HOST_STATUS_POLL_MS = 20000;
         const OS_GLYPHS = { linux: '🐧', darwin: '🍎', bsd: '😈', windows: '🪟', unknown: '🖥' };
 
+        // Distro marks beat a generic penguin. The Ubuntu "circle of friends"
+        // is three dots on a ring, which is cheap and stays crisp at 15px.
+        const OS_BADGES = {
+            ubuntu: {
+                title: 'Ubuntu',
+                html: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">'
+                    + '<circle cx="12" cy="12" r="8.4"/>'
+                    + '<circle cx="12" cy="3.2" r="2.1" fill="currentColor" stroke="none"/>'
+                    + '<circle cx="4.4" cy="16.2" r="2.1" fill="currentColor" stroke="none"/>'
+                    + '<circle cx="19.6" cy="16.2" r="2.1" fill="currentColor" stroke="none"/>'
+                    + '</svg>',
+            },
+        };
+
+        const OS_TITLES = { linux: 'Linux', darwin: 'macOS', bsd: 'BSD', windows: 'Windows', unknown: 'Unknown OS' };
+
+        const osBadge = (os) => {
+            const distro = String(os?.id || '').toLowerCase();
+            if (distro && OS_BADGES[distro]) return OS_BADGES[distro];
+            const family = os?.family || 'unknown';
+            return { title: os?.name || OS_TITLES[family] || family, text: OS_GLYPHS[family] || OS_GLYPHS.unknown };
+        };
+
         const applyHostStatus = (card, snapshot) => {
             const dot = card.querySelector('.hc-dot');
             if (!dot) return;
@@ -1811,10 +1846,15 @@ export function init() {
 
             const family = snapshot.os?.family || 'unknown';
             const os = card.querySelector('.hc-os');
-            if (os && os.dataset.hostOs !== family) {
-                os.dataset.hostOs = family;
-                os.textContent = OS_GLYPHS[family] || OS_GLYPHS.unknown;
-                os.title = snapshot.os?.name ? `${snapshot.os.name} (${family})` : family;
+            if (os) {
+                const badge = osBadge(snapshot.os);
+                const signature = `${family}:${snapshot.os?.id || ''}:${snapshot.os?.name || ''}`;
+                if (os.dataset.hostOs !== signature) {
+                    os.dataset.hostOs = signature;
+                    if (badge.html) os.innerHTML = badge.html;
+                    else os.textContent = badge.text;
+                    os.title = badge.title;
+                }
             }
 
             const docker = card.querySelector('.hc-docker');
