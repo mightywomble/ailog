@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.3.1 | **Remediation opens in a dialog, from a green button.** The header entry point is now a success-green button that opens the whole self-healing page (start a run, catalog, windows, protected hosts, recent runs) in a dialog, so the plan wizard never loses the dashboard behind it. The page keeps its `/remediation` URL and an `?embed=1` mode that drops its own Back link, and the dialog unloads the frame on close so its timers stop. | ✅ Complete |
 | 2026-10-30 | v3.3.0 | **Plan is a wizard now, and a run is never a blank screen.** Clicking *Plan* opens a four-step wizard: review the plan (hosts, waves, playbook, verify, rollback) → choose dry run or apply, run now or a maintenance slot → confirm (click, plus typed `RUN` for a multi-host apply) → a live console. The console shows a connecting stage, a per-host row that moves from *connecting over SSH* to the task in flight, a ticking elapsed clock and a server heartbeat every 5s, so a slow wave never looks hung. Runs can be scheduled up to 30 days ahead (`scheduled_for`), wait in the queue, and be cancelled before they start. | ✅ Complete |
 | 2026-10-30 | v3.2.1 | **Remediation is actually reachable now.** `source:` rules were compared against the whole cluster key, so `source: syslog` never matched the real `file:syslog` and **no report could ever produce a card**; sources now match by key segment and may list several families (`[syslog, journal]`). A report with no match shows an explanation instead of an empty strip, and `/remediation` gained a **Start a run** form so a remedy can be planned against one host without waiting for a matching report. | ✅ Complete |
 | 2026-10-30 | v3.2.0 | **Self-healing remediation.** Reports now produce remedy cards from a validated Ansible catalog: a plan you approve (click for one host, typed `RUN` for more), wave-limited execution, independent post-apply verification, mandatory rollback above low risk, in-app maintenance windows and per-host protection, full audit trail. Model output is demoted to a non-executable *Unverified suggestion* card; promotion is a PR. Execution is off by default (`AILOG_ALLOW_REMEDIATION=off\|dry_run\|on`). | ✅ Complete |
@@ -751,9 +752,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.3.0`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.3.1`
 (`:latest` points at the same manifest), digest
-`sha256:eac22ab743eccc881cbb183cf306c2583119a870ed34464fb12afc53629c55f7`, running as
+`sha256:c75e0bc904f20862ae085f83c6e7a51c61745dd718048ba1a696e5114b09f0f0`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -762,7 +763,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.3.0 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.3.1 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -770,7 +771,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.3.0 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.3.1 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -1171,6 +1172,21 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.3.1 - Remediation is a green button that opens a dialog
+- 🟢 **Green, because it is the one header button that changes a server.** `.icon-btn.is-go` takes its colour from
+  `--ok`, so it reads as success-green in all six themes, light and dark, without a hard-coded hex.
+- 🪟 **It opens in a dialog.** The button is still an `<a href="/remediation">` (middle-click and no-JS still work),
+  but a click is intercepted to open the page in the shared iframe dialog, next to Docker, Monitoring and Reports.
+  Metrics and reports pages already support `?embed=1`; `/remediation` now does too — no Back link, tighter
+  chrome, and an *Open full page* escape hatch.
+- 🧹 **Closing unloads the frame**, so the embedded page's timers and any in-flight wizard stop instead of idling
+  behind the dialog — the same rule the other embedded pages follow.
+- ⌘K *Open Remediation* opens the dialog as well, falling back to navigation.
+- 🧪 Guards added: the href and modal markup both exist, the class is token-driven (`var(--ok)`, no hex), the
+  frame is blanked on `appmodal:close`, modifier-clicks are not swallowed, and the embed flag drops the Back link.
+- 🚀 **Deployed as `v3.3.1`** (`sha256:c75e0bc9…4b09f0f0`), green button and embedded dialog verified on
+  `ailog.safehomelan.com`.
 
 ### v3.3.0 - The plan is a wizard, and the run is visible
 - 🧭 ***Plan* now opens a wizard, not a single dialog.** Four steps: **Review** (risk, targets and why each host is

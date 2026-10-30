@@ -38,7 +38,8 @@
 .rem-code-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .rem-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-top: auto; padding-top: .35rem; }
 .rem-btn { font-size: .78rem; border-radius: var(--radius-sm); border: 1px solid var(--border);
-  background: var(--surface-2); color: var(--text); padding: .35rem .7rem; cursor: pointer; }
+  background: var(--surface-2); color: var(--text); padding: .35rem .7rem; cursor: pointer;
+  text-decoration: none; display: inline-flex; align-items: center; gap: .35rem; }
 .rem-btn:hover { background: var(--overlay-hover); }
 .rem-btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
 .rem-btn.primary:hover { background: var(--accent-hover); }
