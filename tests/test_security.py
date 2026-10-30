@@ -175,6 +175,46 @@ def test_websocket_origin_can_be_relaxed(flask_app, monkeypatch):
         assert websocket_origin_allowed() is True
 
 
+
+
+
+def test_websocket_origin_allows_https_in_front_of_plain_http(flask_app):
+    """A TLS-terminating proxy makes the browser Origin https while Flask sees http.
+
+    This is the regression that broke every SSH terminal: the old exact
+    comparison of Origin against request.host_url rejected it.
+    """
+    with flask_app.test_request_context('/', base_url='http://ailog.lan:5001',
+                                       headers={'Origin': 'https://ailog.lan'}):
+        assert websocket_origin_allowed() is True
+
+
+def test_websocket_origin_accepts_the_proxy_forwarded_host(flask_app):
+    with flask_app.test_request_context('/', base_url='http://10.0.0.5:5001',
+                                       headers={'Origin': 'https://ailog.example.com',
+                                                'X-Forwarded-Host': 'ailog.example.com'}):
+        assert websocket_origin_allowed() is True
+
+
+def test_websocket_origin_still_rejects_other_sites(flask_app):
+    with flask_app.test_request_context('/', base_url='http://ailog.lan:5001',
+                                       headers={'Origin': 'https://evil.example'}):
+        assert websocket_origin_allowed() is False
+
+
+def test_websocket_origin_extra_origins_are_configurable(flask_app, monkeypatch):
+    monkeypatch.setenv('AILOG_WS_ALLOWED_ORIGINS', 'https://*.home.arpa, https://other.example')
+    with flask_app.test_request_context('/', base_url='http://10.0.0.5:5001',
+                                       headers={'Origin': 'https://ailog.home.arpa'}):
+        assert websocket_origin_allowed() is True
+    with flask_app.test_request_context('/', base_url='http://10.0.0.5:5001',
+                                       headers={'Origin': 'https://other.example'}):
+        assert websocket_origin_allowed() is True
+    with flask_app.test_request_context('/', base_url='http://10.0.0.5:5001',
+                                       headers={'Origin': 'https://nope.example'}):
+        assert websocket_origin_allowed() is False
+
+
 # --- host keys ------------------------------------------------------------
 
 
