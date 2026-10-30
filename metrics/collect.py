@@ -22,7 +22,7 @@ from core.ssh import run_host
 from dockermon.parse import parse_df_root, parse_meminfo, parse_netdev, parse_proc_stat
 
 MARK = '===AILOG_METRICS==='
-SECTIONS = ('stat', 'mem', 'net', 'df', 'load', 'up', 'host', 'docker', 'dstate')
+SECTIONS = ('stat', 'mem', 'net', 'df', 'load', 'up', 'host', 'os', 'docker', 'dstate')
 
 # host_key -> (wall clock, rx, tx, cpu_total, cpu_idle)
 _rate_lock = threading.Lock()
@@ -57,6 +57,10 @@ def build_command() -> str:
             cmd = 'cat /proc/uptime'
         elif name == 'host':
             cmd = 'hostname'
+        elif name == 'os':
+            cmd = ("uname -s 2>/dev/null; "
+                   "grep -m1 '^ID=' /etc/os-release 2>/dev/null; "
+                   "grep -m1 '^PRETTY_NAME=' /etc/os-release 2>/dev/null")
         elif name == 'docker':
             cmd = 'command -v docker >/dev/null 2>&1 && echo yes || echo no'
         else:
@@ -66,7 +70,11 @@ def build_command() -> str:
                    "|| docker ps -a --format '{{.State}}' 2>/dev/null) "
                    "&& echo AILOG_DOCKER_OK; } 2>/dev/null")
         lines.append(f"echo '{MARK}:{name}'; {cmd} 2>/dev/null")
-    return '; '.join(lines)
+    # The last section is a *probe*: on a host without Docker it fails, and
+    # without this the whole SSH command would exit non-zero. ``ok`` means
+    # "exit 0", so that alone used to report a perfectly healthy host as
+    # offline. The data is what matters here, not the shell's status.
+    return '; '.join(lines) + '; true'
 
 
 def _split(output: str) -> Dict[str, str]:
@@ -121,6 +129,29 @@ def _meminfo_value(text: str, key: str) -> int:
     return 0
 
 
+def _os_family(text: str) -> Dict[str, str]:
+    """``uname -s`` plus an optional Linux distro, for the sidebar OS glyph."""
+    lines = [ln.strip() for ln in (text or '').splitlines() if ln.strip()]
+    family = (lines[0] if lines else '').lower()
+    distro = pretty = ''
+    for line in lines[1:]:
+        if line.startswith('ID='):
+            distro = line.split('=', 1)[1].strip().strip('"').lower()
+        elif line.startswith('PRETTY_NAME='):
+            pretty = line.split('=', 1)[1].strip().strip('"')
+    if family.startswith('darwin'):
+        family = 'darwin'
+    elif family.startswith('linux'):
+        family = 'linux'
+    elif family.startswith(('freebsd', 'openbsd', 'netbsd')):
+        family = 'bsd'
+    elif family.startswith(('mingw', 'msys', 'cygwin')):
+        family = 'windows'
+    elif not family:
+        family = 'unknown'
+    return {'family': family, 'id': distro, 'name': pretty or distro or family}
+
+
 def parse_system(text: str) -> Dict[str, Any]:
     """Parse the marker output into raw counters (no rates yet)."""
     blocks = _split(text)
@@ -158,6 +189,7 @@ def parse_system(text: str) -> Dict[str, Any]:
         'load15': load[2] if len(load) > 2 else None,
         'uptime': uptime,
         'hostname': (blocks.get('host', '') or '').strip().splitlines()[0] if blocks.get('host') else None,
+        'os': _os_family(blocks.get('os', '')),
         'docker_installed': (blocks.get('docker', '') or '').strip().lower().startswith('yes'),
         'docker_reachable': docker_ok,
         'docker_running': sum(1 for st in states if st.startswith('running')),
@@ -206,7 +238,27 @@ def system_snapshot(host: Dict[str, Any]) -> Dict[str, Any]:
             raise RuntimeError((out or 'command failed').strip()[:300])
         raw = parse_system(out)
         if not raw['mem_total'] and not raw['cpu_total']:
-            raise RuntimeError('no /proc data returned')
+            # SSH answered, so the host is up - it simply has no /proc (macOS,
+            # a BSD, a container without procfs). Call that "online, no
+            # metrics" instead of pretending a reachable machine is down.
+            base.update({
+                'online': True,
+                'error': None,
+                'metrics_error': 'no /proc metrics (host is not Linux?)',
+                'hostname': raw['hostname'] or base['name'],
+                'os': raw['os'],
+                'uptime': raw['uptime'] or None,
+                'docker_installed': raw['docker_installed'],
+                'docker_reachable': raw['docker_reachable'],
+                'docker_running': raw['docker_running'],
+                'docker_total': raw['docker_total'],
+                'cpu': {'percent': None, 'cores': None, 'load1': None, 'load5': None, 'load15': None},
+                'mem': {'used': 0, 'total': 0, 'percent': None, 'swap_used': 0, 'swap_total': 0},
+                'disk': {'used': raw['disk_used'], 'total': raw['disk_total'],
+                         'percent': _pct(raw['disk_used'], raw['disk_total']), 'mount': '/'},
+                'net': {'rx': 0, 'tx': 0, 'rx_bps': None, 'tx_bps': None},
+            })
+            return base
         rates = _rates(key, raw, now)
     except Exception as exc:  # an unreachable host must not break the page
         base.update({'online': False, 'error': str(exc)[:300]})
@@ -222,6 +274,7 @@ def system_snapshot(host: Dict[str, Any]) -> Dict[str, Any]:
         'online': True,
         'error': None,
         'hostname': raw['hostname'] or base['name'],
+        'os': raw['os'],
         'uptime': raw['uptime'],
         'docker_installed': raw['docker_installed'],
         'docker_reachable': raw['docker_reachable'],

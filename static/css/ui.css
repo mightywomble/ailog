@@ -380,42 +380,6 @@ a.ov-row-main:hover { text-decoration: underline; }
 .qa-btn-secondary:hover { background: var(--surface-3); border-color: var(--accent); }
 .qa-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-/* host monogram: only shown when the sidebar collapses to an icon rail / phone drawer header */
-.host-monogram { display: none; }
-
-@media (max-width: 1024px) and (min-width: 641px) {
-  #hosts-sidebar .termix-host {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    padding: 8px 2px !important;
-  }
-  /* flatten the card wrappers so the monogram + status dot stack directly */
-  #hosts-sidebar .termix-host > div,
-  #hosts-sidebar .termix-host > div > div:first-child,
-  #hosts-sidebar .termix-host > div > div:first-child > div { display: contents; }
-  #hosts-sidebar .termix-host .host-monogram {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 999px;
-    background: var(--surface-3);
-    border: 1px solid var(--border-strong);
-    color: var(--text);
-    font-size: .8rem;
-    font-weight: 700;
-  }
-  #hosts-sidebar .termix-host.termix-host-selected .host-monogram,
-  #hosts-sidebar .termix-host.selected .host-monogram {
-    background: var(--accent);
-    color: var(--on-accent);
-    border-color: var(--accent);
-  }
-}
-
 @media (max-width: 640px) {
   /* never let a wide child push the page sideways */
   html, body { max-width: 100%; overflow-x: hidden; }
@@ -499,6 +463,127 @@ a.ov-row-main:hover { text-decoration: underline; }
   height: 16px;
   stroke-width: 2.2;
   stroke-linecap: round;
+}
+
+/* --------------------------------------------------------- host cards
+ * One uniform tile per host: OS + reachability top-left, name centred,
+ * Docker bottom-left, SSH prompt bottom-right. */
+#hosts-sidebar .host-card {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.55rem .7rem 1.5rem;
+  overflow: hidden;
+}
+#hosts-sidebar .host-card .hc-main { min-width: 0; width: 100%; }
+#hosts-sidebar .host-card .host-card-name {
+  font-size: .82rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+#hosts-sidebar .host-card .hc-sub {
+  margin-top: 2px;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: .62rem;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* top-left: reachability dot then the OS glyph */
+#hosts-sidebar .host-card .hc-corner {
+  position: absolute;
+  top: .5rem;
+  left: .55rem;
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  line-height: 1;
+}
+#hosts-sidebar .host-card .hc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: var(--faint);
+}
+#hosts-sidebar .host-card .hc-dot[data-state="up"] { background: var(--ok); }
+#hosts-sidebar .host-card .hc-dot[data-state="down"] { background: var(--bad); }
+#hosts-sidebar .host-card .hc-dot[data-state="unknown"] { background: var(--faint); }
+#hosts-sidebar .host-card .hc-os { font-size: .74rem; line-height: 1; }
+
+/* bottom-left: Docker mark, only on Docker hosts */
+#hosts-sidebar .host-card .hc-docker {
+  position: absolute;
+  bottom: .45rem;
+  left: .55rem;
+  font-size: .76rem;
+  line-height: 1;
+}
+#hosts-sidebar .host-card .hc-docker[hidden] { display: none; }
+
+/* bottom-right: the prompt button that opens the SSH terminal */
+#hosts-sidebar .host-card .hc-ssh {
+  position: absolute;
+  bottom: .4rem;
+  right: .45rem;
+  width: 26px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--ok) 55%, transparent);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: .62rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+#hosts-sidebar .host-card .hc-ssh:hover {
+  background: color-mix(in srgb, var(--ok) 30%, transparent);
+  border-color: var(--ok);
+}
+#hosts-sidebar .host-card .hc-ssh:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* the drag grip belongs in the top-right corner now */
+#hosts-sidebar .host-card .hosts-grab-handle {
+  position: absolute;
+  top: .3rem;
+  right: .3rem;
+  margin: 0;
+  padding: .1rem;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  cursor: grab;
+}
+
+/* Icon rail (tablet): drop everything but the dot and the name. */
+@media (max-width: 1024px) and (min-width: 641px) {
+  #hosts-sidebar .host-card {
+    min-height: 62px;
+    padding: 1.2rem .25rem .5rem;
+  }
+  #hosts-sidebar .host-card .hc-corner { top: .35rem; left: 50%; transform: translateX(-50%); }
+  #hosts-sidebar .host-card .hc-os,
+  #hosts-sidebar .host-card .hc-docker,
+  #hosts-sidebar .host-card .hc-ssh,
+  #hosts-sidebar .host-card .hc-sub,
+  #hosts-sidebar .host-card .hosts-grab-handle { display: none; }
+  #hosts-sidebar .host-card .host-card-name { font-size: .58rem; line-height: 1.1; }
 }
 
 /* ------------------------------------------------ SSH terminal: expand/contract */
