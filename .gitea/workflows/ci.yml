@@ -21,12 +21,14 @@ jobs:
       - name: Lint (bugs only)
         run: ruff check --select F,E9 .
       - name: Tests
-        env:
-          DATABASE_URL: sqlite:////tmp/ci.db
         run: pytest -q --cov=. --cov-report=term
+      - name: Tests are isolated (same suite twice)
+        # Guards the conftest: every pytest process must get a throwaway
+        # SQLite file, so a second run cannot collide with the first.
+        run: |
+          pytest -q --no-header tests/test_inventory.py tests/test_dockermon.py
+          pytest -q --no-header tests/test_inventory.py tests/test_dockermon.py
       - name: Coverage floor
-        env:
-          DATABASE_URL: sqlite:////tmp/ci.db
         # app.py is still the un-split monolith (3.3k statements at ~16%);
         # the floor is the current measured total and is meant to ratchet up
         # as the phase-3 split lands. Raise it, never lower it.

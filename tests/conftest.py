@@ -17,10 +17,24 @@ if ROOT not in sys.path:
 
 _DB_FD, _DB_PATH = tempfile.mkstemp(suffix='.db', prefix='ailog-test-')
 os.close(_DB_FD)
-os.environ.setdefault('DATABASE_URL', f'sqlite:///{_DB_PATH}')
-os.environ.setdefault('AILOG_TESTING', '1')
+# Always own the database. A DATABASE_URL inherited from the shell or from CI
+# would otherwise point every run at the same file; rows from the previous run
+# survive and the deterministic fixture IPs collide on hosts.ip_address.
+os.environ['DATABASE_URL'] = f'sqlite:///{_DB_PATH}'
+os.environ['AILOG_TESTING'] = '1'
 # DB admin routes are opt-in; the suite exercises them, so switch them on here.
-os.environ.setdefault('AILOG_ALLOW_DB_ADMIN', '1')
+os.environ['AILOG_ALLOW_DB_ADMIN'] = '1'
+
+
+@pytest.fixture(scope='session', autouse=True)
+def _throwaway_database():
+    """Delete the per-session SQLite file (and its WAL sidecars) when done."""
+    yield
+    for suffix in ('', '-wal', '-shm'):
+        try:
+            os.unlink(_DB_PATH + suffix)
+        except OSError:
+            pass
 
 
 @pytest.fixture(scope='session')
@@ -64,10 +78,16 @@ def host(ctx):
     Each call gets a fresh row (and IP) because ``hosts.ip_address`` is unique.
     """
     from database import Host, db
-    _host_counter['n'] += 1
-    n = _host_counter['n']
+    # hosts.ip_address is unique; skip any address already present so the
+    # fixture cannot fail just because the database carried earlier rows.
+    while True:
+        _host_counter['n'] += 1
+        n = _host_counter['n']
+        ip = f'10.0.{n // 250}.{n % 250 + 1}'
+        if Host.query.filter_by(ip_address=ip).first() is None:
+            break
     row = Host(hostname=f'test-host-{n}', friendly_name=f'test-host-{n}',
-               ip_address=f'10.0.{n // 250}.{n % 250 + 1}', ssh_user='tester')
+               ip_address=ip, ssh_user='tester')
     db.session.add(row)
     db.session.commit()
     return f'db-{row.id}'
