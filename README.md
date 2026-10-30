@@ -753,7 +753,7 @@ by the `stacks/ailog/stack.yml` stack file.
 
 **Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.3.0`
 (`:latest` points at the same manifest), digest
-`__DIGEST__`, running as
+`sha256:eac22ab743eccc881cbb183cf306c2583119a870ed34464fb12afc53629c55f7`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -1190,7 +1190,7 @@ The application provides detailed startup logs showing:
   `scheduled_for`, cancelling before the slot, the slot firing (and doing nothing for a cancelled run), heartbeats
   in the progress snapshot, and the UI rules (typed `RUN`, raw dry-run/apply and now/schedule choices, escaped
   server strings, wizard loaded before its callers).
-- 🚀 **Deployed as `v3.3.0`** (`__DIGEST_SHORT__`).
+- 🚀 **Deployed as `v3.3.0`** (`sha256:eac22ab7…629c55f7`).
 
 ### v3.2.1 - Remediation is reachable (and honest when it has nothing to offer)
 - 🐛 **Fixed: no card could ever appear.** Rules declare `source: syslog`, but clusters carry a qualified key
