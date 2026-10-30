@@ -280,3 +280,14 @@ def test_a_scheduled_run_announces_itself_on_the_stream(client, monkeypatch, hos
     assert 'scheduled' in stages, events
     message = next(e['message'] for e in events if e.get('stage') == 'scheduled')
     assert 'Scheduled' in message
+
+
+def test_reconnecting_replays_events_once(client, monkeypatch, host, db):
+    """A late subscriber must not see the same event twice."""
+    progress.start('replay-once')
+    progress.emit('replay-once', {'type': 'stage', 'stage': 'wave', 'message': 'Wave 1'})
+    progress.emit('replay-once', {'type': 'target', 'host_key': host, 'state': 'connecting'})
+    progress.finish('replay-once', 'checked')
+
+    events = list(progress.stream('replay-once'))
+    assert [e.get('type') for e in events] == ['stage', 'target', 'done']

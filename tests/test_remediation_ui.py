@@ -124,6 +124,8 @@ def test_the_wizard_offers_dry_run_now_or_scheduled():
     assert 'value="now"' in body and 'value="later"' in body
     assert 'type="datetime-local"' in body
     assert 'run_at' in body, 'a scheduled run must send its start time'
+    # A local wall-clock time must be sent with a zone, not as a bare string.
+    assert 'new Date(state.runAt)' in body and '.toISOString()' in body
 
 
 def test_the_wizard_escapes_every_server_string_it_interpolates():

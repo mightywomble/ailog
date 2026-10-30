@@ -88,10 +88,17 @@
 
     function block(label, text, open) {
         if (!text) return '';
-        return `<details ${open ? 'open' : ''}><summary class="rem-muted">${esc(label)}</summary>` +
-            `<div class="rem-code-head"><span class="rem-muted">${esc(label)}</span>` +
-            `<button type="button" class="rem-btn" data-copy-block>Copy</button></div>` +
-            `<pre class="rem-pre">${esc(text)}</pre></details>`;
+        if (!open) {
+            return `<details><summary class="rem-muted">${esc(label)}</summary>` +
+                `<pre class="rem-pre">${esc(text)}</pre></details>`;
+        }
+        return `<div class="rem-code-head"><span class="rem-block-label">${esc(label)}</span>` +
+            '<button type="button" class="rem-btn" data-copy-block>Copy</button></div>' +
+            `<pre class="rem-pre" data-block-text>${esc(text)}</pre>`;
+    }
+
+    function eligibleLabels(plan) {
+        return (plan.targets || []).filter((t) => t.eligible).map((t) => t.label || t.host_key);
     }
 
     function targetsTable(plan) {
@@ -182,7 +189,7 @@
               <div><span class="rem-block-label">Remedy</span><div>${esc(plan.title)}</div></div>
               <div><span class="rem-block-label">Mode</span><div class="${state.dryRun ? '' : 'rem-bad'}">${esc(mode)}</div></div>
               <div><span class="rem-block-label">When</span><div>${when}</div></div>
-              <div><span class="rem-block-label">Targets</span><div>${eligible} host(s): ${esc(plan.eligible_keys.join(', '))}</div></div>
+              <div><span class="rem-block-label">Targets</span><div>${eligible} host(s): ${esc(eligibleLabels(plan).join(', '))}</div></div>
             </div>
             ${needsTyping
                 ? `<label class="rem-confirm">Type <strong>RUN</strong> to approve ${eligible} hosts:
@@ -256,11 +263,21 @@
         if (status) {
             const stateNode = row.querySelector('.rem-target-state');
             stateNode.textContent = status;
-            stateNode.className = 'rem-target-state ' + (
-                ['healed', 'checked'].includes(status) ? 'rem-ok'
-                    : ['failed', 'rollback_failed', 'unreachable'].includes(status) ? 'rem-bad' : 'rem-muted');
+            stateNode.className = 'rem-target-state ' + statusTone(status);
             if (label) row.querySelector('.rem-target-name').textContent = label;
+            // Once ansible is done with a host, the last task is no longer
+            // "what is happening"; say what the state means instead.
+            const done = {verifying: 'verifying the fix', healed: 'fix verified', checked: 'dry run complete',
+                failed: 'fix failed', skipped: 'skipped', unreachable: 'host unreachable',
+                cancelled: 'cancelled', rollback_failed: 'rollback failed'};
+            if (done[status]) targetTask(key, done[status]);
         }
+    }
+
+    function statusTone(status) {
+        if (['healed', 'checked'].includes(status)) return 'rem-ok';
+        if (['failed', 'rollback_failed', 'unreachable'].includes(status)) return 'rem-bad';
+        return 'rem-muted';
     }
 
     function targetTask(key, task) {
@@ -305,6 +322,10 @@
                 setStage(`Running… ${payload.elapsed}s elapsed`);
             } else if (type === 'stage') {
                 setStage(payload.message || payload.stage || 'working');
+                if (payload.stage === 'scheduled') setRunState('scheduled');
+                else if (['queued', 'checking', 'probing', 'wave', 'connecting', 'connected'].includes(payload.stage)) {
+                    setRunState('running');
+                }
                 log(`· ${payload.message || payload.stage}`);
             } else if (type === 'target') {
                 targetRow(payload.host_key, payload.label, payload.state);
@@ -387,7 +408,8 @@
 
         node.querySelectorAll('[data-copy-block]').forEach((button) => {
             button.addEventListener('click', async () => {
-                const pre = button.closest('details').querySelector('.rem-pre');
+                const scope = button.closest('details') || node;
+                const pre = scope.querySelector('[data-block-text], .rem-pre');
                 try { await navigator.clipboard.writeText(pre.textContent); button.textContent = 'Copied'; } catch (error) { }
                 setTimeout(() => { button.textContent = 'Copy'; }, 1200);
             });
@@ -507,7 +529,14 @@
                 if (errorBox) { errorBox.textContent = 'Pick a start time.'; errorBox.classList.remove('hidden'); }
                 return;
             }
-            payload.run_at = state.runAt.length === 16 ? `${state.runAt}:00` : state.runAt;
+            // datetime-local is local wall-clock with no zone; send it
+            // timezone-aware so the server stores the instant the operator meant.
+            const when = new Date(state.runAt);
+            if (Number.isNaN(when.getTime())) {
+                if (errorBox) { errorBox.textContent = 'That start time could not be read.'; errorBox.classList.remove('hidden'); }
+                return;
+            }
+            payload.run_at = when.toISOString();
         }
         try {
             const body = await api(`/api/remediations/${encodeURIComponent(state.slug)}/apply`, {
