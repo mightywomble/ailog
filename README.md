@@ -750,10 +750,12 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.2.0`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.2.1`
 (`:latest` points at the same manifest), digest
-`sha256:662b6218c367ce4cacae4dd3dd3a4f0b6c3f12cbb27fa2597cf2bb91f830c931`, running as
-`ailog_ailog.1` on `swarm-worker1`. Redeploy after a push with:
+`sha256:1703dfdbf62bbc4956cd371d9c1317a3a145252bcd80d1e8a6c38600e010985d`, running as
+`ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
+(`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
+playbook only executes with `--check --diff`. Redeploy after a push with:
 
 ```bash
 docker service update --with-registry-auth --force ailog_ailog
@@ -764,7 +766,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.2.0 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.2.1 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -774,7 +776,8 @@ uses (`ansible.posix`, `community.docker`, `community.general`), plus the whole
 `remediations/` tree, so plans and dry runs work with no extra setup.
 
 **Execution is off by default.** Cards and the catalog are visible, but `plan`
-and `apply` return 403 until the service is told otherwise:
+and `apply` return 403 until the service is told otherwise. The homelab stack
+runs `dry_run`, so plans work and nothing changes on a host:
 
 ```yaml
 # stacks/ailog/stack.yml -> environment
@@ -796,7 +799,7 @@ Verify the deployment:
 ```bash
 curl -s http://<node>:5001/api/remediation/settings \
   | jq '{mode: .policy.mode, runner: .policy.runner_available, catalog: (.catalog|length)}'
-# => {"mode":"off","runner":true,"catalog":12}
+# => {"mode":"dry_run","runner":true,"catalog":12}
 ```
 
 `runner: false` means the image was built without the Ansible extras — rebuild
@@ -1181,6 +1184,9 @@ The application provides detailed startup logs showing:
   `/remediation`.
 - 🧪 Tests use the **real cluster shape** (`file:syslog`, integer severity) plus explicit regressions for
   segment matching and multi-family sources, so this cannot silently regress again.
+- 🚀 **Deployed as `v3.2.1`** (`sha256:1703dfdb…10985d`) with production in **`dry_run`**, and a verified
+  end-to-end run: plan → signed token → `ansible-runner` over SSH to `swarm-manager` → `checked`
+  (both tasks skipped: no failed units, which is the correct answer).
 
 ### v3.2.0 - Self-healing remediation (approval-gated, catalog-only)
 - 🩺 **Remedy cards on every report.** The correlation stage already clusters the evidence; a deterministic
