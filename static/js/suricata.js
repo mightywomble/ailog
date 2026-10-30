@@ -260,9 +260,6 @@ async function refreshSuricataStats() {
     const slider = document.getElementById('suricata-range-slider');
     if (slider) slider.addEventListener('input', () => { refreshSuricataStats(); });
 
-    const dashboardOpen = document.getElementById('dashboard-open-settings');
-    if (dashboardOpen) dashboardOpen.addEventListener('click', () => { document.getElementById('settings-btn')?.click(); });
-
     const testBtn = document.getElementById('suricata-test-btn');
     if (testBtn) testBtn.addEventListener('click', testSuricataConnection);
 

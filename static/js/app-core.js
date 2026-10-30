@@ -192,10 +192,6 @@ export function init() {
         const dashboardTotalHostsEl = document.getElementById('dashboard-total-hosts');
         const dashboardTotalSchedulesEl = document.getElementById('dashboard-total-schedules');
         const dashboardDbStatusEl = document.getElementById('dashboard-db-status');
-        const dashboardOpenSettingsBtn = document.getElementById('dashboard-open-settings');
-        const dashboardOpenMonitoringBtn = document.getElementById('dashboard-open-monitoring');
-        const dashboardRescanBtn = document.getElementById('dashboard-rescan');
-        const dashboardExportSshBtn = document.getElementById('dashboard-export-ssh');
         
         const hostListContainer = document.getElementById('host-list-container');
         const settingsBtn = document.getElementById('settings-btn');
@@ -3525,9 +3521,6 @@ const showHostInfoMain = async () => {
         });
         
         // Dashboard quick actions
-        if (dashboardOpenSettingsBtn) dashboardOpenSettingsBtn.addEventListener('click', () => settingsBtn.click());
-        if (dashboardRescanBtn && rescanAllBtn) dashboardRescanBtn.addEventListener('click', () => rescanAllBtn.click());
-        if (dashboardExportSshBtn && createSshConfigBtn) dashboardExportSshBtn.addEventListener('click', () => createSshConfigBtn.click());
 
         if (backToDashboardBtn) backToDashboardBtn.addEventListener('click', () => {
             window.showDashboard();
