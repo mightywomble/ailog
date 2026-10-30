@@ -428,6 +428,7 @@ torn down (an iframe, a poller, a chart).
 | `AILOG_SSH_HOST_KEY_POLICY` | `accept-new` | `accept-new`, `strict` or `off` |
 | `AILOG_KNOWN_HOSTS` | `/data/known_hosts` (fallback `~/.ssh/known_hosts`) | Pinned host keys |
 | `AILOG_WS_ALLOW_NO_ORIGIN` | `0` | Accept websocket upgrades without an `Origin` header (only for old clients) |
+| `AILOG_WS_ALLOWED_ORIGINS` | _(empty)_ | Extra origins (comma separated, `*` wildcards) allowed to open the SSH terminal websocket, e.g. `https://*.home.arpa`. Same-host and `X-Forwarded-Host` origins are always accepted. |
 | `AILOG_RUN_SCHEDULER` | `1` | Set `0` on web replicas so only one process owns APScheduler |
 
 Health probe: `GET /healthz` is unauthenticated and reports the active auth mode.
