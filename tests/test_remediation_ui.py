@@ -242,3 +242,13 @@ def test_catalog_cards_take_the_width_and_model_ideas_sit_beside_them():
 def test_the_admin_page_explains_how_to_enable_execution():
     body = _read(TEMPLATES, 'remediation.html')
     assert 'AILOG_ALLOW_REMEDIATION' in body
+
+
+def test_the_dashboard_has_no_quick_actions_panel():
+    """The panel duplicated the header, the More menu and the command palette."""
+    body = _read(TEMPLATES, 'index.html')
+    assert 'Quick actions' not in body
+    for dead in ('dashboard-open-settings', 'dashboard-rescan', 'dashboard-export-ssh',
+                 'dashboard-open-monitoring-wizard'):
+        assert dead not in body, f'{dead} is back on the dashboard'
+        assert dead not in _read(JS, 'app-core.js'), f'{dead} is still wired in app-core.js'

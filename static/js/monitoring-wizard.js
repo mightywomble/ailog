@@ -33,13 +33,4 @@
                     frame.setAttribute('src', 'about:blank');
                 }
             });
-
-        // Wire dashboard button/link
-        const dash = document.getElementById('dashboard-open-monitoring-wizard');
-        if (dash) {
-            dash.addEventListener('click', (e) => {
-                e.preventDefault();
-                window.openMonitoringWizard(null);
-            });
-        }
     });
