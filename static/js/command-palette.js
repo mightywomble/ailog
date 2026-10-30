@@ -51,7 +51,10 @@
                 id: 'remediation', title: 'Open Remediation', hint: 'catalog, maintenance windows, run history',
                 group: 'Actions', icon: 'action',
                 keywords: 'remediate heal self-healing ansible playbook catalog windows runs',
-                run: () => { window.location.href = '/remediation'; },
+                run: () => {
+                    if (typeof window.openRemediationModal === 'function') window.openRemediationModal();
+                    else window.location.href = '/remediation';
+                },
             },
             {
                 id: 'remediation-last-run', title: 'Open last remediation run', hint: 'what changed and whether it verified',

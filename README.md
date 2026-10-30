@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.3.1 | **Remediation opens in a dialog, from a green button.** The header entry point is now a success-green button that opens the whole self-healing page (start a run, catalog, windows, protected hosts, recent runs) in a dialog, so the plan wizard never loses the dashboard behind it. The page keeps its `/remediation` URL and an `?embed=1` mode that drops its own Back link, and the dialog unloads the frame on close so its timers stop. | ✅ Complete |
 | 2026-10-30 | v3.3.0 | **Plan is a wizard now, and a run is never a blank screen.** Clicking *Plan* opens a four-step wizard: review the plan (hosts, waves, playbook, verify, rollback) → choose dry run or apply, run now or a maintenance slot → confirm (click, plus typed `RUN` for a multi-host apply) → a live console. The console shows a connecting stage, a per-host row that moves from *connecting over SSH* to the task in flight, a ticking elapsed clock and a server heartbeat every 5s, so a slow wave never looks hung. Runs can be scheduled up to 30 days ahead (`scheduled_for`), wait in the queue, and be cancelled before they start. | ✅ Complete |
 | 2026-10-30 | v3.2.1 | **Remediation is actually reachable now.** `source:` rules were compared against the whole cluster key, so `source: syslog` never matched the real `file:syslog` and **no report could ever produce a card**; sources now match by key segment and may list several families (`[syslog, journal]`). A report with no match shows an explanation instead of an empty strip, and `/remediation` gained a **Start a run** form so a remedy can be planned against one host without waiting for a matching report. | ✅ Complete |
 | 2026-10-30 | v3.2.0 | **Self-healing remediation.** Reports now produce remedy cards from a validated Ansible catalog: a plan you approve (click for one host, typed `RUN` for more), wave-limited execution, independent post-apply verification, mandatory rollback above low risk, in-app maintenance windows and per-host protection, full audit trail. Model output is demoted to a non-executable *Unverified suggestion* card; promotion is a PR. Execution is off by default (`AILOG_ALLOW_REMEDIATION=off\|dry_run\|on`). | ✅ Complete |
@@ -1171,6 +1172,19 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.3.1 - Remediation is a green button that opens a dialog
+- 🟢 **Green, because it is the one header button that changes a server.** `.icon-btn.is-go` takes its colour from
+  `--ok`, so it reads as success-green in all six themes, light and dark, without a hard-coded hex.
+- 🪟 **It opens in a dialog.** The button is still an `<a href="/remediation">` (middle-click and no-JS still work),
+  but a click is intercepted to open the page in the shared iframe dialog, next to Docker, Monitoring and Reports.
+  Metrics and reports pages already support `?embed=1`; `/remediation` now does too — no Back link, tighter
+  chrome, and an *Open full page* escape hatch.
+- 🧹 **Closing unloads the frame**, so the embedded page's timers and any in-flight wizard stop instead of idling
+  behind the dialog — the same rule the other embedded pages follow.
+- ⌘K *Open Remediation* opens the dialog as well, falling back to navigation.
+- 🧪 Guards added: the href and modal markup both exist, the class is token-driven (`var(--ok)`, no hex), the
+  frame is blanked on `appmodal:close`, modifier-clicks are not swallowed, and the embed flag drops the Back link.
 
 ### v3.3.0 - The plan is a wizard, and the run is visible
 - 🧭 ***Plan* now opens a wizard, not a single dialog.** Four steps: **Review** (risk, targets and why each host is

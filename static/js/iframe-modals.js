@@ -67,6 +67,22 @@
         closeFrame('reportsModal', 'reportsModalFrame');
     };
 
+    // Remediation: catalog, "start a run", maintenance windows and the run
+    // list. Embedded so the wizard opens with the dashboard still behind it;
+    // the header link keeps its href, so a middle-click still gets the page.
+    window.openRemediationModal = function () {
+        openFrame('remediationModal', 'remediationModalFrame', 'remediationModalTitle',
+                  '/remediation?embed=1', '', 'Remediation');
+    };
+    window.closeRemediationModal = function () {
+        closeFrame('remediationModal', 'remediationModalFrame');
+    };
+    window.remediationModalIsOpen = function () {
+        return typeof window.isAppModalOpen === 'function'
+            ? window.isAppModalOpen('remediationModal')
+            : false;
+    };
+
     // Live monitoring: the netdata-style card grid. It polls every 2s, so the
     // frame is blanked on close rather than left running hidden.
     window.openMetricsModal = function (label) {
@@ -92,6 +108,8 @@
             ?.addEventListener('click', window.closeReportsModal);
         document.getElementById('metricsModalClose')
             ?.addEventListener('click', window.closeMetricsModal);
+        document.getElementById('remediationModalClose')
+            ?.addEventListener('click', window.closeRemediationModal);
 
         // The modal's own close (Escape / backdrop / shared handler) must also
         // unload the frame, which only these listeners know how to do.
@@ -99,6 +117,7 @@
             dockerModal: 'dockerModalFrame',
             reportsModal: 'reportsModalFrame',
             metricsModal: 'metricsModalFrame',
+            remediationModal: 'remediationModalFrame',
         };
         Object.keys(FRAMES).forEach((id) => {
             document.getElementById(id)?.addEventListener('appmodal:close', () => {
@@ -108,5 +127,16 @@
                 }
             });
         });
+    });
+
+    // The header button opens the dialog; the anchor still navigates if this
+    // module never loads (or if the user middle-clicks / uses a keyboard shortcut).
+    document.addEventListener('click', (event) => {
+        const link = event.target.closest('#remediation-link');
+        if (!link) return;
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
+        if (typeof window.openRemediationModal !== 'function') return;
+        event.preventDefault();
+        window.openRemediationModal();
     });
 })();

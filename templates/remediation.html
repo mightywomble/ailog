@@ -25,18 +25,27 @@
   </script>
   <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
 </head>
+{% set embedded = request.args.get('embed') == '1' %}
 <body>
-  <main class="rem-page">
+  <main class="rem-page{% if embedded %} is-embedded{% endif %}">
     <header class="rem-page-head">
       <div>
+        {% if not embedded %}
         <h1>Self-healing</h1>
         <p class="rem-muted">Catalog, maintenance windows and the audit of every run.</p>
+        {% else %}
+        <p class="rem-muted">Catalog, maintenance windows and the audit of every run.</p>
+        {% endif %}
       </div>
       <div class="rem-actions">
         <span class="rem-badge mode-{{ policy.mode }}">{{ policy.mode }}</span>
         {% if policy.forced_dry_run %}<span class="rem-badge">forced dry run</span>{% endif %}
         {% if not policy.runner_available %}<span class="rem-badge risk-high">ansible-runner missing</span>{% endif %}
+        {% if embedded %}
+        <a class="rem-btn" href="/remediation" target="_blank" rel="noopener">Open full page</a>
+        {% else %}
         <a class="rem-btn" href="/">Back</a>
+        {% endif %}
       </div>
     </header>
 
