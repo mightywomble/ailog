@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.4.2 | **Fixed: the dashboard came up empty.** v3.4.1 deleted a `const dashboardOpenMonitoringBtn` that a surviving listener still used, so `init()` threw a `ReferenceError` and everything after it - the host list, the toolbar, every modal - silently stopped wiring. The declaration is restored, and a test now fails if any `*Btn` variable is used but never declared. | ✅ Complete |
 | 2026-10-30 | v3.4.1 | **Quick actions removed from the dashboard.** The panel of four cards (Admin Settings, Rescan All, Export SSH Config, Monitoring Wizard) duplicated the header, the *More* menu and the command palette, so it is gone along with its wiring. | ✅ Complete |
 | 2026-10-30 | v3.4.0 | **Reports are dialogs.** A report opens inside the Reports dialog - from the dashboard list, from *Analyse All Logs* when the analysis finishes, and from the report list - and every link inside a report (*All reports*, *Remediation*, *view previous*) stays in that dialog instead of loading a new page. The self-healing card now takes the full width, with model *Unverified suggestions* in a column beside it rather than a half-width card with empty space. The header *Remediation* button is back to a plain green link. | ✅ Complete |
 | 2026-10-30 | v3.3.1 | **Remediation opens in a dialog, from a green button.** The header entry point is now a success-green button that opens the whole self-healing page (start a run, catalog, windows, protected hosts, recent runs) in a dialog, so the plan wizard never loses the dashboard behind it. The page keeps its `/remediation` URL and an `?embed=1` mode that drops its own Back link, and the dialog unloads the frame on close so its timers stop. | ✅ Complete |
@@ -1174,6 +1175,21 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.4.2 - Fixed: no hosts, no buttons
+- 🐛 **The dashboard was dead, not empty.** v3.4.1 removed the *Quick actions* panel and deleted four element
+  variables with it - one of them, `dashboardOpenMonitoringBtn`, belonged to the *Quick access* toolbar and was
+  still referenced 260 lines below. `init()` therefore threw
+  `ReferenceError: dashboardOpenMonitoringBtn is not defined` at `app-core.js:461`, and because everything after
+  that point is wiring, the host list never rendered and no button did anything. `node --check` cannot see this and
+  neither could the template tests.
+- ✅ **Fixed** by restoring that one declaration. The other three really were dead and stay gone.
+- 🛡️ **A guard so it cannot happen again:** a test now collects every `*Btn` identifier in `app-core.js` (comments
+  stripped), works out what is declared as `const`/`let`/`var`/function/parameter, and fails on anything used but
+  never declared. Verified by re-breaking the file: the test flags exactly `dashboardOpenMonitoringBtn`.
+- 🔍 **Reproduced and confirmed in a real browser**, before and after: production v3.4.1 - 0 host cards,
+  settings and monitoring buttons dead, one `ReferenceError`; v3.4.2 - 2 host cards, both dialogs open, no errors.
+- 🚀 **Deployed as `v3.4.2`** (`__DIGEST_SHORT__`).
 
 ### v3.4.1 - Quick actions removed from the dashboard
 - 🧹 **The "Quick actions" card row is gone.** All four of its entries already exist elsewhere: *Admin Settings* is the
