@@ -14,6 +14,10 @@ hardened without touching code:
     AILOG_HSTS               1 to send Strict-Transport-Security
     AILOG_CSP                override the Content-Security-Policy, or 'off'
     AILOG_WS_ALLOW_NO_ORIGIN 1 to accept websocket upgrades without Origin
+    AILOG_WS_ALLOWED_ORIGINS comma separated extra origins/patterns for the
+                           SSH terminal websocket (e.g. https://*.home.arpa)
+    AILOG_WS_ALLOWED_ORIGINS comma separated extra origins/patterns for the
+                           SSH terminal websocket (e.g. https://*.home.arpa)
 
 The module deliberately has no import-time side effects: ``install_security``
 is called once from ``app.py`` (and later from the app factory).
@@ -21,12 +25,14 @@ is called once from ``app.py`` (and later from the app factory).
 
 from __future__ import annotations
 
+import fnmatch
 import hmac
 import ipaddress
 import os
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
-from flask import g, jsonify, request
+from flask import current_app, g, has_app_context, jsonify, request
 from werkzeug.security import check_password_hash
 
 AUTH_MODES = ('none', 'proxy', 'local')
@@ -234,10 +240,68 @@ def install_security(app) -> SecurityConfig:
     return cfg
 
 
+def _split_host(value: str) -> tuple[str, int | None]:
+    """Return (lowercase hostname, explicit port) for a Host or Origin value."""
+    value = (value or '').strip()
+    if not value:
+        return '', None
+    parts = urlsplit(value if '://' in value else '//' + value)
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    return (parts.hostname or '').lower(), port
+
+
+def _allowed_origin_patterns() -> list[str]:
+    raw = _env('AILOG_WS_ALLOWED_ORIGINS')
+    return [p.strip().lower().rstrip('/') for p in raw.split(',') if p.strip()]
+
+
 def websocket_origin_allowed() -> bool:
-    """Validate the Origin header of a WebSocket upgrade request."""
+    """Validate the Origin header of a WebSocket upgrade request.
+
+    The first version compared Origin against request.host_url exactly, so
+    every deployment reached through a reverse proxy or a different hostname
+    (https in the browser, plain http to Flask) had its SSH terminal rejected.
+    We now compare the host the request was addressed to - including the
+    X-Forwarded-Host that a proxy adds and a browser cannot forge - and allow
+    extra origins via AILOG_WS_ALLOWED_ORIGINS.
+    """
     origin = request.headers.get('Origin')
     if not origin:
         return _env_bool('AILOG_WS_ALLOW_NO_ORIGIN')
-    allowed = {request.host_url.rstrip('/'), request.url_root.rstrip('/')}
-    return origin.rstrip('/') in allowed
+
+    origin = origin.strip()
+    normalised = origin.lower().rstrip('/')
+
+    for pattern in _allowed_origin_patterns():
+        if fnmatch.fnmatchcase(normalised, pattern):
+            return True
+
+    origin_host, origin_port = _split_host(origin)
+    if not origin_host:
+        return False
+
+    candidates = {request.host or ''}
+    forwarded = request.headers.get('X-Forwarded-Host') or ''
+    for value in forwarded.split(','):
+        if value.strip():
+            candidates.add(value.strip())
+
+    for candidate in candidates:
+        host, port = _split_host(candidate)
+        if host != origin_host:
+            continue
+        # Proxies usually rewrite the port; only enforce it when both sides
+        # spell one out (otherwise https://host vs host:5001 never matches).
+        if port is None or origin_port is None or port == origin_port:
+            return True
+
+    if has_app_context():
+        current_app.logger.warning(
+            'websocket origin rejected: origin=%s host=%s x-forwarded-host=%s '
+            '(set AILOG_WS_ALLOWED_ORIGINS to allow it)',
+            origin, request.host, forwarded or '-',
+        )
+    return False

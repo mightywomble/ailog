@@ -162,4 +162,4 @@ def test_html_is_never_cached_and_static_assets_revalidate(flask_app):
 def test_settings_footer_shows_the_version(flask_app):
     body = flask_app.test_client().get('/').data.decode()
     assert 'data-app-version' in body
-    assert 'v3.1.1' in body
+    assert re.search(r'Homelab Manager · v\d+\.\d+\.\d+', body)
