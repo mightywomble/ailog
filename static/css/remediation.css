@@ -79,3 +79,75 @@
   max-width: 62ch;
   line-height: 1.5;
 }
+
+/* ------------------------------------------------------------- wizard
+   Four steps: review the plan, choose options, confirm, watch the run.
+   The console exists because a fleet run can take minutes: the user must
+   always be able to see that the app is connected and what it is doing. */
+
+.hidden { display: none !important; }
+.rem-panel [hidden] { display: none !important; }
+
+.rem-panel-wizard { width: min(820px, 100%); }
+.rem-panel-wizard .rem-panel-body { gap: .9rem; }
+
+.rem-steps { display: flex; gap: .35rem; list-style: none; margin: .45rem 0 0; padding: 0; flex-wrap: wrap; }
+.rem-steps li { display: flex; align-items: center; gap: .35rem; font-size: .72rem; color: var(--faint);
+  text-transform: uppercase; letter-spacing: .06em; }
+.rem-steps li + li::before { content: '›'; color: var(--border-strong); margin-right: .1rem; }
+.rem-steps li.is-current { color: var(--text); font-weight: 600; }
+.rem-steps li.is-done { color: var(--ok); }
+.rem-step-n { display: inline-flex; align-items: center; justify-content: center; width: 1.15rem; height: 1.15rem;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); font-size: .66rem;
+  letter-spacing: 0; color: var(--muted); }
+.rem-steps li.is-current .rem-step-n { border-color: var(--accent); color: var(--accent); }
+.rem-steps li.is-done .rem-step-n { border-color: color-mix(in srgb, var(--ok) 55%, transparent); color: var(--ok); }
+
+.rem-fieldset { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2);
+  padding: .7rem .85rem .85rem; margin: 0; display: flex; flex-direction: column; gap: .55rem; }
+.rem-fieldset legend { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  padding: 0 .35rem; }
+.rem-radio { display: flex; gap: .5rem; align-items: flex-start; font-size: .82rem; color: var(--text);
+  cursor: pointer; line-height: 1.45; }
+.rem-radio input { margin-top: .18rem; accent-color: var(--accent); }
+.rem-radio code { font-family: ui-monospace, monospace; font-size: .76em; background: var(--surface-sunken);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 .25rem; }
+.rem-radio em { color: var(--warn); font-style: normal; font-size: .92em; }
+
+.rem-schedule { display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-end; padding-left: 1.35rem; }
+.rem-schedule label { display: flex; flex-direction: column; gap: .2rem; font-size: .72rem; color: var(--muted); }
+.rem-schedule input[type="datetime-local"] { background: var(--surface-sunken); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .35rem .45rem; font-size: .8rem; }
+
+.rem-hint { font-size: .75rem; color: var(--faint); line-height: 1.5; max-width: 66ch; }
+
+.rem-summary { display: grid; grid-template-columns: 1fr; gap: .6rem; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface-2); padding: .8rem .9rem; }
+@media (min-width: 720px) { .rem-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rem-summary > div { font-size: .82rem; color: var(--text); line-height: 1.45; }
+.rem-summary .rem-block-label { margin-bottom: .15rem; }
+.rem-confirm .rem-input { min-width: 8rem; font-family: ui-monospace, monospace; letter-spacing: .12em; }
+
+/* Live run console */
+.rem-console-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); padding: .6rem .75rem; }
+.rem-console-head strong { font-size: .85rem; color: var(--text); font-weight: 600; }
+.rem-console-head .rem-meta { margin-left: auto; font-variant-numeric: tabular-nums; }
+.rem-spinner { width: .85rem; height: .85rem; border-radius: 999px; flex: none;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent);
+  animation: rem-spin .8s linear infinite; }
+.rem-spinner.is-done { animation: none; border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+  border-top-color: var(--ok); }
+@keyframes rem-spin { to { transform: rotate(360deg); } }
+[data-motion="reduced"] .rem-spinner { animation: none; }
+
+.rem-targets .rem-target { display: grid; grid-template-columns: minmax(7rem, 1fr) minmax(0, 2fr) auto;
+  align-items: center; gap: .5rem; }
+.rem-target-name { font-weight: 600; font-size: .78rem; color: var(--text); }
+.rem-target-task { font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rem-target-state { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; justify-self: end; }
+.rem-target-state.rem-ok { color: var(--ok); }
+.rem-target-state.rem-bad { color: var(--bad); }
+.rem-target-state.rem-muted { color: var(--faint); }
+.rem-console-head + .rem-targets { margin-top: .1rem; }
+.rem-log[data-run-log] { max-height: 16rem; color: var(--text); }
