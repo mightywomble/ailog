@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.3.0 | **Plan is a wizard now, and a run is never a blank screen.** Clicking *Plan* opens a four-step wizard: review the plan (hosts, waves, playbook, verify, rollback) → choose dry run or apply, run now or a maintenance slot → confirm (click, plus typed `RUN` for a multi-host apply) → a live console. The console shows a connecting stage, a per-host row that moves from *connecting over SSH* to the task in flight, a ticking elapsed clock and a server heartbeat every 5s, so a slow wave never looks hung. Runs can be scheduled up to 30 days ahead (`scheduled_for`), wait in the queue, and be cancelled before they start. | ✅ Complete |
 | 2026-10-30 | v3.2.1 | **Remediation is actually reachable now.** `source:` rules were compared against the whole cluster key, so `source: syslog` never matched the real `file:syslog` and **no report could ever produce a card**; sources now match by key segment and may list several families (`[syslog, journal]`). A report with no match shows an explanation instead of an empty strip, and `/remediation` gained a **Start a run** form so a remedy can be planned against one host without waiting for a matching report. | ✅ Complete |
 | 2026-10-30 | v3.2.0 | **Self-healing remediation.** Reports now produce remedy cards from a validated Ansible catalog: a plan you approve (click for one host, typed `RUN` for more), wave-limited execution, independent post-apply verification, mandatory rollback above low risk, in-app maintenance windows and per-host protection, full audit trail. Model output is demoted to a non-executable *Unverified suggestion* card; promotion is a PR. Execution is off by default (`AILOG_ALLOW_REMEDIATION=off\|dry_run\|on`). | ✅ Complete |
 | 2026-10-30 | v3.1.2 | **SSH terminal fixed behind proxies.** The websocket origin guard compared `Origin` with `request.host_url` exactly, so any deployment reached over https through a reverse proxy (or by a different hostname) had every terminal rejected with "Origin not allowed". The check now compares hosts, honours `X-Forwarded-Host`, and accepts extra origins via `AILOG_WS_ALLOWED_ORIGINS`. | ✅ Complete |
@@ -750,15 +751,18 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.2.1`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.3.0`
 (`:latest` points at the same manifest), digest
-`sha256:1703dfdbf62bbc4956cd371d9c1317a3a145252bcd80d1e8a6c38600e010985d`, running as
+`sha256:eac22ab743eccc881cbb183cf306c2583119a870ed34464fb12afc53629c55f7`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
 
 ```bash
-docker service update --with-registry-auth --force ailog_ailog
+# --force alone reuses the image the node already has; name the tag so the
+# node actually resolves and pulls the new digest.
+docker service update --with-registry-auth --force \
+  --image zot.safehomelan.com/ailog:v3.3.0 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -766,7 +770,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.2.1 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.3.0 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -1167,6 +1171,29 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.3.0 - The plan is a wizard, and the run is visible
+- 🧭 ***Plan* now opens a wizard, not a single dialog.** Four steps: **Review** (risk, targets and why each host is
+  eligible, the playbook, how it is verified, the rollback), **Options** (dry run or apply, run now or schedule a
+  maintenance slot), **Confirm** (one host: a click; several hosts and a real apply: type `RUN`), **Run**.
+- 🕒 **Runs can wait for a maintenance slot.** A scheduled run is stored as `scheduled` with `scheduled_for`, does
+  nothing now, and is promoted to `queued` when its slot arrives (APScheduler, falling back to a timer). It can be
+  cancelled while it waits — state `cancelled`, pending targets `skipped`, the job dropped. Slots are bounded to
+  30 days ahead and must be at least a minute in the future.
+- 📡 **The console proves it is connected.** A *connecting to &lt;hosts&gt; over SSH* stage, a per-host row that
+  moves from `connecting over SSH…` to the Ansible task in flight (marked *changed* when it changes something), a
+  `connected, running tasks` event on the first task per host, a per-wave `finished in Ns` line, and a server
+  heartbeat every 5 seconds. The clock ticks client-side, and after 15 seconds of silence the stage line says
+  *Still running… (waiting for the host)* instead of looking frozen.
+- 🔒 **The server still decides.** Options re-sign the plan (so a token can never be reused with a wider scope),
+  apply re-checks it, and blocking maintenance windows are re-checked when a scheduled run actually starts.
+- 🧩 **One implementation.** Report cards and the `/remediation` start form both call the same
+  `window.ailogRemediation.open()`; the old duplicated plan/run modals are gone, so there is one path to Ansible.
+- 🧪 New tests cover the schedule parser (past, too soon, cap, `Z`/offset forms), `scheduled` state and
+  `scheduled_for`, cancelling before the slot, the slot firing (and doing nothing for a cancelled run), heartbeats
+  in the progress snapshot, and the UI rules (typed `RUN`, raw dry-run/apply and now/schedule choices, escaped
+  server strings, wizard loaded before its callers).
+- 🚀 **Deployed as `v3.3.0`** (`sha256:eac22ab7…629c55f7`).
 
 ### v3.2.1 - Remediation is reachable (and honest when it has nothing to offer)
 - 🐛 **Fixed: no card could ever appear.** Rules declare `source: syslog`, but clusters carry a qualified key

@@ -5,7 +5,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 
-const state = { reportId: 0, hostKey: '', policy: null, cards: [], plan: null, card: null, run: null, source: null };
+const state = { reportId: 0, hostKey: '', policy: null, cards: [] };
 
 function root() { return document.getElementById('report-remediations'); }
 
@@ -72,8 +72,7 @@ function cardHtml(card) {
         ${codeBlock('How to test', card.verify)}
         ${card.rollback ? codeBlock('Rollback', card.rollback) : ''}
         <div class="rem-actions">
-            ${canApply && !dismissed ? `<label class="rem-confirm"><input type="checkbox" data-dry-run checked> dry run first</label>` : ''}
-            ${canApply && !dismissed ? `<button type="button" class="rem-btn primary" data-apply="${card.id}">Yes, apply</button>` : ''}
+            ${canApply && !dismissed ? `<button type="button" class="rem-btn primary" data-plan="${card.id}">Review &amp; fix…</button>` : ''}
             ${!dismissed ? `<select class="rem-select" data-reason="${card.id}" aria-label="Dismiss reason">${reasons.map((r) => `<option value="${r}">${esc(r.replace('_', ' '))}</option>`).join('')}</select>` : ''}
             ${!dismissed ? `<button type="button" class="rem-btn" data-dismiss="${card.id}">No, dismiss</button>` : `<span class="rem-badge">dismissed: ${esc(card.dismissed_reason || '')}</span>`}
         </div>
@@ -124,167 +123,25 @@ async function load() {
     render();
 }
 
-function modal(html) {
-    let node = document.getElementById('rem-modal');
-    if (node) node.remove();
-    node = document.createElement('div');
-    node.id = 'rem-modal';
-    node.className = 'rem-modal';
-    node.innerHTML = html;
-    document.body.appendChild(node);
-    return node;
-}
-
-function closeModal() {
-    const node = document.getElementById('rem-modal');
-    if (node) node.remove();
-    if (state.source) { state.source.close(); state.source = null; }
-}
-
-async function openPlan(card, scope, dryRun) {
-    try {
-        const plan = await api(`/api/remediations/${encodeURIComponent(card.slug)}/plan`, {
-            method: 'POST',
-            body: JSON.stringify({ scope, host_key: state.hostKey, dry_run: dryRun, match_id: card.id }),
-        });
-        state.plan = plan;
-        state.card = card;
-        const eligible = plan.targets.filter((target) => target.eligible);
-        const needsTyping = eligible.length > 1;
-        const node = modal(`
-            <div class="rem-panel" role="dialog" aria-modal="true">
-                <div class="rem-panel-head">
-                    <div class="rem-panel-title">${esc(plan.title)}</div>
-                    <button type="button" class="rem-btn" data-close>Close</button>
-                </div>
-                <div class="rem-panel-body">
-                    <div class="rem-card-top">${riskBadge(plan.risk)}<span class="rem-badge">${esc(scope)}</span><span class="rem-badge">${dryRun ? 'dry run' : 'will apply'}</span><span class="rem-meta">${eligible.length} host(s), ${plan.waves.length} wave(s)</span></div>
-                    <table class="rem-table"><thead><tr><th>Host</th><th>Eligible</th><th>Why</th></tr></thead><tbody>
-                    ${plan.targets.map((target) => `<tr><td>${esc(target.label)}</td><td class="${target.eligible ? 'rem-ok' : 'rem-bad'}">${target.eligible ? 'yes' : 'no'}</td><td>${esc(target.why || '')}</td></tr>`).join('')}
-                    </tbody></table>
-                    ${codeBlock('Playbook (what will run)', plan.code, 'open')}
-                    ${codeBlock('How it is verified afterwards', plan.verify)}
-                    ${needsTyping ? `<label class="rem-confirm">Type <strong>RUN</strong> to approve ${eligible.length} hosts: <input class="rem-input" data-confirm-input autocomplete="off"></label>` : '<div class="rem-muted">One host: click Apply to confirm.</div>'}
-                </div>
-                <div class="rem-panel-foot">
-                    <span class="rem-muted" data-modal-error></span>
-                    <button type="button" class="rem-btn" data-close>Cancel</button>
-                    <button type="button" class="rem-btn primary" data-confirm ${needsTyping ? 'disabled' : ''}>Yes, ${dryRun ? 'check' : 'apply'}</button>
-                </div>
-            </div>`);
-        const input = node.querySelector('[data-confirm-input]');
-        const confirmBtn = node.querySelector('[data-confirm]');
-        if (input) {
-            input.addEventListener('input', () => {
-                confirmBtn.disabled = input.value.trim().toUpperCase() !== 'RUN';
-            });
-        }
-        confirmBtn.addEventListener('click', () => applyPlan());
-    } catch (error) {
-        modal(`<div class="rem-panel"><div class="rem-panel-head"><div class="rem-panel-title">Cannot plan this run</div><button type="button" class="rem-btn" data-close>Close</button></div><div class="rem-panel-body"><div class="rem-empty">${esc(error.message)}</div></div></div>`);
+/* Opening a card hands over to the shared wizard (remediation-wizard.js):
+   review -> options (dry run? now or a maintenance slot?) -> confirm -> live
+   console. This file must never run a playbook itself; it only picks the
+   remedy and the host. */
+function openWizard(card) {
+    if (!window.ailogRemediation) {
+        window.alert('The remediation wizard did not load. Reload the page.');
+        return;
     }
-}
-
-async function applyPlan() {
-    const plan = state.plan;
-    if (!plan) return;
-    const errorNode = document.querySelector('#rem-modal [data-modal-error]');
-    try {
-        const body = await api(`/api/remediations/${encodeURIComponent(plan.slug)}/apply`, {
-            method: 'POST',
-            body: JSON.stringify({ token: plan.token, scope: plan.scope, host_key: state.hostKey, dry_run: plan.dry_run, match_id: state.card && state.card.id }),
-        });
-        openRun(body.uuid);
-    } catch (error) {
-        if (errorNode) errorNode.textContent = error.message;
-    }
-}
-
-function openRun(uuid) {
-    state.run = uuid;
-    const node = modal(`
-        <div class="rem-panel" role="dialog" aria-modal="true">
-            <div class="rem-panel-head">
-                <div class="rem-panel-title">Remediation run</div>
-                <span class="rem-badge" data-run-state>running</span>
-            </div>
-            <div class="rem-panel-body">
-                <div class="rem-targets" data-run-targets></div>
-                <div class="rem-log" data-run-log></div>
-            </div>
-            <div class="rem-panel-foot">
-                <button type="button" class="rem-btn" data-cancel>Cancel run</button>
-                <button type="button" class="rem-btn" data-rollback hidden>Rollback</button>
-                <button type="button" class="rem-btn" data-close>Close</button>
-            </div>
-        </div>`);
-    node.querySelector('[data-cancel]').addEventListener('click', async () => {
-        try { await api(`/api/remediation-runs/${uuid}/cancel`, { method: 'POST' }); } catch (error) { }
+    window.ailogRemediation.open({
+        slug: card.slug,
+        hostKey: state.hostKey,
+        matchId: card.id,
+        scope: 'host',
+        title: card.title,
     });
-    node.querySelector('[data-rollback]').addEventListener('click', async () => {
-        const button = node.querySelector('[data-rollback]');
-        button.disabled = true;
-        try {
-            const body = await api(`/api/remediation-runs/${uuid}/rollback`, { method: 'POST' });
-            log(`Rolled back: ${(body.hosts || []).join(', ') || 'nothing to do'}`);
-        } catch (error) { log(error.message); }
-    });
-    streamRun(uuid);
 }
 
-function log(line) {
-    const box = document.querySelector('#rem-modal [data-run-log]');
-    if (!box) return;
-    box.textContent += (box.textContent ? '\n' : '') + line;
-    box.scrollTop = box.scrollHeight;
-}
-
-function targetRow(key, label, status) {
-    const box = document.querySelector('#rem-modal [data-run-targets]');
-    if (!box) return;
-    let row = box.querySelector(`[data-target="${key}"]`);
-    if (!row) {
-        row = document.createElement('div');
-        row.className = 'rem-target';
-        row.dataset.target = key;
-        row.innerHTML = `<span>${esc(label || key)}</span><span class="rem-muted"></span>`;
-        box.appendChild(row);
-    }
-    const statusNode = row.lastElementChild;
-    statusNode.textContent = status;
-    statusNode.className = ['healed', 'checked'].includes(status) ? 'rem-ok' : ['failed', 'rollback_failed'].includes(status) ? 'rem-bad' : 'rem-muted';
-}
-
-function streamRun(uuid) {
-    if (state.source) state.source.close();
-    const source = new EventSource(`/api/remediation-runs/${uuid}/stream`);
-    state.source = source;
-    source.onmessage = (event) => {
-        let payload = {};
-        try { payload = JSON.parse(event.data); } catch (error) { return; }
-        if (payload.type === 'task' && payload.task) { log(`${payload.host || ''} ${payload.task}${payload.changed ? ' (changed)' : ''}`); }
-        else if (payload.type === 'target') { targetRow(payload.host_key, payload.label, payload.state); }
-        else if (payload.type === 'verify') { targetRow(payload.host_key, '', payload.state); log(`verify ${payload.host_key}: ${payload.detail}`); }
-        else if (payload.type === 'stage') { log(payload.message || payload.stage); }
-        else if (payload.type === 'log') { log(payload.message); }
-        else if (payload.type === 'error') { log(`ERROR: ${payload.message}`); }
-        else if (payload.type === 'result') {
-            const badge = document.querySelector('#rem-modal [data-run-state]');
-            if (badge) badge.textContent = payload.state;
-            log(`Finished: ${payload.state} ${JSON.stringify(payload.summary || {})}`);
-            const rollback = document.querySelector('#rem-modal [data-rollback]');
-            if (rollback && ['failed', 'applied_unverified'].includes(payload.state)) rollback.hidden = false;
-        } else if (payload.type === 'done') {
-            source.close();
-            state.source = null;
-            load();
-        }
-    };
-    source.onerror = () => {
-        source.close();
-        state.source = null;
-    };
-}
+document.addEventListener('ailog:remediation-finished', () => { load(); });
 
 async function dismiss(cardId, reason) {
     try {
@@ -301,7 +158,6 @@ function bind() {
     host.addEventListener('click', async (event) => {
         const target = event.target.closest('button, [data-close]');
         if (!target) return;
-        if (target.matches('[data-close]')) { closeModal(); return; }
         if (target.matches('[data-refresh]')) {
             target.disabled = true;
             try { await api(`/api/reports/${state.reportId}/remediations/refresh`, { method: 'POST' }); } catch (error) { }
@@ -309,12 +165,11 @@ function bind() {
             await load();
             return;
         }
-        const applyId = target.getAttribute('data-apply');
-        if (applyId) {
-            const card = state.cards.find((item) => String(item.id) === applyId);
+        const planId = target.getAttribute('data-plan');
+        if (planId) {
+            const card = state.cards.find((item) => String(item.id) === planId);
             if (!card) return;
-            const dryRun = host.querySelector(`[data-card-id="${applyId}"] [data-dry-run]`);
-            await openPlan(card, 'host', dryRun ? dryRun.checked : true);
+            openWizard(card);
             return;
         }
         const dismissId = target.getAttribute('data-dismiss');
@@ -330,11 +185,6 @@ function bind() {
             setTimeout(() => { target.textContent = 'Copy'; }, 1200);
         }
     });
-    document.addEventListener('click', (event) => {
-        const node = document.getElementById('rem-modal');
-        if (node && event.target === node) closeModal();
-    });
-    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeModal(); });
 }
 
 if (document.readyState === 'loading') {

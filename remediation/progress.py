@@ -46,8 +46,14 @@ def finish(run_uuid: str, state: str) -> None:
         entry['done'] = True
         entry['state'] = state
         entry['finished'] = datetime.datetime.now(datetime.timezone.utc)
+        payload = {'type': 'done', 'state': state}
+        # Keep 'done' in the replay buffer too, so a subscriber that arrives
+        # after the run finished is replayed the whole run *and* the terminator.
+        entry['events'].append(payload)
+        if len(entry['events']) > MAX_EVENTS:
+            entry['events'] = entry['events'][-MAX_EVENTS:]
         q = entry['queue']
-    q.put({'type': 'done', 'state': state})
+    q.put(payload)
 
 
 def cancel(run_uuid: str) -> bool:
@@ -90,6 +96,13 @@ def stream(run_uuid: str):
         yield event
         if event.get('type') == 'done':
             return
+    # Everything emitted so far is in 'pending' *and* in the queue; drain the
+    # queue before switching to live, or the client sees each event twice.
+    while True:
+        try:
+            q.get_nowait()
+        except queue.Empty:
+            break
     while True:
         try:
             event = q.get(timeout=10)

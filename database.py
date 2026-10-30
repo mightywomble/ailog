@@ -909,6 +909,8 @@ class RemediationRun(db.Model):
     requested_by = db.Column(db.String(128))
     confirm_fingerprint = db.Column(db.String(64))
     state = db.Column(db.String(32), nullable=False, default='queued', index=True)
+    # Set for a run that waits for a maintenance slot instead of starting now.
+    scheduled_for = db.Column(db.DateTime, index=True)
     started_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     finished_at = db.Column(db.DateTime)
     summary_json = db.Column(db.Text)
@@ -933,6 +935,7 @@ class RemediationRun(db.Model):
             'scope': self.scope,
             'requested_by': self.requested_by,
             'state': self.state,
+            'scheduled_for': self.scheduled_for.isoformat() if self.scheduled_for else None,
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'finished_at': self.finished_at.isoformat() if self.finished_at else None,
             'summary': self._load(self.summary_json, {}),

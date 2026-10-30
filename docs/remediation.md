@@ -53,16 +53,58 @@ report saved
    │  matcher: deterministic regex over stored clusters
    ▼
 card on /reports/<id>  ── dismiss (reason recorded) ──▶ stays dismissed
-   │  "Plan" -> POST /api/remediations/<slug>/plan
+   │  "Review & fix" -> POST /api/remediations/<slug>/plan
    ▼
-plan dialog: scope, hosts, waves, playbook, verify command, rollback
-   │  click (1 host) or type RUN (2+ hosts) -> POST .../apply
+wizard step 1: review (scope, hosts, waves, playbook, verify, rollback)
+   │  step 2: dry run or apply? now or a maintenance slot?
+   │  step 3: click (1 host) or type RUN (2+ hosts) -> POST .../apply
    ▼
-run (worker thread, SSE progress) -> per-wave ansible-runner
+step 4: live console (SSE) <── heartbeat every 5s, per-host rows, stage line
+   │  run (worker thread) -> per-wave ansible-runner
    │  after each wave: independent verify probe
    ▼
 healed | applied_unverified | failed   (+ rollback for failed targets)
 ```
+
+### The wizard, and why it exists
+
+There is one wizard (`static/js/remediation-wizard.js`,
+`window.ailogRemediation.open()`), used by both the report cards and the
+*Start a run* form on `/remediation`. The UI never decides anything: changing
+an option re-signs the plan, applying re-checks the token, and the server
+re-checks windows, caps and protected hosts.
+
+**Step 4 is the point.** A fleet run takes minutes, and a silent screen reads
+as a hung app, so the console always shows:
+
+| What you see | Where it comes from |
+|---|---|
+| `Connecting to <hosts> over SSH…` | a `stage` event emitted before the wave starts |
+| a per-host row: name, `connecting over SSH…`, then the Ansible task in flight (marked *changed*) | `target` and `task` events from `runner_on_*` |
+| `<host>: connected, running tasks` | first event from that host — proof the SSH session is live |
+| `Running… Ns elapsed`, a ticking clock and a spinner | server `heartbeat` every 5s plus a client-side ticker |
+| `Still running… (waiting for the host)` | 15s of silence — the app says so instead of looking frozen |
+| `Wave 1 finished in Ns.` then per-host states | `stage`/`target` events as the wave completes |
+
+Reconnecting replays the last events, so a reload mid-run does not lose the
+log. `Cancel` stops the run (or unschedules a waiting one) and `Rollback`
+appears for a failed or unverified apply.
+
+### Scheduling a run
+
+*Run now* starts immediately. *Schedule for maintenance* stores the run as
+`scheduled` with `scheduled_for` (local time from the browser, converted to
+UTC) and returns at once; it appears in the run list with its slot. When the
+slot arrives the run is promoted to `queued` and executes exactly as if it had
+started then — which is why maintenance windows, caps and protection are
+re-checked at that moment, not when the plan was made.
+
+- a slot must be at least a minute in the future and at most
+  `MAX_SCHEDULE_DAYS` (30) ahead
+- the job is registered with the app's scheduler (`remediation-<uuid>`,
+  `misfire_grace_time=3600`), falling back to a plain timer if unavailable
+- cancelling before the slot sets the run `cancelled`, marks its targets
+  `skipped` and drops the job
 
 ### Confirmation tokens
 

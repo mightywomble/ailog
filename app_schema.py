@@ -43,6 +43,10 @@ COLUMNS = {
     'log_reports': [
         ('clusters_json', 'TEXT'),
     ],
+    # v3.3.0 - remediation runs can wait for a maintenance slot
+    'remediation_runs': [
+        ('scheduled_for', 'DATETIME'),
+    ],
     # v3.2.0 - remediation protection flag
     'hosts': [
         ('do_not_remediate', 'BOOLEAN DEFAULT 0'),

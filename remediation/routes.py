@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 
@@ -117,11 +118,12 @@ def api_apply(slug: str):
         current_app._get_current_object(), models, db, slug,
         str(data.get('token') or ''), data.get('scope') or 'host',
         data.get('host_key'), data.get('group_id'), dry_run,
-        data.get('match_id'), _actor(),
+        data.get('match_id'), _actor(), run_at=data.get('run_at'),
     )
     if error:
         return jsonify({'error': error}), code
-    return jsonify({'ok': True, 'uuid': run.uuid, 'state': run.state}), 202
+    return jsonify({'ok': True, 'uuid': run.uuid, 'state': run.state,
+                    'scheduled_for': run.to_dict(False).get('scheduled_for')}), 202
 
 
 @remediation_bp.route('/api/remediation-runs/<run_uuid>')
@@ -155,8 +157,35 @@ def api_run_stream(run_uuid: str):
 
 @remediation_bp.route('/api/remediation-runs/<run_uuid>/cancel', methods=['POST'])
 def api_cancel(run_uuid: str):
+    """Cancel a running wave, or unschedule a run that is waiting."""
+    models, db = _models(), _db()
+    run = models.RemediationRun.query.filter_by(uuid=run_uuid).first()
+    if run and run.state == 'scheduled':
+        run.state = 'cancelled'
+        run.finished_at = datetime.datetime.utcnow()
+        for target in run.targets:
+            if target.state == 'pending':
+                target.state = 'skipped'
+        db.session.commit()
+        _drop_scheduled_job(current_app._get_current_object(), run_uuid)
+        progress.emit(run_uuid, {'type': 'stage', 'stage': 'cancelled',
+                                 'message': 'Scheduled run cancelled before it started.'})
+        progress.finish(run_uuid, 'cancelled')
+        service.audit(db, models, _actor(), 'remediation.cancel', 'remediation_run', run_uuid,
+                      {'was': 'scheduled'})
+        return jsonify({'ok': True, 'cancelled': 'scheduled'})
     ok = progress.cancel(run_uuid)
-    return jsonify({'ok': ok})
+    return jsonify({'ok': ok, 'cancelled': 'running' if ok else 'none'})
+
+
+def _drop_scheduled_job(app, run_uuid: str):
+    scheduler = getattr(app, 'scheduler', None)
+    if scheduler is None:
+        return
+    try:
+        scheduler.remove_job(f'remediation-{run_uuid}')
+    except Exception:
+        pass
 
 
 @remediation_bp.route('/api/remediation-runs/<run_uuid>/rollback', methods=['POST'])

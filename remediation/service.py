@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import threading
+import time
 import traceback
 import uuid as uuid_lib
 from pathlib import Path
@@ -22,6 +23,29 @@ from remediation import catalog, inventory, planner, policy, progress, runner, v
 log = logging.getLogger(__name__)
 
 _semaphore = threading.BoundedSemaphore(4)
+# A run may wait for a maintenance slot, but not forever: reject anything
+# further out than this so a typo cannot park a job for years.
+MAX_SCHEDULE_DAYS = 30
+HEARTBEAT_SECONDS = 5
+
+
+def parse_run_at(raw):
+    """Parse an ISO-8601 timestamp from the wizard. Returns (when, error)."""
+    if not raw:
+        return None, ''
+    text = str(raw).strip().replace('Z', '+00:00')
+    try:
+        when = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None, 'That start time could not be understood.'
+    if when.tzinfo is not None:
+        when = when.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    now = datetime.datetime.utcnow()
+    if when <= now + datetime.timedelta(seconds=30):
+        return None, 'Pick a start time at least a minute in the future.'
+    if when > now + datetime.timedelta(days=MAX_SCHEDULE_DAYS):
+        return None, f'Runs can be scheduled at most {MAX_SCHEDULE_DAYS} days ahead.'
+    return when, ''
 
 
 def waves_for(risk: str, keys: list[str]) -> list[list[str]]:
@@ -88,7 +112,8 @@ def plan(models, slug: str, scope: str, host_key: str | None, group_id,
 
 
 def start_run(app, models, db, slug: str, token: str, scope: str,
-              host_key: str | None, group_id, dry_run: bool, match_id, actor: str):
+              host_key: str | None, group_id, dry_run: bool, match_id, actor: str,
+              run_at=None):
     entry = catalog.get(slug)
     if not entry:
         return None, 'Unknown remediation.', 404
@@ -105,6 +130,10 @@ def start_run(app, models, db, slug: str, token: str, scope: str,
     if not ok:
         return None, message, 400
 
+    when, when_error = parse_run_at(run_at)
+    if when_error:
+        return None, when_error, 400
+
     capped = [t for t in eligible if not policy.run_rate_limited(db, models, t['host_key'], slug)]
     if not capped:
         return None, 'This host already ran this remedy in the last 10 minutes.', 429
@@ -113,7 +142,8 @@ def start_run(app, models, db, slug: str, token: str, scope: str,
         uuid=str(uuid_lib.uuid4()), slug=slug, match_id=match_id,
         dry_run=bool(dry_run), scope=scope or 'host', requested_by=actor,
         confirm_fingerprint=planner.fingerprint(slug, keys, bool(dry_run)),
-        state='queued',
+        state='scheduled' if when else 'queued',
+        scheduled_for=when,
     )
     db.session.add(run)
     db.session.flush()
@@ -123,6 +153,15 @@ def start_run(app, models, db, slug: str, token: str, scope: str,
     db.session.commit()
 
     progress.start(run.uuid)
+    if when:
+        progress.emit(run.uuid, {'type': 'stage', 'stage': 'scheduled',
+                                 'message': f"Scheduled {entry['title']} for {when.isoformat()}Z."})
+        audit(db, models, actor, 'remediation.schedule', 'remediation_run', run.uuid,
+              {'slug': slug, 'hosts': keys, 'dry_run': bool(dry_run),
+               'scope': scope, 'run_at': when.isoformat()})
+        _schedule_run(app, run.uuid, when)
+        return run, '', 202
+
     progress.emit(run.uuid, {'type': 'stage', 'stage': 'queued',
                              'message': f"Queued {entry['title']} for {len(capped)} host(s)."})
     audit(db, models, actor, 'remediation.apply', 'remediation_run', run.uuid,
@@ -131,6 +170,40 @@ def start_run(app, models, db, slug: str, token: str, scope: str,
     thread = threading.Thread(target=_execute, args=(app, run.uuid), daemon=True)
     thread.start()
     return run, '', 202
+
+
+def _schedule_run(app, run_uuid: str, when: datetime.datetime):
+    """Fire _execute at `when` using the app's APScheduler, else a timer."""
+    scheduler = getattr(app, 'scheduler', None)
+    args = (app, run_uuid)
+    if scheduler is not None:
+        try:
+            scheduler.add_job(func=_scheduled_start, trigger='date', run_date=when,
+                              args=args, id=f'remediation-{run_uuid}',
+                              replace_existing=True, misfire_grace_time=3600)
+            return
+        except Exception:
+            log.exception('could not register the scheduled run; falling back to a timer')
+    delay = max(1.0, (when - datetime.datetime.utcnow()).total_seconds())
+    timer = threading.Timer(delay, _scheduled_start, args=args)
+    timer.daemon = True
+    timer.start()
+
+
+def _scheduled_start(app, run_uuid: str):
+    """Promote a scheduled run to queued, unless it was cancelled meanwhile."""
+    with app.app_context():
+        from database import db
+        import database as models
+        run = models.RemediationRun.query.filter_by(uuid=run_uuid).first()
+        if not run or run.state != 'scheduled':
+            return
+        run.state = 'queued'
+        run.started_at = datetime.datetime.utcnow()
+        db.session.commit()
+        progress.emit(run_uuid, {'type': 'stage', 'stage': 'queued',
+                                 'message': 'Maintenance slot reached: starting the run.'})
+        threading.Thread(target=_execute, args=(app, run_uuid), daemon=True).start()
 
 
 def _execute(app, run_uuid: str):
@@ -221,16 +294,43 @@ def _execute_inner(app, db, models, run, run_uuid):
             continue
         progress.emit(run_uuid, {'type': 'stage', 'stage': 'wave',
                                  'message': f'Wave {index}: {len(wave_hosts)} host(s)'})
+        labels = ', '.join(h.friendly_name or h.hostname or inventory.host_key(h) for h in wave_hosts)
         for key in wave:
-            progress.emit(run_uuid, {'type': 'target', 'host_key': key, 'state': 'running'})
+            progress.emit(run_uuid, {'type': 'target', 'host_key': key, 'state': 'connecting'})
+        progress.emit(run_uuid, {'type': 'stage', 'stage': 'connecting',
+                                 'message': f'Connecting to {labels} over SSH…'})
 
+        # A wave can take minutes (SSH, sudo, apt-less playbooks). Emit a
+        # heartbeat so the console shows elapsed time instead of looking hung.
+        beat_stop = threading.Event()
+        beat_started = time.time()
+
+        def _beat():
+            while not beat_stop.wait(HEARTBEAT_SECONDS):
+                progress.emit(run_uuid, {'type': 'heartbeat', 'stage': 'running',
+                                         'elapsed': int(time.time() - beat_started)})
+
+        seen_connected = set()
+
+        def _on_event(event):
+            host = event.get('host')
+            kind = str(event.get('event') or '')
+            if host and host not in seen_connected and kind.startswith('runner_on_'):
+                seen_connected.add(host)
+                progress.emit(run_uuid, {'type': 'stage', 'stage': 'connected',
+                                         'host': host,
+                                         'message': f'{host}: connected, running tasks'})
+            progress.emit(run_uuid, event)
+
+        beater = threading.Thread(target=_beat, daemon=True)
+        beater.start()
         try:
             result = runner.run_playbook(
                 entry['playbook'], inventory.build(wave_hosts),
                 [inventory.host_key(h) for h in wave_hosts],
                 {'remediation_target': ''}, bool(run.dry_run),
                 run_dir / f'wave-{index}', timeout=policy.run_timeout(),
-                on_event=lambda event: progress.emit(run_uuid, event),
+                on_event=_on_event,
             )
             rc, host_results = result['rc'], result['hosts']
         except Exception as exc:
@@ -238,6 +338,10 @@ def _execute_inner(app, db, models, run, run_uuid):
             rc, host_results = 1, {}
             for key in wave:
                 host_results[key] = {'ok': False, 'changed': 0, 'failed': True, 'output': str(exc)}
+        finally:
+            beat_stop.set()
+        progress.emit(run_uuid, {'type': 'stage', 'stage': 'finished-wave',
+                                 'message': f'Wave {index} finished in {int(time.time() - beat_started)}s.'})
 
         for key in wave:
             target = next((t for t in targets if t.host_key == key), None)
