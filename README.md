@@ -6,7 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
-| 2026-10-30 | v3.5.0 | **The fleet card answers "which ones are down?".** `10/16 online` is now a button, and the dashboard has an *Offline devices* card of its own: every unreachable host with how long it has been out and the moment it was last seen. The collector now records `Host.last_seen` whenever a probe succeeds (at most once a minute per host), so the time is real rather than the moment the poll noticed. | ✅ Complete |
+| 2026-10-30 | v3.5.1 | **The fleet card answers "which ones are down?".** `10/16 online` is now a button, and the dashboard has an *Offline devices* card of its own: every unreachable host with how long it has been out and the moment it was last seen. The collector now records `Host.last_seen` whenever a probe succeeds (at most once a minute per host), so the time is real rather than the moment the poll noticed. | ✅ Complete |
 | 2026-10-30 | v3.4.2 | **Fixed: the dashboard came up empty.** v3.4.1 deleted a `const dashboardOpenMonitoringBtn` that a surviving listener still used, so `init()` threw a `ReferenceError` and everything after it - the host list, the toolbar, every modal - silently stopped wiring. The declaration is restored, and a test now fails if any `*Btn` variable is used but never declared. | ✅ Complete |
 | 2026-10-30 | v3.4.1 | **Quick actions removed from the dashboard.** The panel of four cards (Admin Settings, Rescan All, Export SSH Config, Monitoring Wizard) duplicated the header, the *More* menu and the command palette, so it is gone along with its wiring. | ✅ Complete |
 | 2026-10-30 | v3.4.0 | **Reports are dialogs.** A report opens inside the Reports dialog - from the dashboard list, from *Analyse All Logs* when the analysis finishes, and from the report list - and every link inside a report (*All reports*, *Remediation*, *view previous*) stays in that dialog instead of loading a new page. The self-healing card now takes the full width, with model *Unverified suggestions* in a column beside it rather than a half-width card with empty space. The header *Remediation* button is back to a plain green link. | ✅ Complete |
@@ -756,7 +756,7 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.5.0`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.5.1`
 (`:latest` points at the same manifest), digest
 `sha256:4257bcc27bddf9b43f90ff29a6d2e71e36ba64140a88e1c1b84850624d795471`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
@@ -767,7 +767,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.5.0 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.5.1 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -775,7 +775,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.5.0 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.5.1 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -1177,7 +1177,7 @@ The application provides detailed startup logs showing:
 
 ## 📝 Recent Updates
 
-### v3.5.0 - The fleet card tells you who is offline
+### v3.5.1 - The fleet card tells you who is offline
 - 🖱️ **`10/16 online` is a button.** Clicking it scrolls to the *Offline devices* card and flashes it; it is a real
   `<button>` with `aria-controls`, so the keyboard can ask the same question.
 - 🗂️ **Offline devices has its own square card** beside the fleet summary: one row per unreachable host with its name,
@@ -1188,6 +1188,9 @@ The application provides detailed startup logs showing:
   the moment the dashboard noticed it was gone.
 - 🧭 **Timestamps are read as UTC.** `last_seen` and `created_at` arrive as naive UTC; the dashboard now treats a stamp
   without a zone as UTC before formatting it, so "3h ago" and "last online 21:31" are correct in any timezone.
+- 🗓️ **A stored report counts as a sighting.** For hosts that have never been probed since this release, the newest
+  report time stands in for `last_seen` (producing a report means the box answered), so the card is useful on day one
+  instead of saying `no record` everywhere.
 - 🧱 **Layout guarded on all three interfaces:** the list scrolls past 200px so a large outage cannot stretch the card
   row, and the fleet card hugs its own content instead of showing an empty box next to a long list.
 

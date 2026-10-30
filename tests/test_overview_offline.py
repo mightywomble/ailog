@@ -84,6 +84,23 @@ def test_an_answering_host_records_last_seen(monkeypatch, ctx, host):
     assert Host.query.get(_host_id(host)).last_seen is not None
 
 
+def test_the_newest_report_counts_as_a_sighting(monkeypatch, ctx, host):
+    """Day one: no probe has been recorded, but a report proves the box answered."""
+    import datetime as dt
+
+    from database import LogReport, db
+
+    when = dt.datetime(2026, 10, 30, 3, 4, 5)
+    db.session.add(LogReport(host_key=host, host_label='nas', window_minutes=120,
+                             window_start=when, window_end=when, created_at=when))
+    db.session.commit()
+
+    _clear_throttle()
+    _wire(monkeypatch, [_snap(host, online=False, name='nas')])
+    payload = metrics_routes.collect_servers()
+    assert payload['servers'][0]['last_seen'] == when.isoformat()
+
+
 def test_an_offline_host_keeps_the_previous_time(monkeypatch, ctx, host):
     from database import Host, db
     from core.timeutil import utcnow

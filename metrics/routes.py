@@ -80,13 +80,30 @@ def _last_seen_map() -> Dict[str, Any]:
     """
     try:
         from database import Host
-        return {
+        out = {
             f'db-{h.id}': h.last_seen.isoformat() if h.last_seen else None
             for h in Host.query.all()
         }
     except Exception:  # a metrics round must never fail over a badge
         logger.debug('metrics: could not read last_seen', exc_info=True)
         return {}
+
+    # A host with no recorded probe may still have a stored report; producing
+    # one means the box answered at that moment, so the newest report is a
+    # truthful "last seen" rather than an empty badge on day one.
+    try:
+        from sqlalchemy import func
+        from database import LogReport
+        latest = (LogReport.query
+                  .with_entities(LogReport.host_key, func.max(LogReport.created_at))
+                  .group_by(LogReport.host_key)
+                  .all())
+        for key, when in latest:
+            if when and key in out and not out[key]:
+                out[key] = when.isoformat()
+    except Exception:
+        logger.debug('metrics: could not read report times', exc_info=True)
+    return out
 
 
 def _note_online(results: List[Dict[str, Any]]) -> None:
