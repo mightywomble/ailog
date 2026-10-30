@@ -1021,7 +1021,14 @@ failed, or the model stopped before finishing a section, the report page says so
    - Verify log file permissions
    - Look for timeout errors in browser console
 
-3. **AI analysis errors**:
+3. **SSH terminal says "Origin not allowed"**:
+   - The terminal websocket only accepts same-host upgrades. Same host, `X-Forwarded-Host` and anything
+     listed in `AILOG_WS_ALLOWED_ORIGINS` are accepted; set that variable (comma separated, `*` wildcards)
+     if your reverse proxy rewrites the host *and* strips the forwarded header
+   - The server log prints the rejected `origin=`, `host=` and `x-forwarded-host=` so the right value is easy to add
+   - Never use `AILOG_WS_ALLOW_NO_ORIGIN=1` as a workaround; it disables the cross-site hijack guard
+
+4. **AI analysis errors**:
    - Validate OpenAI API key in Settings
    - Check API quota and billing
    - Ensure log content is not empty
@@ -1114,6 +1121,20 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.1.2 - SSH terminal works behind proxies again
+- 🔓 **Fixed:** the websocket origin guard introduced in the audit compared `Origin` with `request.host_url`
+  byte-for-byte, so any deployment reached over https through a reverse proxy (or by a different hostname)
+  had every terminal rejected with *Origin not allowed* before SSH was even attempted
+- 🧭 The check now compares **hosts** (scheme- and port-tolerant), honours `X-Forwarded-Host`, supports
+  `AILOG_WS_ALLOWED_ORIGINS` for host-rewriting proxies, and logs the rejected origin/host/forwarded host
+- 🧪 Tests cover proxy TLS termination, forwarded hosts, foreign-origin rejection and the allowlist
+
+### v3.1.1 - Cache-proof releases
+- 🏷️ Every stylesheet and module is linked with `?v=<version>`, so a deploy can never be masked by a cached
+  `theme.js` (which is what hid the Interface picker)
+- 📄 HTML is served `Cache-Control: no-store`, static files must revalidate, and **Settings → footer shows the
+  running version** (`Homelab Manager · v3.1.2`) so you can tell at a glance which build the browser has
 
 ### v3.1.0 - Interfaces: Classic, Glass and Console
 - 🧩 **A new appearance axis, independent of colour.** Settings → Appearance → **Interface** offers three
