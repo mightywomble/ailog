@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.6.2 | **Fixed: the SSH prompt opened the previous host.** Each socket's handlers closed over the *shared* `sshSocket` variable, so when a second host was opened, `closeSshSocket()` shut the first socket down and its late `error`/`close` event called `closeSshSocket()` again - this time closing the brand-new connection. The new socket never reached `onopen`, no `connectToHost` was sent, and the tab/terminal kept showing the session you had just left. Handlers are now bound to their own socket and detached before closing. Also: the OS badge is bigger and Ubuntu hosts show the circle-of-friends mark instead of a generic penguin. | ✅ Complete |
 | 2026-10-30 | v3.6.0 | **The fleet card answers "which ones are down?".** `10/16 online` is now a button, and the dashboard has an *Offline devices* card of its own: every unreachable host with how long it has been out and the moment it was last seen. The collector now records `Host.last_seen` whenever a probe succeeds (at most once a minute per host), so the time is real rather than the moment the poll noticed. | ✅ Complete |
 | 2026-10-30 | v3.4.2 | **Fixed: the dashboard came up empty.** v3.4.1 deleted a `const dashboardOpenMonitoringBtn` that a surviving listener still used, so `init()` threw a `ReferenceError` and everything after it - the host list, the toolbar, every modal - silently stopped wiring. The declaration is restored, and a test now fails if any `*Btn` variable is used but never declared. | ✅ Complete |
 | 2026-10-30 | v3.4.1 | **Quick actions removed from the dashboard.** The panel of four cards (Admin Settings, Rescan All, Export SSH Config, Monitoring Wizard) duplicated the header, the *More* menu and the command palette, so it is gone along with its wiring. | ✅ Complete |
@@ -758,7 +759,7 @@ by the `stacks/ailog/stack.yml` stack file.
 
 **Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.6.0`
 (`:latest` points at the same manifest), digest
-`sha256:e75761159ef8d397c766eae1504ebdac6768687caab7a9c1aae2681932c91334`, running as
+`sha256:58164a2ec14f1aaaed14bca06180e5b511f49f37542d4e54b39fb50d28142305`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:

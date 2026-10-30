@@ -122,8 +122,10 @@ def test_status_decorates_cards_without_re_rendering_them():
     js = _read('static', 'js', 'app-core.js')
     block = js[js.index('const applyHostStatus'):js.index('window.refreshHostStatuses')]
     assert 'card.querySelector' in block
-    assert '.innerHTML' not in block
-    assert 'textContent' in block
+    assert 'card.innerHTML' not in block          # the tile itself is never rebuilt
+    # only the badge node is redrawn, from a constant, never from server text
+    assert 'os.innerHTML = badge.html' in block
+    assert 'os.textContent = badge.text' in block
 
 
 def test_the_rail_keeps_only_the_dot_and_the_name():
@@ -140,3 +142,54 @@ def test_the_new_host_styles_use_tokens():
     block = css[css.index('#hosts-sidebar .host-card {'):css.index('/* Icon rail (tablet)')]
     assert not re.search(r'#[0-9a-fA-F]{3,8}\b', block)
     assert 'var(--ok)' in block and 'var(--bad)' in block
+
+
+def test_each_socket_owns_its_handlers():
+    """The wrong-server bug: a replaced socket's close/error tore down the new one."""
+    js = _read('static', 'js', 'app-core.js')
+    block = js[js.index('const connectSshSocket'):js.index('const openSshTerminal')]
+    assert 'const sock = new WebSocket(wsUrl);' in block
+    assert 'const isCurrent = () => sshSocket === sock;' in block
+    for handler in ('sock.onopen', 'sock.onmessage', 'sock.onclose', 'sock.onerror'):
+        assert handler in block, handler
+    assert block.count('if (!isCurrent()) return;') >= 4
+    # and the connection is opened on the captured socket, not the shared one
+    assert 'sock.send(JSON.stringify({' in block
+    assert 'sshSocket.send(JSON.stringify({' not in block
+
+    close = js[js.index('const closeSshSocket'):js.index('const connectSshSocket')]
+    for detach in ('sock.onopen = null', 'sock.onmessage = null',
+                   'sock.onerror = null', 'sock.onclose = null'):
+        assert detach in close, detach
+
+
+def test_the_ssh_button_opens_the_host_on_the_card():
+    js = _read('static', 'js', 'app-core.js')
+    block = js[js.index("card.querySelector('[data-hc-ssh]')"):]
+    block = block[:block.index('// Drag/drop reordering')]
+    # select then open, in that order, with the same id
+    assert block.index('selectHost(hostId)') < block.index('openSshTerminal()')
+    # and the reopen path closes the old socket cleanly before dialling
+    assert 'closeSshSocket();\n\n            // Everything below closes over' in js
+
+
+def test_ubuntu_hosts_get_the_ubuntu_mark():
+    js = _read('static', 'js', 'app-core.js')
+    assert 'const OS_BADGES' in js
+    assert 'ubuntu:' in js
+    assert '<circle cx="12" cy="12" r="8.4"/>' in js       # circle of friends
+    assert 'const osBadge = (os)' in js
+    assert "String(os?.id || '').toLowerCase()" in js
+    assert 'osBadge(snapshot.os)' in js
+    # a distro we have a mark for wins over the generic penguin
+    block = js[js.index('const osBadge = (os)'):js.index('const applyHostStatus')]
+    assert 'OS_BADGES[distro]' in block
+
+
+def test_the_badges_are_a_little_bigger():
+    css = _read('static', 'css', 'ui.css')
+    block = css[css.index('#hosts-sidebar .host-card .hc-os {'):css.index('/* bottom-left: Docker mark')]
+    assert 'font-size: 1.1rem' in block
+    assert 'width: 18px; height: 18px' in block
+    assert '.hc-dot' in css[css.index('#hosts-sidebar .host-card .hc-dot {'):][:200]
+    assert 'width: 9px' in css[css.index('#hosts-sidebar .host-card .hc-dot {'):][:200]
