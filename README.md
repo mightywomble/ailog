@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.4.0 | **Reports are dialogs.** A report opens inside the Reports dialog - from the dashboard list, from *Analyse All Logs* when the analysis finishes, and from the report list - and every link inside a report (*All reports*, *Remediation*, *view previous*) stays in that dialog instead of loading a new page. The self-healing card now takes the full width, with model *Unverified suggestions* in a column beside it rather than a half-width card with empty space. The header *Remediation* button is back to a plain green link. | ✅ Complete |
 | 2026-10-30 | v3.3.1 | **Remediation opens in a dialog, from a green button.** The header entry point is now a success-green button that opens the whole self-healing page (start a run, catalog, windows, protected hosts, recent runs) in a dialog, so the plan wizard never loses the dashboard behind it. The page keeps its `/remediation` URL and an `?embed=1` mode that drops its own Back link, and the dialog unloads the frame on close so its timers stop. | ✅ Complete |
 | 2026-10-30 | v3.3.0 | **Plan is a wizard now, and a run is never a blank screen.** Clicking *Plan* opens a four-step wizard: review the plan (hosts, waves, playbook, verify, rollback) → choose dry run or apply, run now or a maintenance slot → confirm (click, plus typed `RUN` for a multi-host apply) → a live console. The console shows a connecting stage, a per-host row that moves from *connecting over SSH* to the task in flight, a ticking elapsed clock and a server heartbeat every 5s, so a slow wave never looks hung. Runs can be scheduled up to 30 days ahead (`scheduled_for`), wait in the queue, and be cancelled before they start. | ✅ Complete |
 | 2026-10-30 | v3.2.1 | **Remediation is actually reachable now.** `source:` rules were compared against the whole cluster key, so `source: syslog` never matched the real `file:syslog` and **no report could ever produce a card**; sources now match by key segment and may list several families (`[syslog, journal]`). A report with no match shows an explanation instead of an empty strip, and `/remediation` gained a **Start a run** form so a remedy can be planned against one host without waiting for a matching report. | ✅ Complete |
@@ -752,9 +753,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.3.1`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.4.0`
 (`:latest` points at the same manifest), digest
-`sha256:c75e0bc904f20862ae085f83c6e7a51c61745dd718048ba1a696e5114b09f0f0`, running as
+`sha256:06d52de26276af3e44b2d58036046b5d693aad5ebb24413509731417e666d5cb`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -763,7 +764,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.3.1 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.4.0 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -771,7 +772,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.3.1 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.4.0 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -1172,6 +1173,28 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.4.0 - A report is a dialog, and the remedy card fills it
+- 🪟 **Reports open where you were.** The dashboard's *Recent reports* rows, a report row in the reports list, and the
+  *Open report* button after an analysis all open the report in the **Reports dialog** (iframe, `?embed=1`) instead of
+  a new tab. A finished *Analyse All Logs* run opens its own report automatically, with the analysis modal behind it.
+- 🔗 **Links inside a report stay in the dialog.** *All reports*, *Remediation* and *view previous* all carry
+  `?embed=1`, so they navigate the frame - the dialog stays open and the page behind it never reloads. The dialog
+  title follows the document it is showing (`Report - swarm-manager`, `Server reports`).
+- 🧱 **The self-healing card uses the width it has.** Catalog remedies (the executable ones) fill the report; model
+  *Unverified suggestions* move to a second column beside them, dashed and labelled *from the model - copy and run
+  yourself*. With no suggestions, the catalog card simply spans the page. The half-width two-up grid is gone.
+- 🧭 **The header button navigates again.** v3.3.1 had the header *Remediation* button open the admin page in a
+  dialog; that is not the entry point that matters, so it is a plain (still green) link to `/remediation` and the
+  dialog belongs to reports. `/remediation?embed=1` stays, because a report's *Remediation* link uses it.
+- 🐛 **Fixed a template crash:** `coverage.get('chunks') > 1` raised a `TypeError` when a report stored
+  `chunks: null`; the page now treats a missing count as one pass.
+- 🧪 Guards: report links carry the embed flag and no `target="_blank"`, the report page drops its Back link inside the
+  dialog, `?embed=1` keeps *All reports* / *Remediation* / *view previous* in the frame, the dashboard and analyser go
+  through `openReportModal`, and the card layout is one column plus an optional ideas column.
+- 🚀 **Deployed as `v3.4.0`** (`sha256:06d52de2…66d5cb`), verified with a real click: dashboard row -> dialog with
+  `/reports/1?embed=1`; *All reports* inside it -> same dialog, `/reports?embed=1`; row -> back to the report, URL
+  never leaves `/`.
 
 ### v3.3.1 - Remediation is a green button that opens a dialog
 - 🟢 **Green, because it is the one header button that changes a server.** `.icon-btn.is-go` takes its colour from

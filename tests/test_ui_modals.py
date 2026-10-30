@@ -103,24 +103,35 @@ def test_reports_page_supports_embed_mode(flask_app):
     assert 'px-3 py-2.5' in embedded
 
 
-def test_reports_links_open_outside_the_dialog_when_embedded(flask_app, ctx, db_session):
-    """Navigating the iframe to /reports/<id> would replace the list inside the
-    dialog, and that page's own Back link would load the SPA in a frame."""
+def test_reports_open_inside_the_dialog_and_stay_there(flask_app, ctx, db_session):
+    """A report is read *in* the reports dialog.
+
+    The list row navigates the frame to /reports/<id>?embed=1 (no target=_blank,
+    which would escape the dialog), and that page's own links carry the flag, so
+    "All reports", "Remediation" and "view previous" all stay in the frame.
+    """
     from database import LogReport
     import datetime
 
-    db_session.add(LogReport(host_key='db-modal-test', host_label='modal-test',
-                             window_minutes=60, verdict='healthy',
-                             events_total=1, clusters_total=1,
-                             created_at=datetime.datetime.utcnow()))
+    row = LogReport(host_key='db-modal-test', host_label='modal-test',
+                    window_minutes=60, verdict='healthy',
+                    events_total=1, clusters_total=1,
+                    created_at=datetime.datetime.utcnow())
+    db_session.add(row)
     db_session.commit()
 
     client = flask_app.test_client()
-    plain = client.get('/reports?host=db-modal-test').data.decode()
-    embedded = client.get('/reports?embed=1&host=db-modal-test').data.decode()
-    assert '/reports/' in plain and '/reports/' in embedded
-    assert 'target="_blank"' not in plain
-    assert 'target="_blank"' in embedded
+    embedded_list = client.get('/reports?embed=1&host=db-modal-test').data.decode()
+    assert f'/reports/{row.id}?embed=1' in embedded_list
+    assert 'target="_blank"' not in embedded_list
+
+    embedded_report = client.get(f'/reports/{row.id}?embed=1').data.decode()
+    assert '>Back<' not in embedded_report, 'the dialog owns closing'
+    assert '/reports?embed=1' in embedded_report
+    assert '/remediation?embed=1' in embedded_report
+
+    plain = client.get(f'/reports/{row.id}').data.decode()
+    assert '>Back<' in plain, 'the standalone page still has a way home'
 
 
 def test_reports_button_is_a_button_not_a_link(index_html):

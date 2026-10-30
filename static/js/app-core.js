@@ -953,7 +953,19 @@ export function init() {
                                         ${evt.tokens_in ? ' &middot; ~' + escapeHtml(String(evt.tokens_in)) + ' tokens in' : ''}
                                     </div>`;
                             }
-                            if (serverReportOpen && evt.url) serverReportOpen.href = evt.url;
+                            // The report is the point of the analysis, so the
+                            // dialog link targets the embed view of that report.
+                            if (serverReportOpen && evt.report_id) {
+                                serverReportOpen.dataset.reportId = String(evt.report_id);
+                                serverReportOpen.href = `/reports/${encodeURIComponent(evt.report_id)}?embed=1`;
+                            } else if (serverReportOpen && evt.url) {
+                                serverReportOpen.href = evt.url;
+                            }
+                            // The report is the point of the run: open it in the
+                            // reports dialog straight away, with this modal behind it.
+                            if (evt.report_id && typeof window.openReportModal === 'function') {
+                                window.openReportModal(String(evt.report_id));
+                            }
                         }
                     });
                 } catch (err) {
@@ -965,6 +977,17 @@ export function init() {
                     serverReportError.textContent = err.message || 'The analysis failed.';
                     serverReportError.classList.remove('hidden');
                 }
+            });
+        }
+
+        // Open the fresh report in the reports dialog rather than a new tab:
+        // the analysis modal stays behind it, so the log view is never lost.
+        if (serverReportOpen) {
+            serverReportOpen.addEventListener('click', (event) => {
+                const id = serverReportOpen.dataset.reportId;
+                if (!id || typeof window.openReportModal !== 'function') return;
+                event.preventDefault();
+                window.openReportModal(id);
             });
         }
 

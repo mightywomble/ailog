@@ -67,20 +67,16 @@
         closeFrame('reportsModal', 'reportsModalFrame');
     };
 
-    // Remediation: catalog, "start a run", maintenance windows and the run
-    // list. Embedded so the wizard opens with the dashboard still behind it;
-    // the header link keeps its href, so a middle-click still gets the page.
-    window.openRemediationModal = function () {
-        openFrame('remediationModal', 'remediationModalFrame', 'remediationModalTitle',
-                  '/remediation?embed=1', '', 'Remediation');
-    };
-    window.closeRemediationModal = function () {
-        closeFrame('remediationModal', 'remediationModalFrame');
-    };
-    window.remediationModalIsOpen = function () {
-        return typeof window.isAppModalOpen === 'function'
-            ? window.isAppModalOpen('remediationModal')
-            : false;
+    // One report opens in the same dialog as the list: the frame navigates to
+    // /reports/<id>?embed=1, whose own links stay inside the dialog. Reports
+    // are read while looking at a host's logs, so they belong in a frame.
+    window.openReportModal = function (reportId, label) {
+        if (reportId === undefined || reportId === null || reportId === '') {
+            window.openReportsModal(null, '');
+            return;
+        }
+        openFrame('reportsModal', 'reportsModalFrame', 'reportsModalTitle',
+                  `/reports/${encodeURIComponent(reportId)}?embed=1`, label, 'Report');
     };
 
     // Live monitoring: the netdata-style card grid. It polls every 2s, so the
@@ -108,8 +104,6 @@
             ?.addEventListener('click', window.closeReportsModal);
         document.getElementById('metricsModalClose')
             ?.addEventListener('click', window.closeMetricsModal);
-        document.getElementById('remediationModalClose')
-            ?.addEventListener('click', window.closeRemediationModal);
 
         // The modal's own close (Escape / backdrop / shared handler) must also
         // unload the frame, which only these listeners know how to do.
@@ -117,7 +111,6 @@
             dockerModal: 'dockerModalFrame',
             reportsModal: 'reportsModalFrame',
             metricsModal: 'metricsModalFrame',
-            remediationModal: 'remediationModalFrame',
         };
         Object.keys(FRAMES).forEach((id) => {
             document.getElementById(id)?.addEventListener('appmodal:close', () => {
@@ -127,16 +120,20 @@
                 }
             });
         });
-    });
 
-    // The header button opens the dialog; the anchor still navigates if this
-    // module never loads (or if the user middle-clicks / uses a keyboard shortcut).
-    document.addEventListener('click', (event) => {
-        const link = event.target.closest('#remediation-link');
-        if (!link) return;
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
-        if (typeof window.openRemediationModal !== 'function') return;
-        event.preventDefault();
-        window.openRemediationModal();
+        // The reports frame moves between the list and a single report, so the
+        // dialog title follows the document it is showing (same origin).
+        const reportsFrame = document.getElementById('reportsModalFrame');
+        reportsFrame?.addEventListener('load', () => {
+            try {
+                const doc = reportsFrame.contentDocument;
+                if (!doc || doc.location.href === 'about:blank') return;
+                const title = (doc.title || '').trim();
+                const node = document.getElementById('reportsModalTitle');
+                if (node && title) node.textContent = title;
+            } catch (error) {
+                // Cross-origin document: keep the title we were given.
+            }
+        });
     });
 })();
