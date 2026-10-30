@@ -1,0 +1,6 @@
+- name: Restart the Suricata sensor
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - restart-suricata

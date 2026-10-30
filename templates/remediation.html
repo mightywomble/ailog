@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Remediation - Homelab Manager</title>
+  <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/remediation.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/remediation-page.css?v={{ app_version }}">
+  <script>
+    (function () {
+      try {
+        var r = document.documentElement;
+        var mode = localStorage.getItem('ui.mode') || 'system';
+        var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        r.dataset.theme = localStorage.getItem('ui.theme') || 'midnight';
+        r.dataset.ui = localStorage.getItem('ui.interface') || 'classic';
+        r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
+        r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
+        r.dataset.motion = localStorage.getItem('ui.motion') || 'full';
+        r.style.colorScheme = r.dataset.mode;
+      } catch (e) {}
+    })();
+  </script>
+  <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
+</head>
+<body>
+  <main class="rem-page">
+    <header class="rem-page-head">
+      <div>
+        <h1>Self-healing</h1>
+        <p class="rem-muted">Catalog, maintenance windows and the audit of every run.</p>
+      </div>
+      <div class="rem-actions">
+        <span class="rem-badge mode-{{ policy.mode }}">{{ policy.mode }}</span>
+        {% if policy.forced_dry_run %}<span class="rem-badge">forced dry run</span>{% endif %}
+        {% if not policy.runner_available %}<span class="rem-badge risk-high">ansible-runner missing</span>{% endif %}
+        <a class="rem-btn" href="/">Back</a>
+      </div>
+    </header>
+
+    {% if not policy.enabled %}
+    <div class="rem-empty">
+      Read-only mode. Cards are shown on every report and can be copied, but nothing can be applied.
+      Set <code>AILOG_ALLOW_REMEDIATION=dry_run</code> to preview changes or <code>on</code> to execute.
+    </div>
+    {% endif %}
+
+    <section class="rem-block">
+      <h2>Catalog <span class="rem-muted">({{ remediation_catalog|length }} remedies)</span></h2>
+      <table class="rem-table">
+        <thead><tr><th>Remedy</th><th>Risk</th><th>Fleet</th><th>Blast radius</th><th>Never touches</th></tr></thead>
+        <tbody>
+        {% for row in remediation_catalog %}
+          <tr>
+            <td><strong>{{ row.title }}</strong><div class="rem-muted">{{ row.slug }}</div></td>
+            <td><span class="rem-badge risk-{{ row.risk }}">{{ row.risk }}</span></td>
+            <td>{{ "yes" if row.fleet_safe else "single host" }}</td>
+            <td class="rem-muted">{{ row.to_dict().changes|join(", ") }}</td>
+            <td class="rem-muted">{{ row.to_dict().does_not|join(", ") }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="rem-block">
+      <h2>Maintenance windows</h2>
+      <p class="rem-muted">A blocking window stops a run for hosts in the selected group (or every host when no group is set). Windows wrap over midnight.</p>
+      <table class="rem-table">
+        <thead><tr><th>Name</th><th>Days</th><th>From</th><th>To</th><th>Timezone</th><th>Group</th><th>Mode</th><th></th></tr></thead>
+        <tbody>
+        {% for window in windows %}
+          <tr>
+            <td>{{ window.name }}</td><td>{{ window.days }}</td><td>{{ window.start_time }}</td><td>{{ window.end_time }}</td>
+            <td>{{ window.timezone }}</td>
+            <td>{% for group in groups if group.id == window.group_id %}{{ group.name }}{% else %}all hosts{% endfor %}</td>
+            <td>{{ window.mode }}</td>
+            <td><button type="button" class="rem-btn danger" data-delete-window="{{ window.id }}">Delete</button></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="rem-muted">No windows &mdash; remediation is allowed at any hour.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <form id="window-form" class="rem-form">
+        <label>Name <input class="rem-input" name="name" value="Nightly freeze" required></label>
+        <label>Days <input class="rem-input" name="days" value="1,2,3,4,5,6,7" title="ISO weekdays, 1=Mon"></label>
+        <label>From <input class="rem-input" name="start_time" value="22:00"></label>
+        <label>To <input class="rem-input" name="end_time" value="02:00"></label>
+        <label>Timezone <input class="rem-input" name="timezone" value="UTC"></label>
+        <label>Group <select class="rem-select" name="group_id"><option value="">all hosts</option>{% for group in groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}</select></label>
+        <label>Mode <select class="rem-select" name="mode"><option value="block">block</option><option value="warn">warn only</option></select></label>
+        <button class="rem-btn primary" type="submit">Add window</button>
+      </form>
+    </section>
+
+    <section class="rem-block">
+      <h2>Protected hosts</h2>
+      <p class="rem-muted">Protected hosts are skipped by the planner and can never be an apply target.</p>
+      <div class="rem-host-grid">
+        {% for host in hosts %}
+          <label class="rem-host"><input type="checkbox" data-protect="{{ host.id }}" {% if host.do_not_remediate %}checked{% endif %}> {{ host.friendly_name or host.hostname }} <span class="rem-muted">{{ host.ip_address }}</span></label>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="rem-block">
+      <h2>Recent runs</h2>
+      <table class="rem-table">
+        <thead><tr><th>When</th><th>Remedy</th><th>Scope</th><th>Dry run</th><th>State</th><th>By</th><th></th></tr></thead>
+        <tbody>
+        {% for run in runs %}
+          <tr>
+            <td class="rem-muted">{{ run.started_at }}</td>
+            <td>{{ run.slug }}</td>
+            <td>{{ run.scope }}</td>
+            <td>{{ "yes" if run.dry_run else "no" }}</td>
+            <td class="{{ "rem-ok" if run.state in ["healed", "checked"] else "rem-bad" if run.state == "failed" else "" }}">{{ run.state }}</td>
+            <td class="rem-muted">{{ run.requested_by }}</td>
+            <td><a class="rem-btn" href="/remediation/runs/{{ run.uuid }}">Details</a></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="rem-muted">No runs yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <script src="/static/js/remediation-admin.js?v={{ app_version }}" defer></script>
+
+</body>
+</html>

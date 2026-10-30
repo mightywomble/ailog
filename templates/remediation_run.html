@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Run {{ run.uuid[:8] }} - Remediation</title>
+  <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/remediation.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/remediation-page.css?v={{ app_version }}">
+  <script>
+    (function () {
+      try {
+        var r = document.documentElement;
+        var mode = localStorage.getItem('ui.mode') || 'system';
+        var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        r.dataset.theme = localStorage.getItem('ui.theme') || 'midnight';
+        r.dataset.ui = localStorage.getItem('ui.interface') || 'classic';
+        r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
+        r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
+        r.dataset.motion = localStorage.getItem('ui.motion') || 'full';
+        r.style.colorScheme = r.dataset.mode;
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <main class="rem-page">
+    <header class="rem-page-head">
+      <div><h1>{{ run.slug }}</h1><p class="rem-muted">Run {{ run.uuid }} &middot; {{ run.scope }} &middot; {{ "dry run" if run.dry_run else "applied" }} by {{ run.requested_by }}</p></div>
+      <div class="rem-actions"><span class="rem-badge">{{ run.state }}</span><a class="rem-btn" href="/remediation">All runs</a></div>
+    </header>
+    {% if run.error %}<div class="rem-empty rem-bad">{{ run.error }}</div>{% endif %}
+    <section class="rem-block">
+      <table class="rem-table">
+        <thead><tr><th>Host</th><th>State</th><th>Exit</th><th>Changed</th><th>Before</th><th>After</th><th>Rollback</th></tr></thead>
+        <tbody>
+        {% for target in run.targets %}
+          <tr>
+            <td>{{ target.host_label or target.host_key }}</td>
+            <td class="{{ "rem-ok" if target.state in ["healed", "checked"] else "rem-bad" if target.state == "failed" else "" }}">{{ target.state }}</td>
+            <td>{{ target.exit_code if target.exit_code is not none else "-" }}</td>
+            <td>{{ target.changed_tasks if target.changed_tasks is not none else "-" }}</td>
+            <td class="rem-muted">{{ target.before_json[:120] if target.before_json else "" }}</td>
+            <td class="rem-muted">{{ target.after_json[:120] if target.after_json else "" }}</td>
+            <td>{{ target.rollback_state or "-" }}</td>
+          </tr>
+          {% if target.output %}
+          <tr><td colspan="7"><pre class="rem-pre">{{ target.output }}</pre></td></tr>
+          {% endif %}
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

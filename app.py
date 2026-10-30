@@ -20,7 +20,7 @@ import time
 import tempfile
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
-from database import db, Host, SystemInfo, Service, HostLog, SSHKey, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket
+from database import db, Host, SystemInfo, Service, HostLog, SSHKey, AppSetting, Schedule, ScheduleHost, ScheduleSource, SuricataSensor, SuricataIngestState, SuricataAlertBucket, SuricataFastAlertBucket, SuricataStatsCounterBucket, Remediation
 from wizard_helpers import test_ssh_connection, collect_system_info, collect_services, execute_remote_command
 from utils.sshkey_crypto import encrypt_str, decrypt_str, is_configured as sshkey_crypto_configured, generate_master_key, compute_key_checksum, verify_key_checksum
 from monitoring.sshkeys import (
@@ -38,7 +38,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.1.2'
+APP_VERSION = '3.2.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -127,6 +127,10 @@ def create_app(config: dict | None = None) -> Flask:
     # One request for the dashboard (aggregate + ETag)
     from overview import overview_bp
     app.register_blueprint(overview_bp)
+
+    # Self-healing remediation: catalog, cards, ansible-runner planning
+    from remediation import remediation_bp
+    app.register_blueprint(remediation_bp)
 
     # Groups, tags, inventory exports and DB backup/restore (modular bolt-on)
     from inventory import groups_bp as _inv_groups_bp, export_bp as _inv_export_bp, dbadmin_bp as _inv_dbadmin_bp
@@ -5222,6 +5226,11 @@ with app.app_context():
     db.create_all()
     _ensure_suricata_endpoint_columns()
     _ensure_sshkey_encryption_columns()
+    try:
+        from remediation import catalog as _remediation_catalog
+        _remediation_catalog.sync(db, Remediation)
+    except Exception as exc:  # a bad catalog must not stop the app booting
+        print(f'WARNING: remediation catalog not loaded: {exc}')
     try:
         from alerting import engine as _alerts_engine
         _alerts_engine.seed_defaults()

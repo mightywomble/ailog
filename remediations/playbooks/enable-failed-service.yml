@@ -1,0 +1,6 @@
+- name: Enable and start failed services
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - enable-failed-service

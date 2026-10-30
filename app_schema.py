@@ -43,6 +43,10 @@ COLUMNS = {
     'log_reports': [
         ('clusters_json', 'TEXT'),
     ],
+    # v3.2.0 - remediation protection flag
+    'hosts': [
+        ('do_not_remediate', 'BOOLEAN DEFAULT 0'),
+    ],
     # v2.13.1 - scheduled reports
     'schedules': [
         ('kind', "VARCHAR(16) DEFAULT 'log'"),

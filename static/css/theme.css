@@ -16,6 +16,12 @@
    Loaded AFTER style.css so it can retarget the older classes.
    ========================================================================== */
 
+/* A modal backdrop is deliberately theme-independent: it dims whatever is
+   behind it, in both light and dark mode. Override per theme if ever needed. */
+:root {
+  --scrim: rgba(0, 0, 0, 0.55);
+}
+
 /* --------------------------------------------------------------------------
    1. themes: midnight (default, the app's original look)
    -------------------------------------------------------------------------- */

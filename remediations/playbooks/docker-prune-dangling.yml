@@ -1,0 +1,6 @@
+- name: Remove dangling Docker images
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - docker-prune-dangling

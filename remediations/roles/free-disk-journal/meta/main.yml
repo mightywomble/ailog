@@ -1,0 +1,17 @@
+galaxy_info:
+  role_name: free_disk_journal
+  author: ailog
+  description: Drops old journal entries so /var has room again; keeps the most recent 200 MB.
+  license: MIT
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - ailog
+    - remediation
+dependencies: []

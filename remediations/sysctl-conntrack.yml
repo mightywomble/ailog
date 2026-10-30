@@ -1,0 +1,30 @@
+slug: sysctl-conntrack
+version: 1
+title: Raise the conntrack table limit
+summary: Writes a sysctl drop-in raising nf_conntrack_max to 262144 and applies it.
+risk: medium
+est_seconds: 20
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: nf_conntrack.*(table full|dropping packet)|conntrack table full
+    source: syslog
+    min_count: 1
+blast_radius:
+  changes:
+  - /etc/sysctl.d/99-ailog-conntrack.conf
+  - nf_conntrack_max runtime value
+  does_not:
+  - firewall rules
+  - kernel modules
+  - the host
+playbook: playbooks/sysctl-conntrack.yml
+verify:
+  command: cat /proc/sys/net/netfilter/nf_conntrack_max
+  expect:
+    stdout_min: 131072
+  settle_seconds: 5
+fleet_safe: false
+rollback: playbooks/sysctl-conntrack-rollback.yml

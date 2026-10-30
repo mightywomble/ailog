@@ -32,6 +32,7 @@
   </style>
   <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
   <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/remediation.css?v={{ app_version }}">
   <script>
     (function () {
       try {
@@ -118,6 +119,8 @@
           </div>
         </div>
       </div>
+
+      <section id="report-remediations" data-report-id="{{ report.id }}" data-host-key="{{ report.host_key }}"></section>
 
       {% if diff and diff.get('has_previous') %}
         {% set vd = diff.get('verdict') or {} %}
@@ -407,5 +410,6 @@
       });
     })();
   </script>
+  <script src="/static/js/remediation.js?v={{ app_version }}" defer></script>
 </body>
 </html>

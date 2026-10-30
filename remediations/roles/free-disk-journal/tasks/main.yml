@@ -1,0 +1,3 @@
+- name: Vacuum journal to 200 MB
+  ansible.builtin.command: journalctl --vacuum-size=200M
+  changed_when: true

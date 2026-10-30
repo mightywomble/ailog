@@ -1,0 +1,17 @@
+galaxy_info:
+  role_name: docker_prune_dangling
+  author: ailog
+  description: Prunes untagged image layers that no container references. Volumes are never touched.
+  license: MIT
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - ailog
+    - remediation
+dependencies: []

@@ -51,6 +51,8 @@ class Host(db.Model):
     ssh_key_id = db.Column(db.Integer, db.ForeignKey('ssh_keys.id'), nullable=True)
     description = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(50), default='unknown')  # unknown, online, offline, auth_error
+    # Set from the Remediation page: the planner and runner both refuse it.
+    do_not_remediate = db.Column(db.Boolean, default=False, nullable=False)
     last_seen = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -71,6 +73,7 @@ class Host(db.Model):
             'ssh_user': self.ssh_user,
             'description': self.description,
             'status': self.status,
+            'do_not_remediate': bool(self.do_not_remediate),
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'groups': [g.to_dict() for g in self.groups],
@@ -778,4 +781,260 @@ class AlertEvent(db.Model):
             'notify_error': self.notify_error,
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Self-healing remediation (see remediation/ and docs/remediation.md)
+# ---------------------------------------------------------------------------
+
+class Remediation(db.Model):
+    """Catalog mirror: one row per YAML file in remediations/.
+
+    The YAML is the source of truth (it is validated at startup and in CI);
+    this table exists so the UI can list, disable and join against runs.
+    """
+    __tablename__ = 'remediations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(96), nullable=False, unique=True, index=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    title = db.Column(db.String(255), nullable=False)
+    summary = db.Column(db.Text)
+    risk = db.Column(db.String(16), nullable=False, default='low')
+    est_seconds = db.Column(db.Integer, default=30)
+    executable = db.Column(db.Boolean, nullable=False, default=True)
+    fleet_safe = db.Column(db.Boolean, nullable=False, default=False)
+    requires_json = db.Column(db.Text)
+    changes_json = db.Column(db.Text)
+    does_not_json = db.Column(db.Text)
+    yaml_json = db.Column(db.Text)
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def _load(self, raw, default):
+        try:
+            return json.loads(raw) if raw else default
+        except Exception:
+            return default
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'slug': self.slug,
+            'version': self.version,
+            'title': self.title,
+            'summary': self.summary,
+            'risk': self.risk,
+            'est_seconds': self.est_seconds,
+            'executable': bool(self.executable),
+            'fleet_safe': bool(self.fleet_safe),
+            'requires': self._load(self.requires_json, []),
+            'changes': self._load(self.changes_json, []),
+            'does_not': self._load(self.does_not_json, []),
+            'enabled': bool(self.enabled),
+        }
+class RemediationMatch(db.Model):
+    """A remedy card attached to one report.
+
+    The card is denormalised on purpose: a two-year-old report must render
+    exactly as it did when it was written, even if the catalog has moved on.
+    source=llm cards are idea-channel only and are never executable.
+    """
+    __tablename__ = 'remediation_matches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, index=True, nullable=False)
+    host_key = db.Column(db.String(128), index=True)
+    slug = db.Column(db.String(96), index=True)
+    source = db.Column(db.String(16), nullable=False, default='catalog')
+    executable = db.Column(db.Boolean, nullable=False, default=False)
+    title = db.Column(db.String(255), nullable=False)
+    summary = db.Column(db.Text)
+    risk = db.Column(db.String(16), default='low')
+    est_seconds = db.Column(db.Integer, default=30)
+    confidence = db.Column(db.Float, default=0.0)
+    evidence_json = db.Column(db.Text)
+    rationale = db.Column(db.Text)
+    code_text = db.Column(db.Text)
+    verify_text = db.Column(db.Text)
+    rollback_text = db.Column(db.Text)
+    changes_json = db.Column(db.Text)
+    does_not_json = db.Column(db.Text)
+    requires_json = db.Column(db.Text)
+    state = db.Column(db.String(24), nullable=False, default='open', index=True)
+    dismissed_reason = db.Column(db.String(64))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def _load(self, raw, default):
+        try:
+            return json.loads(raw) if raw else default
+        except Exception:
+            return default
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'report_id': self.report_id,
+            'host_key': self.host_key,
+            'slug': self.slug,
+            'source': self.source,
+            'executable': bool(self.executable),
+            'title': self.title,
+            'summary': self.summary,
+            'risk': self.risk,
+            'est_seconds': self.est_seconds,
+            'confidence': round(float(self.confidence or 0.0), 2),
+            'evidence': self._load(self.evidence_json, []),
+            'rationale': self.rationale,
+            'code': self.code_text,
+            'verify': self.verify_text,
+            'rollback': self.rollback_text,
+            'changes': self._load(self.changes_json, []),
+            'does_not': self._load(self.does_not_json, []),
+            'requires': self._load(self.requires_json, []),
+            'state': self.state,
+            'dismissed_reason': self.dismissed_reason,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+class RemediationRun(db.Model):
+    __tablename__ = 'remediation_runs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    uuid = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    slug = db.Column(db.String(96), index=True)
+    match_id = db.Column(db.Integer, index=True)
+    dry_run = db.Column(db.Boolean, nullable=False, default=True)
+    scope = db.Column(db.String(16), nullable=False, default='host')
+    requested_by = db.Column(db.String(128))
+    confirm_fingerprint = db.Column(db.String(64))
+    state = db.Column(db.String(32), nullable=False, default='queued', index=True)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    finished_at = db.Column(db.DateTime)
+    summary_json = db.Column(db.Text)
+    artifact_dir = db.Column(db.Text)
+    error = db.Column(db.Text)
+
+    targets = db.relationship('RemediationTarget', backref='run', lazy=True,
+                              cascade='all, delete-orphan')
+
+    def _load(self, raw, default):
+        try:
+            return json.loads(raw) if raw else default
+        except Exception:
+            return default
+
+    def to_dict(self, include_targets=True):
+        data = {
+            'uuid': self.uuid,
+            'slug': self.slug,
+            'match_id': self.match_id,
+            'dry_run': bool(self.dry_run),
+            'scope': self.scope,
+            'requested_by': self.requested_by,
+            'state': self.state,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'finished_at': self.finished_at.isoformat() if self.finished_at else None,
+            'summary': self._load(self.summary_json, {}),
+            'error': self.error,
+        }
+        if include_targets:
+            data['targets'] = [t.to_dict() for t in self.targets]
+        return data
+
+
+class RemediationTarget(db.Model):
+    __tablename__ = 'remediation_targets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, db.ForeignKey('remediation_runs.id'), nullable=False, index=True)
+    host_key = db.Column(db.String(128), nullable=False)
+    host_label = db.Column(db.String(255))
+    state = db.Column(db.String(32), nullable=False, default='pending')
+    exit_code = db.Column(db.Integer)
+    changed_tasks = db.Column(db.Integer)
+    before_json = db.Column(db.Text)
+    after_json = db.Column(db.Text)
+    output = db.Column(db.Text)
+    rollback_state = db.Column(db.String(32))
+
+    def _load(self, raw, default):
+        try:
+            return json.loads(raw) if raw else default
+        except Exception:
+            return default
+
+    def to_dict(self):
+        return {
+            'host_key': self.host_key,
+            'host_label': self.host_label,
+            'state': self.state,
+            'exit_code': self.exit_code,
+            'changed_tasks': self.changed_tasks,
+            'before': self._load(self.before_json, {}),
+            'after': self._load(self.after_json, {}),
+            'output': self.output,
+            'rollback_state': self.rollback_state,
+        }
+class RemediationWindow(db.Model):
+    """In-app maintenance window.
+
+    days is a comma separated list of ISO weekdays (1=Mon .. 7=Sun);
+    start_time/end_time are local HH:MM. A window whose end is before its
+    start wraps over midnight.
+    """
+    __tablename__ = 'remediation_windows'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False, default='Window')
+    group_id = db.Column(db.Integer, index=True)
+    tag_id = db.Column(db.Integer, index=True)
+    days = db.Column(db.String(32), default='1,2,3,4,5,6,7')
+    start_time = db.Column(db.String(5), default='22:00')
+    end_time = db.Column(db.String(5), default='02:00')
+    timezone = db.Column(db.String(64), default='UTC')
+    mode = db.Column(db.String(16), default='block')
+    enabled = db.Column(db.Boolean, default=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'group_id': self.group_id,
+            'tag_id': self.tag_id,
+            'days': self.days,
+            'start_time': self.start_time,
+            'end_time': self.end_time,
+            'timezone': self.timezone,
+            'mode': self.mode,
+            'enabled': bool(self.enabled),
+        }
+
+
+class AuditEvent(db.Model):
+    """Generic audit trail (remediation today, other actions later)."""
+    __tablename__ = 'audit_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    ts = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    actor = db.Column(db.String(128))
+    action = db.Column(db.String(64), index=True)
+    object_type = db.Column(db.String(64))
+    object_id = db.Column(db.String(128))
+    detail_json = db.Column(db.Text)
+    request_id = db.Column(db.String(64))
+
+    def to_dict(self):
+        try:
+            detail = json.loads(self.detail_json) if self.detail_json else {}
+        except Exception:
+            detail = {}
+        return {
+            'id': self.id,
+            'ts': self.ts.isoformat() if self.ts else None,
+            'actor': self.actor,
+            'action': self.action,
+            'object_type': self.object_type,
+            'object_id': self.object_id,
+            'detail': detail,
         }

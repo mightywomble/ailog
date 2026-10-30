@@ -1,0 +1,6 @@
+- name: Turn on NTP and step the clock
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - fix-time-sync

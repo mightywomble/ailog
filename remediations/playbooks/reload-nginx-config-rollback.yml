@@ -1,0 +1,6 @@
+- name: Restore the nginx config backup and reload
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - reload-nginx-config-rollback

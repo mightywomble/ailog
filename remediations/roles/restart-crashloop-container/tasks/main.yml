@@ -1,0 +1,10 @@
+- name: Find crash-looping containers
+  ansible.builtin.command: docker ps --filter status=restarting --format {% raw %}{{ .Names }}{% endraw %}
+  register: looping_containers
+  changed_when: false
+
+- name: Restart each crash-looping container
+  ansible.builtin.command: docker restart {{ item }}
+  loop: "{{ looping_containers.stdout_lines }}"
+  when: looping_containers.stdout_lines | length > 0
+  changed_when: true

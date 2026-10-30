@@ -1,0 +1,32 @@
+slug: restart-docker-service
+version: 1
+title: Restart the Docker daemon
+summary: Restarts dockerd when the API hangs. Containers with a restart policy come
+  back automatically.
+risk: medium
+est_seconds: 60
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: dockerd.*(hang|unresponsive|timeout)|Cannot connect to the Docker
+      daemon
+    source: docker
+    min_count: 1
+blast_radius:
+  changes:
+  - docker service restart (containers with restart policies are recreated by Docker)
+  does_not:
+  - images
+  - volumes
+  - compose files
+  - the host
+playbook: playbooks/restart-docker-service.yml
+verify:
+  command: docker info --format "{{.ServerVersion}}"
+  expect:
+    stdout_matches: ^[0-9]
+  settle_seconds: 30
+fleet_safe: false
+rollback: playbooks/restart-docker-service-rollback.yml

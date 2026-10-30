@@ -48,6 +48,32 @@
                 run: () => { window.location.href = '/alerts'; },
             },
             {
+                id: 'remediation', title: 'Open Remediation', hint: 'catalog, maintenance windows, run history',
+                group: 'Actions', icon: 'action',
+                keywords: 'remediate heal self-healing ansible playbook catalog windows runs',
+                run: () => { window.location.href = '/remediation'; },
+            },
+            {
+                id: 'remediation-last-run', title: 'Open last remediation run', hint: 'what changed and whether it verified',
+                group: 'Actions', icon: 'action',
+                keywords: 'remediation run history last apply dry run output',
+                run: () => {
+                    fetch('/api/remediation-runs?limit=1', { headers: { Accept: 'application/json' } })
+                        .then((r) => r.json())
+                        .then((data) => {
+                            const last = (data.runs || [])[0];
+                            window.location.href = last ? `/remediation/runs/${last.uuid}` : '/remediation';
+                        })
+                        .catch(() => { window.location.href = '/remediation'; });
+                },
+            },
+            {
+                id: 'remediation-settings', title: 'Remediation settings', hint: 'windows and protected hosts',
+                group: 'Actions', icon: 'action',
+                keywords: 'remediation mode dry run enable protect do not remediate window',
+                run: () => { window.location.href = '/remediation#settings'; },
+            },
+            {
                 id: 'settings', title: 'Open Settings', group: 'Actions', icon: 'action',
                 keywords: 'ai provider discord hosts backup restore settings',
                 run: () => document.getElementById('settings-btn')?.click(),

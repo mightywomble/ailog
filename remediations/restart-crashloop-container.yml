@@ -1,0 +1,29 @@
+slug: restart-crashloop-container
+version: 1
+title: Restart containers that are stuck restarting
+summary: Restarts every container Docker reports in the restarting state.
+risk: low
+est_seconds: 30
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: restart(ing|ed) (container|policy)|RestartCount|restart loop
+    source: docker
+    min_count: 1
+blast_radius:
+  changes:
+  - docker restart of containers in restarting state
+  does_not:
+  - volumes
+  - images
+  - other containers
+  - compose files
+playbook: playbooks/restart-crashloop-container.yml
+verify:
+  command: docker ps -q --filter status=restarting | wc -l
+  expect:
+    stdout_max: 0
+  settle_seconds: 30
+fleet_safe: true

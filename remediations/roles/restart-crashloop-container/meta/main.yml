@@ -1,0 +1,17 @@
+galaxy_info:
+  role_name: restart_crashloop_container
+  author: ailog
+  description: Restarts every container Docker reports in the restarting state.
+  license: MIT
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - ailog
+    - remediation
+dependencies: []

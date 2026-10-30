@@ -1,0 +1,28 @@
+slug: restart-suricata
+version: 1
+title: Restart the Suricata sensor
+summary: Restarts suricata when the sensor stopped emitting events.
+risk: low
+est_seconds: 20
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: suricata.*(stopped|exited|failed|not running)|no events.*suricata
+    source: syslog
+    min_count: 1
+blast_radius:
+  changes:
+  - suricata service
+  does_not:
+  - suricata.yaml
+  - rules
+  - capture interfaces
+playbook: playbooks/restart-suricata.yml
+verify:
+  command: systemctl is-active suricata
+  expect:
+    stdout_matches: ^active$
+  settle_seconds: 15
+fleet_safe: true

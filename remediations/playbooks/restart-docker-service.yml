@@ -1,0 +1,6 @@
+- name: Restart the Docker daemon
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - restart-docker-service

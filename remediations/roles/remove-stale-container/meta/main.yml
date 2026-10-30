@@ -1,0 +1,17 @@
+galaxy_info:
+  role_name: remove_stale_container
+  author: ailog
+  description: Deletes exited containers older than 7 days. Volumes and images are kept.
+  license: MIT
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - ailog
+    - remediation
+dependencies: []

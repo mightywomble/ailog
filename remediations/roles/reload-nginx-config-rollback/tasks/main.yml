@@ -1,0 +1,10 @@
+- name: Restore the backup when present
+  ansible.builtin.copy:
+    src: /etc/nginx/nginx.conf.ailog-bak
+    dest: /etc/nginx/nginx.conf
+    remote_src: true
+    mode: '0644'
+  failed_when: false
+- name: Reload after restore
+  ansible.builtin.command: systemctl reload nginx  # noqa: command-instead-of-module
+  changed_when: true

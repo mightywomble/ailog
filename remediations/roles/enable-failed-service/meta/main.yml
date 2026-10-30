@@ -1,0 +1,17 @@
+galaxy_info:
+  role_name: enable_failed_service
+  author: ailog
+  description: Enables and starts units that are installed but were left disabled and failed at boot.
+  license: MIT
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - ailog
+    - remediation
+dependencies: []

@@ -1,0 +1,6 @@
+- name: Vacuum the systemd journal to 200 MB
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - free-disk-journal

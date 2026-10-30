@@ -1,0 +1,12 @@
+- name: Back up the current config
+  ansible.builtin.copy:
+    src: /etc/nginx/nginx.conf
+    dest: /etc/nginx/nginx.conf.ailog-bak
+    remote_src: true
+    mode: '0600'
+- name: Test the configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+- name: Reload nginx
+  ansible.builtin.command: systemctl reload nginx  # noqa: command-instead-of-module
+  changed_when: true

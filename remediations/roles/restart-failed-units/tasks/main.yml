@@ -1,0 +1,10 @@
+- name: Collect failed units
+  ansible.builtin.command: systemctl list-units --state=failed --no-legend --plain  # noqa: command-instead-of-module
+  changed_when: false
+  register: failed_units
+- name: Restart failed units
+  ansible.builtin.systemd:
+    name: '{{ item }}'
+    state: restarted
+    daemon_reload: true
+  loop: '{{ failed_units.stdout_lines | map(''split'') | map(''first'') | list }}'

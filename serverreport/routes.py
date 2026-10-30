@@ -533,6 +533,32 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
     except Exception:
         pass
 
+    # Remediation cards are derived from the clusters we just stored. Both
+    # passes are best-effort: a matcher or model failure must never fail a
+    # report that has already been saved.
+    try:
+        import database as _models
+        from remediation import matcher as _matcher
+        from remediation import policy as _remediation_policy
+        _matcher.match_report(report, _models, db, with_ideas=False)
+        if _remediation_policy.idea_channel_enabled():
+            app_obj = app_module
+            report_id = report.id
+
+            def _idea_pass():
+                with app_obj.app_context():
+                    try:
+                        from database import db as _db
+                        row = _models.LogReport.query.get(report_id)
+                        if row:
+                            _matcher.match_report(row, _models, _db, with_ideas=True)
+                    except Exception:
+                        _db.session.rollback()
+
+            threading.Thread(target=_idea_pass, daemon=True).start()
+    except Exception:
+        db.session.rollback()
+
     # The pipeline runs in its own thread with its own session, so hand back a
     # plain dict: the ORM instance is detached (and expired) by the time the
     # SSE generator touches it.

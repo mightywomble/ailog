@@ -34,6 +34,46 @@ jobs:
         # as the phase-3 split lands. Raise it, never lower it.
         run: pytest -q --cov=. --cov-fail-under=30 --no-header
 
+  remediation-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest yamllint ansible-lint
+      - name: Catalog validates
+        # The catalog is the trust boundary: a malformed entry must fail here,
+        # never halfway through a fleet run.
+        run: >
+          python -c "from remediation import catalog; e = catalog.load_all(force=True);
+          assert len(e) == len(list(catalog.CATALOG_DIR.glob('*.yml')));
+          assert all(x.get('rollback') for x in e if x['risk'] != 'low');
+          print(len(e), 'catalog entries valid')"
+      - name: Catalog tests
+        run: pytest -q --no-header tests/test_remediation_catalog.py tests/test_remediation_policy.py
+      - name: Playbooks parse and find their roles
+        # Regression guard: playbooks live in playbooks/ but roles in roles/,
+        # so ANSIBLE_ROLES_PATH must be set or every run fails at task 1.
+        run: |
+          cd remediations
+          export ANSIBLE_ROLES_PATH="$PWD/roles"
+          for f in playbooks/*.yml; do
+            ansible-playbook --syntax-check -i localhost, "$f" >/dev/null || exit 1
+            echo "ok $f"
+          done
+      - name: yamllint the catalog
+        run: |
+          yamllint -d "{extends: relaxed, rules: {line-length: disable}}" remediations/
+      - name: ansible-lint the playbooks (production profile)
+        run: |
+          cd remediations
+          ANSIBLE_ROLES_PATH="$PWD/roles" ansible-lint playbooks/
+
   frontend-syntax:
     runs-on: ubuntu-latest
     steps:

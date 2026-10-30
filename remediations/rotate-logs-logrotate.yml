@@ -1,0 +1,29 @@
+slug: rotate-logs-logrotate
+version: 1
+title: Force a logrotate pass
+summary: Runs logrotate in force mode so oversized logs are rotated and compressed
+  now.
+risk: low
+est_seconds: 30
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: log ?rotate.*(error|failed|not rotated)|log file.*(too large|size)
+    source: syslog
+    min_count: 1
+blast_radius:
+  changes:
+  - rotation and compression of logs matching /etc/logrotate.conf
+  does_not:
+  - logrotate configuration
+  - deleting non-rotated logs
+  - the host
+playbook: playbooks/rotate-logs-logrotate.yml
+verify:
+  command: logrotate --debug /etc/logrotate.conf
+  expect:
+    exit_code: 0
+  settle_seconds: 5
+fleet_safe: true

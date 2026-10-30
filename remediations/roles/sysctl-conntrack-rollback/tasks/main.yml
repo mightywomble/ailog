@@ -1,0 +1,7 @@
+- name: Remove the drop-in
+  ansible.builtin.file:
+    path: /etc/sysctl.d/99-ailog-conntrack.conf
+    state: absent
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: true

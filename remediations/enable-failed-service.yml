@@ -1,0 +1,30 @@
+slug: enable-failed-service
+version: 1
+title: Enable and start failed services
+summary: Enables and starts units that are installed but were left disabled and failed
+  at boot.
+risk: low
+est_seconds: 30
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: (unit|service).*(disabled|not enabled).*(failed|not started)|Failed
+      to start
+    source: syslog
+    min_count: 1
+blast_radius:
+  changes:
+  - enable/start of failed or disabled units
+  does_not:
+  - unit file content
+  - masked units
+  - the host
+playbook: playbooks/enable-failed-service.yml
+verify:
+  command: systemctl --failed --no-legend | wc -l
+  expect:
+    stdout_max: 0
+  settle_seconds: 15
+fleet_safe: true
