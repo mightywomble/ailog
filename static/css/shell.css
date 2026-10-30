@@ -48,12 +48,13 @@ body.app-shell-body {
 .app-body > #hosts-sidebar { grid-column: 1; grid-row: 1; min-height: 0; }
 .app-body > #dashboard-view,
 .app-body > #logs-view,
-.app-body > #suricata-stats-view { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; }
+.app-body > #suricata-stats-view,
+.app-body > #mobile-hosts-view { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; }
 .app-body > #top-progress-container { grid-column: 1 / -1; grid-row: 2; }
 .app-body > main { grid-column: 2; min-width: 0; min-height: 0; }
 
 /* the view container keeps its own scroll */
-#dashboard-view, #logs-view, #suricata-stats-view {
+#dashboard-view, #logs-view, #suricata-stats-view, #mobile-hosts-view {
   height: 100% !important;
   min-height: 0;
   overflow: auto;
@@ -211,6 +212,8 @@ body.app-shell-body {
     grid-template-columns: minmax(0, 1fr);
     padding: 0 10px calc(var(--tabbar-h) + 10px + env(safe-area-inset-bottom));
   }
+  /* the sidebar is fixed here, so the view owns the whole single column */
+  .app-body > #mobile-hosts-view { grid-column: 1 / -1; grid-row: 1; }
 
   /* sidebar becomes a slide-over sheet */
   #hosts-sidebar {

@@ -195,3 +195,20 @@ def test_the_layout_listeners_swap_views_without_a_reload():
     assert 'showDashboard()' in block
     assert "PHONE_QUERY.addEventListener?.('change', onLayoutChange);" in js
     assert "TOUCH_QUERY.addEventListener?.('change', onLayoutChange);" in js
+
+
+def test_the_grid_is_the_scroll_container_on_a_phone():
+    """Bug: the grid was not part of the shell's view rules, so the last rows
+    were clipped by the fixed-height shell with no way to reach them."""
+    css = _read('static', 'css', 'shell.css')
+    scroll = css[css.index('/* the view container keeps its own scroll */'):]
+    scroll = scroll[:scroll.index('/* ---------------------------------------------------------------- header')]
+    assert '#mobile-hosts-view' in scroll
+    assert 'overflow: auto' in scroll
+    placement = css[css.index('.app-body > #dashboard-view,'):]
+    placement = placement[:placement.index('/* the view container keeps')]
+    assert '#mobile-hosts-view' in placement
+    assert 'grid-column: 2' in placement
+    # the sidebar is a fixed overlay on a phone: one full-width column
+    phone = css[css.index('  /* the sidebar is fixed here, so the view owns the whole single column */'):]
+    assert '.app-body > #mobile-hosts-view { grid-column: 1 / -1; grid-row: 1; }' in phone[:200]
