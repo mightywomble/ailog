@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.7.1 | **Fixed: the phone grid would not scroll.** The new hosts view was mounted inside the fixed-height shell but was not part of the shell's view rules, so the shell clipped it: hosts past the fold were unreachable. It now joins `#dashboard-view`/`#logs-view` as a scroll container (`overflow: auto`, `min-height: 0`) and owns the single phone grid column (the sidebar is a fixed overlay there). | ✅ Complete |
 | 2026-10-30 | v3.7.0 | **Phones get a card-first host screen.** On a touch device the first screen is a grid of host tiles (2 across on a phone, 3 on an unfolded Fold or in landscape): the green `>_` on a tile opens the SSH terminal **full screen**, and tapping the tile body opens a slim detail sheet (status, OS, Docker, last seen, `SSH terminal` / `Logs & info`). Every action is thumb-sized (44px+). Desktop is untouched - the sidebar, dashboard and logs view are exactly as before. | ✅ Complete |
 | 2026-10-30 | v3.6.2 | **Fixed: the SSH prompt opened the previous host.** Each socket's handlers closed over the *shared* `sshSocket` variable, so when a second host was opened, `closeSshSocket()` shut the first socket down and its late `error`/`close` event called `closeSshSocket()` again - this time closing the brand-new connection. The new socket never reached `onopen`, no `connectToHost` was sent, and the tab/terminal kept showing the session you had just left. Handlers are now bound to their own socket and detached before closing. Also: the OS badge is bigger and Ubuntu hosts show the circle-of-friends mark instead of a generic penguin. | ✅ Complete |
 | 2026-10-30 | v3.6.0 | **The fleet card answers "which ones are down?".** `10/16 online` is now a button, and the dashboard has an *Offline devices* card of its own: every unreachable host with how long it has been out and the moment it was last seen. The collector now records `Host.last_seen` whenever a probe succeeds (at most once a minute per host), so the time is real rather than the moment the poll noticed. | ✅ Complete |
@@ -758,7 +759,7 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.7.0`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.7.1`
 (`:latest` points at the same manifest), digest
 `sha256:55b233e44e6ba19d58034747fe9115f11147ae37f66a93de6ed2973f6541f89c`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
@@ -769,7 +770,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.7.0 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.7.1 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -1193,6 +1194,7 @@ The application provides detailed startup logs showing:
   queries as `isMobileLayout()` — so a narrow desktop window keeps the desktop layout.
 - 🔁 **Live without a reload.** A layout change swaps grid ↔ dashboard, the bottom-tab *Hosts* button now opens the
   grid instead of the drawer (`aria-current` follows the view), and the 20s status poll decorates both mounts.
+- 🐛 **Fixed in v3.7.1: the grid scrolls.** The view was not in the shell's scroll/placement rules, so the fixed-height shell clipped the last rows with no way to reach them. `#mobile-hosts-view` is now a scroll container like the dashboard and logs, and it takes the whole single column on a phone (the sidebar is a fixed overlay). Verified with wheel and touch swipes at 390×844 (549px of scroll), 760×900 (84px) and 844×390 (594px).
 - 🧪 **17 new tests** (`tests/test_mobile_hosts_view.py`) and headless-Edge verification at 390×844, 760×900 and
   1440×900: 6 tiles, a 44×44 prompt, a populated sheet, three columns unfolded, and the dashboard still first on
   desktop.
