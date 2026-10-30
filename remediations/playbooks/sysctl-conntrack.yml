@@ -1,0 +1,6 @@
+- name: Raise the conntrack table limit
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - sysctl-conntrack

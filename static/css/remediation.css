@@ -1,0 +1,73 @@
+/* Self-healing remediation cards.
+   Semantic tokens only, so every theme and interface applies unchanged. */
+
+.rem-section { margin: 1.5rem 0; }
+.rem-head { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-bottom: .9rem; }
+.rem-head h2 { font-size: 1.05rem; font-weight: 600; color: var(--text); margin: 0; }
+.rem-head .rem-sub { font-size: .78rem; color: var(--muted); }
+.rem-badge { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; padding: .15rem .45rem;
+  border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--surface-2); }
+.rem-badge.risk-low { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.rem-badge.risk-medium { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.rem-badge.risk-high { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.rem-badge.mode-on { color: var(--ok); }
+.rem-badge.mode-dry_run { color: var(--info); }
+.rem-badge.mode-off { color: var(--muted); }
+.rem-badge.idea { color: var(--warn); }
+
+.rem-grid { display: grid; grid-template-columns: 1fr; gap: .9rem; }
+@media (min-width: 900px) { .rem-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.rem-card { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius);
+  padding: 1rem; display: flex; flex-direction: column; gap: .7rem; }
+.rem-card.is-idea { border-style: dashed; }
+.rem-card.is-dismissed { opacity: .55; }
+.rem-card-top { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.rem-title { font-size: .95rem; font-weight: 600; color: var(--text); margin: 0; }
+.rem-meta { font-size: .74rem; color: var(--faint); }
+.rem-block-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: .2rem; }
+.rem-list { margin: 0; padding-left: 1.1rem; font-size: .8rem; color: var(--text); }
+.rem-list li { margin: .12rem 0; }
+.rem-muted { color: var(--muted); font-size: .78rem; }
+.rem-evidence { display: flex; flex-wrap: wrap; gap: .35rem; }
+.rem-chip { font-size: .7rem; border: 1px solid var(--border); background: var(--surface-2);
+  border-radius: 999px; padding: .12rem .5rem; color: var(--muted); font-family: ui-monospace, monospace; }
+.rem-code, .rem-pre { background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: .7rem .8rem; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .75rem; line-height: 1.5; color: var(--text); white-space: pre; margin: 0; max-height: 15rem; }
+.rem-code-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.rem-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-top: auto; padding-top: .35rem; }
+.rem-btn { font-size: .78rem; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text); padding: .35rem .7rem; cursor: pointer; }
+.rem-btn:hover { background: var(--overlay-hover); }
+.rem-btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+.rem-btn.primary:hover { background: var(--accent-hover); }
+.rem-btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.rem-btn:disabled { opacity: .5; cursor: not-allowed; }
+.rem-select, .rem-input { font-size: .78rem; background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .3rem .45rem; }
+.rem-empty { border: 1px dashed var(--border); border-radius: var(--radius); padding: 1rem;
+  color: var(--muted); font-size: .85rem; }
+
+.rem-modal { position: fixed; inset: 0; z-index: 95; display: flex; align-items: center; justify-content: center;
+  background: var(--scrim); padding: 1rem; }
+.rem-modal[hidden] { display: none; }
+.rem-panel { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  width: min(760px, 100%); max-height: 88vh; display: flex; flex-direction: column; box-shadow: var(--shadow-2); }
+.rem-panel-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+  padding: .85rem 1rem; border-bottom: 1px solid var(--border); }
+.rem-panel-title { font-weight: 600; font-size: .95rem; color: var(--text); }
+.rem-panel-body { padding: 1rem; overflow-y: auto; display: flex; flex-direction: column; gap: .8rem; }
+.rem-panel-foot { padding: .85rem 1rem; border-top: 1px solid var(--border); display: flex; gap: .6rem;
+  justify-content: flex-end; flex-wrap: wrap; align-items: center; }
+.rem-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.rem-table th, .rem-table td { text-align: left; padding: .35rem .4rem; border-bottom: 1px solid var(--border); }
+.rem-table th { color: var(--muted); font-weight: 500; }
+.rem-ok { color: var(--ok); } .rem-bad { color: var(--bad); } .rem-warn { color: var(--warn); }
+.rem-log { font-family: ui-monospace, monospace; font-size: .72rem; background: var(--surface-sunken);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .6rem; max-height: 14rem; overflow-y: auto;
+  white-space: pre-wrap; color: var(--muted); }
+.rem-targets { display: flex; flex-direction: column; gap: .3rem; }
+.rem-target { display: flex; justify-content: space-between; gap: .5rem; font-size: .78rem;
+  padding: .3rem .45rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.rem-confirm { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; font-size: .8rem; color: var(--text); }

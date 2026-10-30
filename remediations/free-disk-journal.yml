@@ -1,0 +1,29 @@
+slug: free-disk-journal
+version: 1
+title: Vacuum the systemd journal to 200 MB
+summary: Drops old journal entries so /var has room again; keeps the most recent 200
+  MB.
+risk: low
+est_seconds: 20
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: No space left on device|disk (usage|space).*(full|critical)|journal.*(size|usage)
+    source: syslog
+    min_count: 1
+blast_radius:
+  changes:
+  - journal files older than the newest 200 MB
+  does_not:
+  - application logs
+  - logrotate config
+  - any other file on the host
+playbook: playbooks/free-disk-journal.yml
+verify:
+  command: df --output=pcent /var | tail -1 | tr -dc 0-9
+  expect:
+    stdout_max: 90
+  settle_seconds: 5
+fleet_safe: true

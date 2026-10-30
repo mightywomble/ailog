@@ -37,5 +37,11 @@ docker>=7.1.0,<8.0
 flask-sock==0.7.0
 paramiko==3.4.1
 
+# Remediation catalog (YAML) and the Ansible execution engine
+# ansible-runner is imported lazily; the Docker image installs both.
+PyYAML>=6.0,<7.0
+ansible-core>=2.17,<2.19
+ansible-runner>=2.4,<3.0
+
 # Optional: PostgreSQL support (uncomment if needed)
 # psycopg2-binary==2.9.9

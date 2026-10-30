@@ -1,0 +1,3 @@
+- name: Run logrotate
+  ansible.builtin.command: logrotate -f /etc/logrotate.conf
+  changed_when: true

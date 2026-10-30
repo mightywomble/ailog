@@ -1,0 +1,6 @@
+- name: Restart containers that are stuck restarting
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - restart-crashloop-container

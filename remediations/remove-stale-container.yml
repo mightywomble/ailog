@@ -1,0 +1,29 @@
+slug: remove-stale-container
+version: 1
+title: Remove containers that exited days ago
+summary: Deletes exited containers older than 7 days. Volumes and images are kept.
+risk: low
+est_seconds: 25
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: exited \([0-9]+\) .*(days|weeks) ago|stale container|dead container
+    source: docker
+    min_count: 2
+blast_radius:
+  changes:
+  - docker rm of exited containers older than 7 days
+  does_not:
+  - volumes
+  - images
+  - running containers
+  - compose definitions
+playbook: playbooks/remove-stale-container.yml
+verify:
+  command: docker ps -aq --filter status=exited --filter until=168h | wc -l
+  expect:
+    stdout_max: 0
+  settle_seconds: 5
+fleet_safe: true

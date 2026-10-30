@@ -1,0 +1,6 @@
+- name: Remove the conntrack drop-in
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - sysctl-conntrack-rollback

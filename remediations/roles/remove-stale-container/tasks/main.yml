@@ -1,0 +1,10 @@
+- name: Find exited containers older than 7 days
+  ansible.builtin.command: docker ps -aq --filter status=exited --filter until=168h
+  register: stale_containers
+  changed_when: false
+
+- name: Remove each stale container
+  ansible.builtin.command: docker rm {{ item }}
+  loop: "{{ stale_containers.stdout_lines }}"
+  when: stale_containers.stdout_lines | length > 0
+  changed_when: true

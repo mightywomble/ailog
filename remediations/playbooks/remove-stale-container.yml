@@ -1,0 +1,6 @@
+- name: Remove containers that exited days ago
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - remove-stale-container

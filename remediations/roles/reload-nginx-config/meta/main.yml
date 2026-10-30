@@ -1,0 +1,17 @@
+galaxy_info:
+  role_name: reload_nginx_config
+  author: ailog
+  description: Backs up the current config, runs nginx -t, and reloads only when the test passes.
+  license: MIT
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - ailog
+    - remediation
+dependencies: []

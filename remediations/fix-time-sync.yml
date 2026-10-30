@@ -1,0 +1,29 @@
+slug: fix-time-sync
+version: 1
+title: Turn on NTP and step the clock
+summary: Enables systemd time synchronisation and steps chrony once if it is installed.
+risk: low
+est_seconds: 25
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: clock (skew|jump|went backwards)|time.*(out of sync|not synchronised)|NTP
+    source: syslog
+    min_count: 2
+blast_radius:
+  changes:
+  - NTP enablement
+  - chrony clock step
+  does_not:
+  - timezone
+  - hardware clock policy beyond step
+  - the host
+playbook: playbooks/fix-time-sync.yml
+verify:
+  command: timedatectl show -p NTPSynchronized --value
+  expect:
+    stdout_matches: ^yes$
+  settle_seconds: 20
+fleet_safe: true

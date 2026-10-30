@@ -1,0 +1,6 @@
+- name: Force a logrotate pass
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - rotate-logs-logrotate

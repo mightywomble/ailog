@@ -1,0 +1,17 @@
+galaxy_info:
+  role_name: rotate_logs_logrotate
+  author: ailog
+  description: Runs logrotate in force mode so oversized logs are rotated and compressed now.
+  license: MIT
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+  galaxy_tags:
+    - ailog
+    - remediation
+dependencies: []

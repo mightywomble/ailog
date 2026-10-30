@@ -1,0 +1,10 @@
+- name: Write the sysctl drop-in
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-ailog-conntrack.conf
+    mode: '0644'
+    content: 'net.netfilter.nf_conntrack_max = 262144
+
+      '
+- name: Apply sysctl
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/99-ailog-conntrack.conf
+  changed_when: true

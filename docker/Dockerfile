@@ -12,7 +12,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt \
+    && ansible-galaxy collection install --no-cache-dir \
+        ansible.posix:1.5.4 community.docker:3.10.4 community.general:8.6.0
 
 COPY . /app
 

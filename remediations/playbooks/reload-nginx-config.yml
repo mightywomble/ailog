@@ -1,0 +1,6 @@
+- name: Validate and reload nginx
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - reload-nginx-config

@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.2.0 | **Self-healing remediation.** Reports now produce remedy cards from a validated Ansible catalog: a plan you approve (click for one host, typed `RUN` for more), wave-limited execution, independent post-apply verification, mandatory rollback above low risk, in-app maintenance windows and per-host protection, full audit trail. Model output is demoted to a non-executable *Unverified suggestion* card; promotion is a PR. Execution is off by default (`AILOG_ALLOW_REMEDIATION=off\|dry_run\|on`). | ✅ Complete |
 | 2026-10-30 | v3.1.2 | **SSH terminal fixed behind proxies.** The websocket origin guard compared `Origin` with `request.host_url` exactly, so any deployment reached over https through a reverse proxy (or by a different hostname) had every terminal rejected with "Origin not allowed". The check now compares hosts, honours `X-Forwarded-Host`, and accepts extra origins via `AILOG_WS_ALLOWED_ORIGINS`. | ✅ Complete |
 | 2026-10-29 | v3.1.1 | **Cache-proof releases.** Every stylesheet and module is linked with a version query string; HTML is served with Cache-Control no-store and static files must revalidate. Settings shows the running version in its footer, so a deployed build can be identified at a glance. | ✅ Complete |
 | 2026-10-29 | v3.1.0 | **Interface (look and feel) as a fourth appearance axis.** Settings → Appearance now offers three layouts — **Classic** (the existing shell), **Glass** (bento cards, pill navigation, blurred translucent panels, ambient glow) and **Console** (dense instrument grid, accent-topped cards, uppercase micro-labels, tabular numerals). Colour themes, light/dark, density and motion all apply on top of every interface; the choice is stored in `ui.interface`, applied as `data-ui` before first paint, exposed as `?ui=glass`, and switchable from ⌘K | ✅ Complete |
@@ -429,6 +430,12 @@ torn down (an iframe, a poller, a chart).
 | `AILOG_KNOWN_HOSTS` | `/data/known_hosts` (fallback `~/.ssh/known_hosts`) | Pinned host keys |
 | `AILOG_WS_ALLOW_NO_ORIGIN` | `0` | Accept websocket upgrades without an `Origin` header (only for old clients) |
 | `AILOG_WS_ALLOWED_ORIGINS` | _(empty)_ | Extra origins (comma separated, `*` wildcards) allowed to open the SSH terminal websocket, e.g. `https://*.home.arpa`. Same-host and `X-Forwarded-Host` origins are always accepted. |
+| `AILOG_ALLOW_REMEDIATION` | `off` | Remediation execution: `off` (cards only), `dry_run` (`--check --diff`), `on` (real changes). |
+| `AILOG_REMEDIATION_MAX_HOSTS` | `10` | Plans wider than this are refused. |
+| `AILOG_REMEDIATION_MAX_CONCURRENT` | `2` | Concurrent remediation runs per process. |
+| `AILOG_REMEDIATION_RETENTION_DAYS` | `30` | Ansible artifact directories kept on disk. |
+| `AILOG_REMEDIATION_ALLOW_IDEA_CHANNEL` | `1` | Allow model *suggestion* cards (never executable). |
+| `AILOG_SECRET_KEY` | _(dev fallback)_ | Signs plan confirmation tokens. Set this in production. |
 | `AILOG_RUN_SCHEDULER` | `1` | Set `0` on web replicas so only one process owns APScheduler |
 
 Health probe: `GET /healthz` is unauthenticated and reports the active auth mode.
@@ -1121,6 +1128,38 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.2.0 - Self-healing remediation (approval-gated, catalog-only)
+- 🩺 **Remedy cards on every report.** The correlation stage already clusters the evidence; a deterministic
+  matcher (regex + `min_count`, with a published confidence formula) turns those clusters into up to a dozen
+  concrete remedies. No model is involved in deciding what may run.
+- ✅ **You approve, then it runs.** *Plan* shows the scope, the hosts, the waves, the playbook, the verify
+  command and the rollback. One host is a click; more than one requires typing `RUN`. The plan is signed into a
+  5-minute HMAC token over `slug|hosts|dry_run|exp`, so the browser cannot widen the scope afterwards.
+- 🧾 **The playbook cannot grade itself.** After each wave an independent SSH probe evaluates the entry's
+  `verify.expect` (`exit_code`, `stdout_matches`, `stdout_contains`, `stdout_min`/`max`). Ansible success plus a
+  failing probe is *not* healed.
+- 🧱 **Twelve catalog remedies, fifteen playbooks, fifteen roles.** Every entry validates strictly: slug equals
+  filename, risk is known, rollback is mandatory above low risk, the playbook must live inside `remediations/`,
+  and `verify` must be falsifiable. Molecule scaffolds included.
+- 🌊 **Wave-limited execution.** Low risk runs `ceil(n/4)` hosts per wave; medium/high run serially. A run halts
+  when failures exceed 20% or two targets fail in a row; unstarted hosts are marked `skipped`.
+- ↩️ **Rollback is a first-class path.** Failed targets are rolled back automatically at the end of a run, and
+  `/remediation/runs/<uuid>` offers a manual rollback. Every step is written to `audit_events`.
+- 🕒 **Maintenance windows live in the app.** Weekday ranges, `HH:MM` start/end (midnight wrap supported), a
+  timezone per window, optional group/tag scope and `block` vs `warn` mode. Hosts can be marked **do not
+  remediate**, and the planner and runner both refuse them.
+- 🤖 **The model is an idea channel, not an execution path.** Its output becomes a card labelled
+  *Unverified suggestion — copy and run yourself* with **no Apply button**, filtered against a destructive-command
+  blocklist. Promotion is a reviewed PR that adds a playbook and tests
+  ([docs/promoting-a-suggestion.md](docs/promoting-a-suggestion.md)).
+- 🔒 **Off by default.** `AILOG_ALLOW_REMEDIATION=off` (cards visible, apply 403), `dry_run` (`--check --diff`
+  only) or `on`. Caps, timeouts, settle window and 30-day artifact retention are all env-driven.
+- 🖥️ **New surfaces:** `/remediation` (policy, catalog, windows, protected hosts, recent runs), the run detail page
+  with per-target before/after evidence, a header link and three ⌘K entries.
+- 🧪 Tests: six modules — catalog validation, matcher determinism, planner/token tampering, the runner state
+  machine against a fake Ansible, the HTTP contract and the flag gate, policy and windows — plus UI guards for
+  tokens, stylesheet order and escaping.
 
 ### v3.1.2 - SSH terminal works behind proxies again
 - 🔓 **Fixed:** the websocket origin guard introduced in the audit compared `Origin` with `request.host_url`

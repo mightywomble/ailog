@@ -1,0 +1,31 @@
+slug: reload-nginx-config
+version: 1
+title: Validate and reload nginx
+summary: Backs up the current config, runs nginx -t, and reloads only when the test
+  passes.
+risk: medium
+est_seconds: 25
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: nginx.*(configuration file|emerg|test failed)|reload failed
+    source: syslog
+    min_count: 1
+blast_radius:
+  changes:
+  - /etc/nginx/nginx.conf.ailog-bak (backup)
+  - nginx worker reload
+  does_not:
+  - nginx config content
+  - certificates
+  - the host
+playbook: playbooks/reload-nginx-config.yml
+verify:
+  command: systemctl is-active nginx
+  expect:
+    stdout_matches: ^active$
+  settle_seconds: 10
+fleet_safe: false
+rollback: playbooks/reload-nginx-config-rollback.yml

@@ -1,0 +1,29 @@
+slug: restart-failed-units
+version: 1
+title: Restart every failed systemd unit
+summary: Restarts units in the failed state so their services come back cleanly.
+risk: low
+est_seconds: 45
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: Failed to start|entered failed state|Main process exited, code=exited
+    source: syslog
+    min_count: 2
+blast_radius:
+  changes:
+  - restart of units currently in failed state
+  does_not:
+  - unit files
+  - enable/disable state
+  - other running services
+  - the host
+playbook: playbooks/restart-failed-units.yml
+verify:
+  command: systemctl --failed --no-legend | wc -l
+  expect:
+    stdout_max: 0
+  settle_seconds: 15
+fleet_safe: false

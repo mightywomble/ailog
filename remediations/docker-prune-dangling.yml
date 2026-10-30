@@ -1,0 +1,30 @@
+slug: docker-prune-dangling
+version: 1
+title: Remove dangling Docker images
+summary: Prunes untagged image layers that no container references. Volumes are never
+  touched.
+risk: low
+est_seconds: 40
+idempotent: true
+os: []
+requires: []
+match:
+  any:
+  - signature_regex: dangling image|no space left on device|image.*(size|usage)
+    source: docker
+    min_count: 1
+blast_radius:
+  changes:
+  - untagged docker images
+  does_not:
+  - volumes
+  - tagged images
+  - running containers
+  - build cache
+playbook: playbooks/docker-prune-dangling.yml
+verify:
+  command: docker images -f dangling=true -q | wc -l
+  expect:
+    stdout_max: 0
+  settle_seconds: 5
+fleet_safe: true
