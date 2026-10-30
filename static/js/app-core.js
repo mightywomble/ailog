@@ -192,7 +192,9 @@ export function init() {
         const dashboardTotalHostsEl = document.getElementById('dashboard-total-hosts');
         const dashboardTotalSchedulesEl = document.getElementById('dashboard-total-schedules');
         const dashboardDbStatusEl = document.getElementById('dashboard-db-status');
-        
+        // Owned by the Quick access toolbar, not by the removed Quick actions panel.
+        const dashboardOpenMonitoringBtn = document.getElementById('dashboard-open-monitoring');
+
         const hostListContainer = document.getElementById('host-list-container');
         const settingsBtn = document.getElementById('settings-btn');
         const createAnsibleInventoryBtn = document.getElementById('create-ansible-inventory-btn');

@@ -252,3 +252,35 @@ def test_the_dashboard_has_no_quick_actions_panel():
                  'dashboard-open-monitoring-wizard'):
         assert dead not in body, f'{dead} is back on the dashboard'
         assert dead not in _read(JS, 'app-core.js'), f'{dead} is still wired in app-core.js'
+
+
+def _strip_js_comments(body):
+    body = re.sub(r'/\*.*?\*/', '', body, flags=re.S)
+    return re.sub(r'(?m)^\s*//.*$', '', body)
+
+
+def test_app_core_does_not_use_undeclared_button_variables():
+    """A ReferenceError inside init() is invisible to `node --check` and to pytest,
+    but it aborts the rest of the wiring: the host list never renders and every
+    later button does nothing. v3.4.1 removed a `const dashboardOpenMonitoringBtn`
+    that a surviving listener still used, and the dashboard came up empty.
+
+    Every element variable name is declared once and used many times, so a
+    conservative "declared before use" check on the `*Btn` family catches the
+    whole class without a JS runtime."""
+    body = _strip_js_comments(_read(JS, 'app-core.js'))
+    declared = set(re.findall(r'\b(?:const|let|var)\s+(\w+)\s*=', body))
+    declared |= set(re.findall(r'\bfunction\s+(\w+)', body))
+    for group in re.findall(r'\(([^)]*)\)\s*=>', body):
+        declared |= {part.strip() for part in group.split(',') if part.strip().isidentifier()}
+    for group in re.findall(r'function\s*\w*\s*\(([^)]*)\)', body):
+        declared |= {part.strip() for part in group.split(',') if part.strip().isidentifier()}
+    used = set(re.findall(r'\b[a-z]\w*Btn\b', body))
+    assert sorted(used - declared) == [], 'used but never declared: %s' % sorted(used - declared)
+
+
+def test_dashboard_element_variables_are_declared_before_use():
+    body = _strip_js_comments(_read(JS, 'app-core.js'))
+    declared = set(re.findall(r'\b(?:const|let|var)\s+(\w+)\s*=', body))
+    used = set(re.findall(r'\bdashboard[A-Z]\w*\b', body))
+    assert sorted(used - declared) == [], 'undeclared dashboard variables: %s' % sorted(used - declared)

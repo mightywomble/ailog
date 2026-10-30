@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.4.2 | **Fixed: the dashboard came up empty.** v3.4.1 deleted a `const dashboardOpenMonitoringBtn` that a surviving listener still used, so `init()` threw a `ReferenceError` and everything after it - the host list, the toolbar, every modal - silently stopped wiring. The declaration is restored, and a test now fails if any `*Btn` variable is used but never declared. | ✅ Complete |
 | 2026-10-30 | v3.4.1 | **Quick actions removed from the dashboard.** The panel of four cards (Admin Settings, Rescan All, Export SSH Config, Monitoring Wizard) duplicated the header, the *More* menu and the command palette, so it is gone along with its wiring. | ✅ Complete |
 | 2026-10-30 | v3.4.0 | **Reports are dialogs.** A report opens inside the Reports dialog - from the dashboard list, from *Analyse All Logs* when the analysis finishes, and from the report list - and every link inside a report (*All reports*, *Remediation*, *view previous*) stays in that dialog instead of loading a new page. The self-healing card now takes the full width, with model *Unverified suggestions* in a column beside it rather than a half-width card with empty space. The header *Remediation* button is back to a plain green link. | ✅ Complete |
 | 2026-10-30 | v3.3.1 | **Remediation opens in a dialog, from a green button.** The header entry point is now a success-green button that opens the whole self-healing page (start a run, catalog, windows, protected hosts, recent runs) in a dialog, so the plan wizard never loses the dashboard behind it. The page keeps its `/remediation` URL and an `?embed=1` mode that drops its own Back link, and the dialog unloads the frame on close so its timers stop. | ✅ Complete |
@@ -754,9 +755,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.4.1`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.4.2`
 (`:latest` points at the same manifest), digest
-`sha256:e7302ddf1891b6545370503a0a36854f3c526de40c628638dc806e57a7921896`, running as
+`sha256:4257bcc27bddf9b43f90ff29a6d2e71e36ba64140a88e1c1b84850624d795471`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -765,7 +766,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.4.1 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.4.2 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -773,7 +774,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.4.1 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.4.2 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -1174,6 +1175,21 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.4.2 - Fixed: no hosts, no buttons
+- 🐛 **The dashboard was dead, not empty.** v3.4.1 removed the *Quick actions* panel and deleted four element
+  variables with it - one of them, `dashboardOpenMonitoringBtn`, belonged to the *Quick access* toolbar and was
+  still referenced 260 lines below. `init()` therefore threw
+  `ReferenceError: dashboardOpenMonitoringBtn is not defined` at `app-core.js:461`, and because everything after
+  that point is wiring, the host list never rendered and no button did anything. `node --check` cannot see this and
+  neither could the template tests.
+- ✅ **Fixed** by restoring that one declaration. The other three really were dead and stay gone.
+- 🛡️ **A guard so it cannot happen again:** a test now collects every `*Btn` identifier in `app-core.js` (comments
+  stripped), works out what is declared as `const`/`let`/`var`/function/parameter, and fails on anything used but
+  never declared. Verified by re-breaking the file: the test flags exactly `dashboardOpenMonitoringBtn`.
+- 🔍 **Reproduced and confirmed in a real browser**, before and after: production v3.4.1 - 0 host cards,
+  settings and monitoring buttons dead, one `ReferenceError`; v3.4.2 - 2 host cards, both dialogs open, no errors.
+- 🚀 **Deployed as `v3.4.2`** (`sha256:4257bcc2…4d795471`); production now renders all 16 host cards with no console errors.
 
 ### v3.4.1 - Quick actions removed from the dashboard
 - 🧹 **The "Quick actions" card row is gone.** All four of its entries already exist elsewhere: *Admin Settings* is the
