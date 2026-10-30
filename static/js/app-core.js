@@ -173,6 +173,19 @@ export function init() {
 
         const dashboardView = document.getElementById('dashboard-view');
         const logsView = document.getElementById('logs-view');
+        // Phone / unfolded-Fold card screen (see showMobileHosts()).
+        const mobileHostsView = document.getElementById('mobile-hosts-view');
+        const mobileHostCards = document.getElementById('mobile-host-cards');
+        const mobileHostsSub = document.getElementById('mobile-hosts-sub');
+        const mobileHostsRefresh = document.getElementById('mobile-hosts-refresh');
+        const mobileHostSheet = document.getElementById('mobile-host-sheet');
+        const mhSheetTitle = document.getElementById('mh-sheet-title');
+        const mhSheetSub = document.getElementById('mh-sheet-sub');
+        const mhSheetStatus = document.getElementById('mh-sheet-status');
+        const mhSheetFacts = document.getElementById('mh-sheet-facts');
+        const mhSheetSsh = document.getElementById('mh-sheet-ssh');
+        const mhSheetLogs = document.getElementById('mh-sheet-logs');
+        const mhSheetClose = document.getElementById('mh-sheet-close');
         const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
         const logsSelectedHostTitle = document.getElementById('logs-selected-host-title');
         const logsActionPull = document.getElementById('logs-action-pull');
@@ -442,13 +455,48 @@ export function init() {
 
         const showDashboard = () => {
             if (typeof contractSshTerminal === 'function') contractSshTerminal();
+            closeMobileHostSheet();
             if (dashboardView) dashboardView.classList.remove('hidden');
             if (logsView) logsView.classList.add('hidden');
+            mobileHostsView?.classList.add('hidden');
         };
 
+        // --------------------------------------------------------- phone grid
+        // A Fold cover screen (~360-420px) is a phone; the same device unfolded
+        // (~700-800px) is still touch, so the grid stays the first screen there
+        // too. A desktop window that happens to be narrow has a fine pointer and
+        // keeps the desktop layout.
+        const PHONE_QUERY = window.matchMedia('(max-width: 640px)');
+        const TOUCH_QUERY = window.matchMedia('(max-width: 900px) and (pointer: coarse)');
+        const isMobileLayout = () => PHONE_QUERY.matches || TOUCH_QUERY.matches;
+
+        const showMobileHosts = () => {
+            if (typeof contractSshTerminal === 'function') contractSshTerminal();
+            closeMobileHostSheet();
+            dashboardView?.classList.add('hidden');
+            logsView?.classList.add('hidden');
+            mobileHostsView?.classList.remove('hidden');
+            mobileHostsView?.scrollTo?.({ top: 0 });
+            syncHostStatuses();
+        };
+
+        const onLayoutChange = () => {
+            const onDashboard = dashboardView && !dashboardView.classList.contains('hidden');
+            const onGrid = mobileHostsView && !mobileHostsView.classList.contains('hidden');
+            if (isMobileLayout()) {
+                if (onDashboard) showMobileHosts();
+            } else if (onGrid) {
+                showDashboard();
+            }
+        };
+        PHONE_QUERY.addEventListener?.('change', onLayoutChange);
+        TOUCH_QUERY.addEventListener?.('change', onLayoutChange);
+
         const showLogs = () => {
+            closeMobileHostSheet();
             if (dashboardView) dashboardView.classList.add('hidden');
             if (logsView) logsView.classList.remove('hidden');
+            mobileHostsView?.classList.add('hidden');
         };
 
 
@@ -1765,6 +1813,22 @@ export function init() {
                     hostListContainer.appendChild(hostCard);
                 }
 
+                // The phone view is a second mount of the same cards: same data,
+                // same factory, different interaction (sheet + full-screen SSH).
+                if (mobileHostCards) {
+                    mobileHostCards.innerHTML = '';
+                    const localhostTile = createHostCard('local', {
+                        friendly_name: 'Localhost',
+                        ip: 'localhost',
+                        user: 'local',
+                        description: 'Local machine'
+                    }, 'mobile');
+                    mobileHostCards.appendChild(localhostTile);
+                    for (const [id, host] of ordered) {
+                        mobileHostCards.appendChild(createHostCard(id, host, 'mobile'));
+                    }
+                }
+
                 // In manual mode, keep manual order list up to date with newly seen hosts
                 if (getHostsSortMode() === 'manual') {
                     const manual = getManualOrder();
@@ -1780,9 +1844,11 @@ export function init() {
                     if (changed) setManualOrder(filtered);
                 }
 
-                // Select localhost by default
-                console.log('[DEBUG] Selecting localhost by default...');
-                window.showDashboard();
+                // First screen: on a phone/fold the host grid, on a desktop the
+                // dashboard exactly as before.
+                console.log('[DEBUG] Showing the initial view...');
+                if (isMobileLayout()) showMobileHosts();
+                else window.showDashboard();
                 updateDashboardStats();
                 // First paint is honest: unknown dots until the poll answers.
                 syncHostStatuses();
@@ -1830,6 +1896,110 @@ export function init() {
             return { title: os?.name || OS_TITLES[family] || family, text: OS_GLYPHS[family] || OS_GLYPHS.unknown };
         };
 
+        // Latest poll per host, for the detail sheet (the cards only need classes).
+        const hostStatusById = new Map();
+
+        const seenLabel = (iso) => {
+            if (!iso) return 'no record';
+            const text = String(iso);
+            const zoned = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(text) ? text : `${text}Z`;
+            const then = new Date(zoned).getTime();
+            if (Number.isNaN(then)) return 'unknown';
+            const mins = Math.round((Date.now() - then) / 60000);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return `${mins}m ago`;
+            if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
+            return `${Math.round(mins / 1440)}d ago`;
+        };
+
+        let sheetHostId = null;
+
+        function closeMobileHostSheet() {
+            sheetHostId = null;
+            mobileHostSheet?.classList.add('hidden');
+            document.body.classList.remove('mh-sheet-open');
+        }
+
+        const openMobileHostSheet = (hostId) => {
+            if (!mobileHostSheet) return;
+            const hostData = hostId === 'local'
+                ? { friendly_name: 'Localhost', ip: 'localhost', user: 'local', group_names: [] }
+                : (hosts?.[hostId] || { ip: hostId, user: 'root' });
+            const snap = hostStatusById.get(hostId) || null;
+            const name = hostData.friendly_name || hostId;
+            sheetHostId = hostId;
+
+            if (mhSheetTitle) mhSheetTitle.textContent = name;
+            if (mhSheetSub) mhSheetSub.textContent = `${hostData.user || 'root'}@${hostData.ip || hostId}`;
+
+            if (mhSheetStatus) {
+                const up = snap ? snap.online !== false : null;
+                const badge = snap ? osBadge(snap.os).title : '';
+                const parts = [];
+                if (up === null) parts.push('Not polled yet');
+                else if (up) parts.push(snap.metrics_error ? 'Reachable (no metrics)' : 'Online');
+                else {
+                    const seen = seenLabel(snap.last_seen);
+                    parts.push(seen === 'no record' ? 'Offline — never seen online' : `Offline — last seen ${seen}`);
+                }
+                if (badge) parts.push(badge);
+                mhSheetStatus.textContent = parts.join(' · ');
+                mhSheetStatus.dataset.state = up === null ? 'unknown' : (up ? 'up' : 'down');
+            }
+
+            if (mhSheetFacts) {
+                mhSheetFacts.textContent = '';
+                const facts = [
+                    ['Group', (hostData.group_names && hostData.group_names.length) ? hostData.group_names.join(', ') : 'none'],
+                    ['Docker', snap ? (snap.docker?.installed
+                        ? `${snap.docker.containers_running || 0} containers running`
+                        : 'not installed') : 'unknown'],
+                    ['Last online', snap ? seenLabel(snap.last_seen) : 'unknown'],
+                    ['Host key', hostId],
+                ];
+                facts.forEach(([label, value]) => {
+                    const dt = document.createElement('dt');
+                    dt.textContent = label;
+                    const dd = document.createElement('dd');
+                    dd.textContent = String(value);
+                    mhSheetFacts.append(dt, dd);
+                });
+            }
+
+            // There is no SSH session to open on the app's own machine.
+            if (mhSheetSsh) mhSheetSsh.classList.toggle('hidden', hostId === 'local');
+
+            mobileHostSheet.classList.remove('hidden');
+            document.body.classList.add('mh-sheet-open');
+            mhSheetClose?.focus({ preventScroll: true });
+        };
+
+        const sshIntoHost = async (hostId) => {
+            selectHost(hostId);
+            await openSshTerminal();
+            // On a phone the terminal opens full screen: it is the reason you
+            // tapped, and the inline pane is waist-height at best.
+            if (isMobileLayout()) window.ailogSsh?.expand();
+        };
+
+        mhSheetClose?.addEventListener('click', closeMobileHostSheet);
+        mobileHostSheet?.addEventListener('click', (event) => {
+            if (event.target === mobileHostSheet) closeMobileHostSheet();
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && sheetHostId) closeMobileHostSheet();
+        });
+        mhSheetSsh?.addEventListener('click', () => {
+            const hostId = sheetHostId;
+            closeMobileHostSheet();
+            if (hostId) sshIntoHost(hostId);
+        });
+        mhSheetLogs?.addEventListener('click', () => {
+            const hostId = sheetHostId;
+            closeMobileHostSheet();
+            if (hostId) selectHost(hostId);
+        });
+
         const applyHostStatus = (card, snapshot) => {
             const dot = card.querySelector('.hc-dot');
             if (!dot) return;
@@ -1861,32 +2031,52 @@ export function init() {
             if (docker) docker.hidden = !(snapshot.docker && snapshot.docker.installed);
         };
 
-        const syncHostStatuses = async () => {
+        const syncHostStatuses = async (force = false) => {
             if (document.hidden) return;
-            if (!hostListContainer || !hostListContainer.children.length) return;
+            const mounted = (hostListContainer && hostListContainer.children.length)
+                || (mobileHostCards && mobileHostCards.children.length);
+            if (!mounted) return;
             let payload;
             try {
-                const res = await fetch('/api/metrics/servers', { headers: { Accept: 'application/json' } });
+                const url = force ? '/api/metrics/servers?refresh=1' : '/api/metrics/servers';
+                const res = await fetch(url, { headers: { Accept: 'application/json' } });
                 if (!res.ok) return;
                 payload = await res.json();
             } catch (_) {
                 return;      // a dead poll must not break the sidebar
             }
             const byKey = new Map((payload?.servers || []).map((s) => [s.host_key, s]));
-            hostListContainer.querySelectorAll('.host-card').forEach((card) => {
-                applyHostStatus(card, byKey.get(card.dataset.hostId));
+            hostStatusById.clear();
+            byKey.forEach((value, key) => hostStatusById.set(key, value));
+
+            // Both mounts: the sidebar list and the phone grid.
+            [hostListContainer, mobileHostCards].forEach((container) => {
+                container?.querySelectorAll('.host-card').forEach((card) => {
+                    applyHostStatus(card, byKey.get(card.dataset.hostId));
+                });
             });
+
+            const all = payload?.servers || [];
+            const up = all.filter((s) => s.online !== false).length;
+            if (mobileHostsSub) {
+                mobileHostsSub.textContent = all.length
+                    ? `${up}/${all.length} online · tap a card for details, >_ for SSH`
+                    : 'No hosts configured yet';
+            }
         };
         window.refreshHostStatuses = syncHostStatuses;
         setInterval(syncHostStatuses, HOST_STATUS_POLL_MS);
         document.addEventListener('visibilitychange', () => { if (!document.hidden) syncHostStatuses(); });
-        const createHostCard = (hostId, hostData) => {
+        mobileHostsRefresh?.addEventListener('click', () => syncHostStatuses(true));
+        // variant 'sidebar' (desktop list) | 'mobile' (phone grid tile).
+        const createHostCard = (hostId, hostData, variant = 'sidebar') => {
+            const isMobileCard = variant === 'mobile';
             const card = document.createElement('div');
-            card.className = 'host-card termix-host';
+            card.className = `host-card termix-host${isMobileCard ? ' host-card-mobile' : ''}`;
             card.dataset.hostId = hostId;
 
             const isManualMode = (getHostsSortMode() === 'manual');
-            const isReorderable = isManualMode && hostId !== 'local';
+            const isReorderable = !isMobileCard && isManualMode && hostId !== 'local';
             if (isReorderable) {
                 // We keep the card draggable, but only allow drag when the user grabs the handle.
                 card.draggable = true;
@@ -1910,7 +2100,9 @@ export function init() {
                 ? hostData.group_names.join(', ') : 'none';
             const hostName = hostData.friendly_name || hostData.ip || hostId;
             if (!isReorderable) {
-                card.title = `${hostName} — ${hostData.user}@${hostData.ip} (group: ${groupLabel})`;
+                card.title = isMobileCard
+                    ? `${hostName} — tap for details`
+                    : `${hostName} — ${hostData.user}@${hostData.ip} (group: ${groupLabel})`;
             }
             card.innerHTML = `
                 ${grabHandleHtml}
@@ -1930,19 +2122,26 @@ export function init() {
                 `}
             `;
 
-            // Clicking the card selects a host but does NOT automatically pull logs
+            // Desktop: clicking the card selects the host (logs view).
+            // Phone: it opens the slim detail sheet instead - a full log screen
+            // is the wrong answer to "which host is this?".
             card.addEventListener('click', (e) => {
-                // Avoid click-select while dragging
                 if (card.dataset.dragging === '1') return;
-                selectHost(hostId);
+                if (isMobileCard) openMobileHostSheet(hostId);
+                else selectHost(hostId);
             });
 
             // ">_" opens the SSH window that already exists, for this host.
             card.querySelector('[data-hc-ssh]')?.addEventListener('click', (event) => {
                 event.stopPropagation();
                 if (card.dataset.dragging === '1') return;
-                selectHost(hostId);
-                openSshTerminal();
+                if (isMobileCard) {
+                    closeMobileHostSheet();
+                    sshIntoHost(hostId);            // full screen on a phone
+                } else {
+                    selectHost(hostId);
+                    openSshTerminal();
+                }
             });
 
             // Drag/drop reordering (manual mode only)
@@ -5196,6 +5395,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
         window.showToast = showToast;
         window.showDashboard = showDashboard;
         window.showLogs = showLogs;
+        window.showMobileHosts = showMobileHosts;
+        window.isMobileLayout = isMobileLayout;
 
         // The brand is the way home: the same view switch as the tab bar, so a
         // click never reloads the page (href="/" is the no-JS fallback).

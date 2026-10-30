@@ -356,6 +356,23 @@
                 </div>
             </div>
         </div>
+        <!-- Phone / unfolded Fold: the card-first screen. Every host is a tile
+             whose >_ opens the SSH terminal full screen; tapping the tile body
+             opens a slim detail sheet. Desktop never shows this view. -->
+        <section id="mobile-hosts-view" class="mobile-hosts hidden" aria-label="Hosts">
+            <header class="mh-head">
+                <div class="min-w-0">
+                    <h2 class="mh-title">Hosts</h2>
+                    <p class="mh-sub" id="mobile-hosts-sub">Checking reachability…</p>
+                </div>
+                <button id="mobile-hosts-refresh" class="mh-refresh" type="button" title="Refresh status">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8 8 0 104.582 9m0 0H9"/></svg>
+                    <span>Refresh</span>
+                </button>
+            </header>
+            <div id="mobile-host-cards" class="mh-grid"></div>
+        </section>
+
         <div id="logs-view" class="hidden flex-1 flex flex-col gap-4 termix-view" style="height: 100%;">
             <div class="termix-panel p-4" style="position: relative; z-index: 40;">
                 <div class="flex items-center justify-between gap-4">
@@ -644,6 +661,33 @@
     {% include "partials/log-selection.html" %}
 
     {% include "partials/ssh-terminal.html" %}
+
+
+    <!-- Slim host detail sheet (phone grid). Filled by app-core with textContent. -->
+    <div id="mobile-host-sheet" class="mh-sheet hidden" role="dialog" aria-modal="true"
+         aria-labelledby="mh-sheet-title">
+        <div class="mh-sheet-panel">
+            <div class="mh-sheet-head">
+                <div class="min-w-0">
+                    <h2 id="mh-sheet-title" class="mh-sheet-title">Host</h2>
+                    <p id="mh-sheet-sub" class="mh-sheet-sub"></p>
+                </div>
+                <button id="mh-sheet-close" type="button" class="mh-sheet-close" aria-label="Close host details">&times;</button>
+            </div>
+            <p id="mh-sheet-status" class="mh-sheet-status"></p>
+            <dl id="mh-sheet-facts" class="mh-sheet-facts"></dl>
+            <div class="mh-sheet-actions">
+                <button id="mh-sheet-ssh" type="button" class="mh-action mh-action-primary">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z"/></svg>
+                    <span>SSH terminal</span>
+                </button>
+                <button id="mh-sheet-logs" type="button" class="mh-action">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h12M4 18h8"/></svg>
+                    <span>Logs &amp; info</span>
+                </button>
+            </div>
+        </div>
+    </div>
 
     <nav id="mobile-tabbar" class="mobile-tabbar" aria-label="Primary">
         <button type="button" data-tab="overview" aria-current="page">

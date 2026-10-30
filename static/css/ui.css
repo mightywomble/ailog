@@ -630,3 +630,296 @@ a.ov-row-main:hover { text-decoration: underline; }
   .ssh-modal-panel { width: 100vw; height: 92dvh; max-height: 92dvh; }
   .ssh-modal-host { display: none; }
 }
+
+/* ------------------------------------------- phone / Fold card-first hosts
+ * The first screen on a touch device is a grid of host tiles, not the log
+ * viewer: the >_ corner opens the SSH terminal (full screen) and the tile
+ * body opens a slim detail sheet. Gated on the same queries as
+ * isMobileLayout() in app-core.js so a narrow desktop window never sees it. */
+.mobile-hosts { display: none; }
+@media (max-width: 640px), (max-width: 900px) and (pointer: coarse) {
+  #mobile-hosts-view:not(.hidden) {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .mh-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 2px 2px 0;
+  }
+  .mh-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .mh-sub {
+    margin: 3px 0 0;
+    font-size: .72rem;
+    color: var(--muted);
+  }
+  .mh-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: .76rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mh-refresh svg { width: 16px; height: 16px; }
+  .mh-refresh:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* two across on a phone, three across when the Fold is open or in landscape */
+  .mh-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    align-content: start;
+    padding-bottom: 4px;
+  }
+  @media (min-width: 560px) {
+    .mh-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+
+  /* Tiles reuse the sidebar card anatomy but get thumb-sized targets. */
+  #mobile-host-cards .host-card {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 116px;
+    padding: 2.1rem .6rem 3.1rem;
+    overflow: hidden;
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #mobile-host-cards .host-card:active { border-color: var(--border-strong); }
+  #mobile-host-cards .host-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  #mobile-host-cards .host-card .hc-main { min-width: 0; width: 100%; }
+  #mobile-host-cards .host-card .host-card-name {
+    font-size: .92rem;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  #mobile-host-cards .host-card .hc-sub {
+    margin-top: 3px;
+    font-family: ui-monospace, 'JetBrains Mono', monospace;
+    font-size: .64rem;
+    color: var(--faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #mobile-host-cards .host-card .hc-corner {
+    position: absolute;
+    top: .6rem;
+    left: .65rem;
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    line-height: 1;
+  }
+  #mobile-host-cards .host-card .hc-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    background: var(--faint);
+  }
+  #mobile-host-cards .host-card .hc-dot[data-state="up"] { background: var(--ok); }
+  #mobile-host-cards .host-card .hc-dot[data-state="down"] { background: var(--bad); }
+  #mobile-host-cards .host-card .hc-dot[data-state="unknown"] { background: var(--faint); }
+  #mobile-host-cards .host-card .hc-os {
+    display: inline-flex;
+    align-items: center;
+    font-size: 1.15rem;
+    line-height: 1;
+    color: var(--text);
+  }
+  #mobile-host-cards .host-card .hc-os svg { width: 19px; height: 19px; display: block; }
+  #mobile-host-cards .host-card .hc-docker {
+    position: absolute;
+    bottom: .55rem;
+    left: .7rem;
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+  #mobile-host-cards .host-card .hc-docker[hidden] { display: none; }
+
+  /* the reason you are here: 44x44 of green prompt */
+  #mobile-host-cards .host-card .hc-ssh {
+    position: absolute;
+    bottom: .45rem;
+    right: .5rem;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--ok) 55%, transparent);
+    background: color-mix(in srgb, var(--ok) 16%, transparent);
+    color: var(--ok);
+    font-family: ui-monospace, 'JetBrains Mono', monospace;
+    font-size: .8rem;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #mobile-host-cards .host-card .hc-ssh:active {
+    background: color-mix(in srgb, var(--ok) 30%, transparent);
+    border-color: var(--ok);
+  }
+  #mobile-host-cards .host-card .hc-ssh:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+}
+
+/* ------------------------------------------------ slim host detail sheet */
+.mh-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, .55);
+}
+.mh-sheet:not(.hidden) { display: flex; }
+.mh-sheet-panel {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 560px;
+  max-height: 82dvh;
+  overflow-y: auto;
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.mh-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mh-sheet-title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.mh-sheet-sub {
+  margin: 3px 0 0;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: .72rem;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mh-sheet-close {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  margin: -6px -6px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.mh-sheet-close:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.mh-sheet-status {
+  margin: 12px 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: .76rem;
+  color: var(--muted);
+}
+.mh-sheet-status::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--faint);
+  flex: 0 0 auto;
+}
+.mh-sheet-status[data-state="up"]::before { background: var(--ok); }
+.mh-sheet-status[data-state="down"]::before { background: var(--bad); }
+.mh-sheet-status[data-state="unknown"]::before { background: var(--faint); }
+
+/* label/value pairs, two columns, small type: a sheet, not a page */
+.mh-sheet-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 14px 0 0;
+  font-size: .76rem;
+}
+.mh-sheet-facts dt { color: var(--faint); }
+.mh-sheet-facts dd {
+  margin: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mh-sheet-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.mh-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.mh-action svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.mh-action:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.mh-action-primary {
+  border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+
+body.mh-sheet-open { overflow: hidden; }
