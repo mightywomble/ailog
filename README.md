@@ -758,7 +758,7 @@ by the `stacks/ailog/stack.yml` stack file.
 
 **Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.6.0`
 (`:latest` points at the same manifest), digest
-`sha256:4014902c7b88c788f78305df0d0c812a40453e532aa1567e6b55484303c6c1f3`, running as
+`sha256:e75761159ef8d397c766eae1504ebdac6768687caab7a9c1aae2681932c91334`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -1195,6 +1195,10 @@ The application provides detailed startup logs showing:
 - 📡 **`os` is part of the same SSH round trip** (`uname -s` + `/etc/os-release`), so the OS glyph costs nothing extra.
 - 🧪 **12 new tests** (`tests/test_homescreen_cards.py`) plus the updated metrics test; verified in headless Edge on
   desktop, tablet rail and phone, and the SSH prompt opens the terminal on a real click.
+- 🔍 **Checked against production after the deploy:** `16/16 online` (was 10/16), 16 uniform 88px cards, 15 SSH prompts
+  (localhost has none), 10 Docker marks, the Mac's card showing 🍎, a real click opening a **Connected** SSH session, and
+  the logo returning to the dashboard without a reload.
+- 🚀 **Deployed as `v3.6.0`** (`sha256:e7576115…c91334`).
 
 ### v3.6.0 - The fleet card tells you who is offline
 - 🖱️ **`10/16 online` is a button.** Clicking it scrolls to the *Offline devices* card and flashes it; it is a real
