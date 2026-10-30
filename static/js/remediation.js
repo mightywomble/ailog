@@ -44,9 +44,15 @@ function listHtml(title, items) {
 
 function codeBlock(label, text, extraClass) {
     if (!text) return '';
-    return `<details ${extraClass === 'open' ? 'open' : ''}><summary class="rem-muted">${esc(label)}</summary>` +
-        `<div class="rem-code-head"><span class="rem-muted">${esc(label)}</span>` +
-        `<button type="button" class="rem-btn" data-copy="${esc(label)}">Copy</button></div>` +
+    // The primary block stays open with one label and a Copy button; the
+    // secondary ones collapse behind their own label.
+    if (extraClass === 'open') {
+        return `<div class="rem-blockdoc">` +
+            `<div class="rem-code-head"><span class="rem-block-label">${esc(label)}</span>` +
+            `<button type="button" class="rem-btn" data-copy="${esc(label)}">Copy</button></div>` +
+            `<pre class="rem-pre" data-copy-text>${esc(text)}</pre></div>`;
+    }
+    return `<details class="rem-blockdoc"><summary class="rem-muted">${esc(label)}</summary>` +
         `<pre class="rem-pre" data-copy-text>${esc(text)}</pre></details>`;
 }
 
@@ -79,6 +85,37 @@ function cardHtml(card) {
     </article>`;
 }
 
+/* Say where the cards came from, and only claim what is actually there. */
+function summaryLabel(cards) {
+    const ideas = cards.filter((card) => card.source === 'llm').length;
+    const catalog = cards.length - ideas;
+    const parts = [];
+    if (catalog) parts.push(`${catalog} from the reviewed catalog`);
+    if (ideas) parts.push(`${ideas} unverified model suggestion${ideas === 1 ? '' : 's'}`);
+    if (!parts.length) return 'nothing to fix in this report';
+    return parts.join(' \u00b7 ');
+}
+
+/* Catalog remedies are the executable ones, so they get the page width. Model
+   suggestions are unverified and never executed: they sit in a column beside
+   them, visibly dashed and labelled, and only when there are any. */
+function cardsHtml() {
+    const ideas = state.cards.filter((card) => card.source === 'llm');
+    const catalog = state.cards.filter((card) => card.source !== 'llm');
+    if (!ideas.length) return `<div class="rem-layout"><div class="rem-col">${catalog.map(cardHtml).join('')}</div></div>`;
+    if (!catalog.length) return `<div class="rem-layout"><div class="rem-col is-ideas">${ideas.map(cardHtml).join('')}</div></div>`;
+    return `<div class="rem-layout has-ideas">
+        <div class="rem-col">${catalog.map(cardHtml).join('')}</div>
+        <div class="rem-col is-ideas">
+            <div class="rem-col-head">
+                Unverified suggestions
+                <span>from the model &mdash; copy and run yourself</span>
+            </div>
+            ${ideas.map(cardHtml).join('')}
+        </div>
+    </div>`;
+}
+
 function render() {
     const host = root();
     if (!host) return;
@@ -87,11 +124,11 @@ function render() {
         <div class="rem-head">
             <h2>Self-healing</h2>
             ${modeBadge()}
-            <span class="rem-sub">${cards.length} suggestion(s) from the catalog${state.policy && state.policy.idea_channel ? ' and the model' : ''}</span>
+            <span class="rem-sub">${summaryLabel(cards)}</span>
             <button type="button" class="rem-btn" data-refresh style="margin-left:auto">Re-match</button>
         </div>
         ${state.policy && !state.policy.enabled ? '<div class="rem-empty">Remediation is in read-only mode. Cards are visible (and copyable); applying requires <code>AILOG_ALLOW_REMEDIATION=dry_run</code> or <code>on</code>.</div>' : ''}
-        ${cards.length ? `<div class="rem-grid">${cards.map(cardHtml).join('')}</div>` : `<div class="rem-empty">
+        ${cards.length ? cardsHtml() : `<div class="rem-empty">
             No catalog remedy matches this report's evidence.
             <div class="rem-empty-sub">
                 That is normal when the findings are informational (sessions, accepted logins,
@@ -180,7 +217,7 @@ function bind() {
         }
         const copy = target.getAttribute('data-copy');
         if (copy) {
-            const block = target.closest('details').querySelector('[data-copy-text]');
+            const block = target.closest('.rem-blockdoc')?.querySelector('[data-copy-text]');
             try { await navigator.clipboard.writeText(block.textContent); target.textContent = 'Copied'; } catch (error) { }
             setTimeout(() => { target.textContent = 'Copy'; }, 1200);
         }

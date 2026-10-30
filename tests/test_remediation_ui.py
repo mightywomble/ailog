@@ -171,13 +171,10 @@ def test_the_palette_offers_the_remediation_entry_points():
 
 def test_the_shell_links_to_the_remediation_page():
     body = _read(TEMPLATES, 'index.html')
-    # An href, so the entry point still works without JS and middle-click opens a tab.
+    # A green header link to the page. The dialog belongs to reports, not here.
     assert 'href="/remediation"' in body
-    # ...but the header button opens the dialog when JS is available.
-    assert 'id="remediation-link"' in body
-    assert 'id="remediationModalFrame"' in body
-    # iframe-modals.js is bundled through main.js (an ES module import).
-    assert "import './iframe-modals.js'" in _read(JS, 'main.js')
+    assert 'icon-btn is-go' in body
+    assert 'remediationModalFrame' not in body
 
 
 def test_the_remediation_header_button_is_green():
@@ -189,23 +186,57 @@ def test_the_remediation_header_button_is_green():
     assert 'var(--ok)' in shell.split('.icon-btn.is-go')[1][:400]
 
 
-def test_the_remediation_dialog_embeds_the_page_and_unloads_it():
+def test_a_report_opens_in_the_reports_dialog():
     body = _read(JS, 'iframe-modals.js')
-    assert 'openRemediationModal' in body and 'closeRemediationModal' in body
-    assert "/remediation?embed=1" in body
-    # Closing must blank the frame so the page's timers stop.
-    assert 'remediationModal: \'remediationModalFrame\'' in body
-    # Clicking the header link intercepts, but modifier-clicks are left alone.
-    assert "closest('#remediation-link')" in body
-    assert 'event.metaKey' in body
+    assert 'window.openReportModal' in body
+    assert '/reports/${encodeURIComponent(reportId)}?embed=1' in body
+    # The reports frame is unloaded on close, like every other embedded page.
+    assert "reportsModal: 'reportsModalFrame'" in body
+    # The dialog title follows whichever document the frame is showing.
+    assert 'contentDocument' in body and 'reportsModalTitle' in body
 
 
-def test_the_remediation_page_drops_its_own_chrome_when_embedded():
-    body = _read(TEMPLATES, 'remediation.html')
+def test_a_report_has_an_embedded_form_whose_links_stay_in_the_dialog():
+    body = _read(TEMPLATES, 'report.html')
     assert "request.args.get('embed') == '1'" in body
-    assert 'is-embedded' in body
-    # A dialog does not need a "Back" link, and a full page does.
-    assert '>Back</a>' in body and 'Open full page' in body
+    assert 'is-embedded' not in body  # this page uses utilities, not a page shell
+    # Every internal link carries the flag, so navigation stays in the frame.
+    assert 'href="/reports{{ q }}"' in body
+    assert 'href="/remediation{{ q }}"' in body
+    assert "{{ diff.get('previous_id') }}{{ q }}" in body
+    # ...and the standalone-only Back link is dropped inside the dialog.
+    assert '{% if not embedded %}' in body
+
+
+def test_the_report_list_links_stay_inside_the_dialog():
+    body = _read(TEMPLATES, 'reports.html')
+    assert 'href="/reports/{{ r.id }}{% if embedded %}?embed=1{% endif %}"' in body
+    # No target=_blank for report links when embedded: that would escape the dialog.
+    assert 'target="_blank"' not in body.split('{% for r in reports %}')[1]
+
+
+def test_the_dashboard_and_the_analyser_open_the_report_dialog():
+    overview = _read(JS, 'overview.js')
+    assert 'window.openReportModal(link.dataset.ovReport)' in overview
+    assert 'data-ov-report=' in overview
+
+    core = _read(JS, 'app-core.js')
+    assert 'window.openReportModal(id)' in core
+    assert '?embed=1' in core, 'the analyser link must point at the embedded report'
+    # A finished analysis opens its report in the dialog without another click.
+    assert "if (evt.report_id && typeof window.openReportModal === 'function')" in core
+
+
+def test_catalog_cards_take_the_width_and_model_ideas_sit_beside_them():
+    body = _read(JS, 'remediation.js')
+    assert 'function cardsHtml()' in body
+    # Catalog (executable) cards are one column; ideas only appear when there are any.
+    assert "card.source === 'llm'" in body
+    assert 'rem-layout has-ideas' in body
+    css = _read(CSS, 'remediation.css')
+    assert '.rem-layout.has-ideas' in css
+    # The old half-width two-up grid is gone.
+    assert '.rem-grid' not in body and '.rem-grid' not in css
 
 
 def test_the_admin_page_explains_how_to_enable_execution():

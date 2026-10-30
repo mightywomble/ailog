@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Server reports - Homelab Manager</title>
+  <title>Server reports</title>
   <script src="/static/vendor/tailwindcss-3.4.16.js" integrity="sha384-mS5Uq7sE90lgbBDN8xgf34ibEgbZo4gB3tfLY40ZRle+M188BQw8onzNHg6GUZaA"></script>
   <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -31,10 +31,10 @@
   </script>
   <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
 </head>
-{# Served standalone (/reports) and embedded in the index.html modal
-   (?embed=1). Embedded: no Back link, and report links open in a tab because
-   navigating the iframe to /reports/<id> would replace the list inside the
-   dialog (and that page's own Back link would load the SPA in a frame). #}
+{# Served standalone (/reports) and embedded in the index.html dialog
+   (?embed=1). Embedded: no Back link, and a report link *navigates the frame*
+   to /reports/<id>?embed=1 - the report opens in the same dialog, and its own
+   links (?embed=1 throughout) keep it there. #}
 {% set embedded = request.args.get('embed') == '1' %}
 <body class="bg-slate-950 text-slate-100 {% if not embedded %}min-h-screen{% endif %}">
   <div class="max-w-6xl mx-auto {% if embedded %}px-3 py-2.5{% else %}p-4 sm:p-6{% endif %}">
@@ -91,7 +91,7 @@
                 <tr class="border-b border-white/5 row-hover">
                   <td class="px-4 py-3 text-slate-400 whitespace-nowrap">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }}</td>
                   <td class="px-4 py-3">
-                    <a class="text-indigo-300 hover:text-indigo-200" href="/reports/{{ r.id }}"{% if embedded %} target="_blank" rel="noopener"{% endif %}>{{ r.host_label or r.host_key }}</a>
+                    <a class="text-indigo-300 hover:text-indigo-200" href="/reports/{{ r.id }}{% if embedded %}?embed=1{% endif %}">{{ r.host_label or r.host_key }}</a>
                   </td>
                   <td class="px-4 py-3">
                     <span class="text-xs px-2 py-0.5 rounded border {{ badge }}">{{ verdict|upper }}</span>
@@ -104,7 +104,7 @@
                   <td class="px-4 py-3 text-slate-400 whitespace-nowrap">{{ '{:,}'.format(r.events_total or 0) }}</td>
                   <td class="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{{ r.model or '' }}</td>
                   <td class="px-4 py-3 text-right whitespace-nowrap">
-                    <a href="/reports/{{ r.id }}" class="text-indigo-300 hover:text-indigo-200 text-xs mr-3"{% if embedded %} target="_blank" rel="noopener"{% endif %}>View</a>
+                    <a href="/reports/{{ r.id }}{% if embedded %}?embed=1{% endif %}" class="text-indigo-300 hover:text-indigo-200 text-xs mr-3">View</a>
                     <button type="button" data-report-id="{{ r.id }}"
                             class="delete-report text-slate-500 hover:text-rose-300 text-xs">Delete</button>
                   </td>

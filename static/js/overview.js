@@ -128,7 +128,7 @@
             const verdict = (r.verdict || 'unknown').toLowerCase();
             return `<li class="ov-row">
                 <span class="ov-verdict is-${esc(verdict)}">${esc(verdict)}</span>
-                <a class="ov-row-main" href="/reports/${esc(r.id)}" target="_blank" rel="noopener">${esc(r.host_label || r.host_key)}</a>
+                <a class="ov-row-main" href="/reports/${esc(r.id)}?embed=1" data-ov-report="${esc(r.id)}">${esc(r.host_label || r.host_key)}</a>
                 <span class="ov-row-meta">${esc(timeAgo(r.created_at))}</span>
               </li>`;
         }).join('');
@@ -190,6 +190,15 @@
         mount.innerHTML = cards.join('');
         mount.dataset.updated = new Date().toISOString();
         painted = true;
+
+        // A report is read next to the fleet it came from: open it in the dialog.
+        mount.querySelectorAll('[data-ov-report]').forEach((link) => {
+            link.addEventListener('click', (event) => {
+                if (typeof window.openReportModal !== 'function') return;   // href still works
+                event.preventDefault();
+                window.openReportModal(link.dataset.ovReport);
+            });
+        });
 
         mount.querySelector('[data-ov-open-reports]')?.addEventListener('click', () => {
             if (typeof window.openReportsModal === 'function') window.openReportsModal(null, '');
