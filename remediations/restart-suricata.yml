@@ -10,7 +10,7 @@ requires: []
 match:
   any:
   - signature_regex: suricata.*(stopped|exited|failed|not running)|no events.*suricata
-    source: syslog
+    source: [syslog, journal]
     min_count: 1
 blast_radius:
   changes:

@@ -47,6 +47,45 @@
     </div>
     {% endif %}
 
+    <section class="rem-block" id="start-run">
+      <h2>Start a run <span class="rem-muted">without a report</span></h2>
+      <p class="rem-muted">
+        Report cards are the usual way in, but a remedy can also be planned here against one
+        host. Nothing runs until you review the plan: it shows the playbook, how the fix is
+        verified and what it will never touch.
+      </p>
+      {% if policy.enabled and policy.runner_available %}
+      <form id="start-form" class="rem-form">
+        <label>Remedy
+          <select name="slug" id="start-slug" required>
+            {% for row in remediation_catalog %}
+              {% if row.enabled %}
+              <option value="{{ row.slug }}">{{ row.title }} ({{ row.risk }})</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </label>
+        <label>Host
+          <select name="host_key" id="start-host" required>
+            {% for host in hosts %}
+              <option value="db-{{ host.id }}"{% if host.do_not_remediate %} disabled{% endif %}>
+                {{ host.friendly_name or host.hostname }}{% if host.do_not_remediate %} — protected{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="rem-inline"><input type="checkbox" name="dry_run" id="start-dry" checked> dry run first</label>
+        <button class="rem-btn primary" type="submit">Plan…</button>
+      </form>
+      <div id="start-error" class="rem-empty rem-bad hidden"></div>
+      {% else %}
+      <div class="rem-empty">
+        Starting a run needs execution enabled (<code>AILOG_ALLOW_REMEDIATION=dry_run</code>
+        or <code>on</code>) and <code>ansible-runner</code> in the image.
+      </div>
+      {% endif %}
+    </section>
+
     <section class="rem-block">
       <h2>Catalog <span class="rem-muted">({{ remediation_catalog|length }} remedies)</span></h2>
       <table class="rem-table">
@@ -128,6 +167,7 @@
       </table>
     </section>
   </main>
+  <div id="plan-panel" class="rem-modal hidden" role="dialog" aria-modal="true" aria-label="Plan"></div>
   <script src="/static/js/remediation-admin.js?v={{ app_version }}" defer></script>
 
 </body>

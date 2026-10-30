@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.2.1 | **Remediation is actually reachable now.** `source:` rules were compared against the whole cluster key, so `source: syslog` never matched the real `file:syslog` and **no report could ever produce a card**; sources now match by key segment and may list several families (`[syslog, journal]`). A report with no match shows an explanation instead of an empty strip, and `/remediation` gained a **Start a run** form so a remedy can be planned against one host without waiting for a matching report. | ✅ Complete |
 | 2026-10-30 | v3.2.0 | **Self-healing remediation.** Reports now produce remedy cards from a validated Ansible catalog: a plan you approve (click for one host, typed `RUN` for more), wave-limited execution, independent post-apply verification, mandatory rollback above low risk, in-app maintenance windows and per-host protection, full audit trail. Model output is demoted to a non-executable *Unverified suggestion* card; promotion is a PR. Execution is off by default (`AILOG_ALLOW_REMEDIATION=off\|dry_run\|on`). | ✅ Complete |
 | 2026-10-30 | v3.1.2 | **SSH terminal fixed behind proxies.** The websocket origin guard compared `Origin` with `request.host_url` exactly, so any deployment reached over https through a reverse proxy (or by a different hostname) had every terminal rejected with "Origin not allowed". The check now compares hosts, honours `X-Forwarded-Host`, and accepts extra origins via `AILOG_WS_ALLOWED_ORIGINS`. | ✅ Complete |
 | 2026-10-29 | v3.1.1 | **Cache-proof releases.** Every stylesheet and module is linked with a version query string; HTML is served with Cache-Control no-store and static files must revalidate. Settings shows the running version in its footer, so a deployed build can be identified at a glance. | ✅ Complete |
@@ -749,10 +750,12 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.2.0`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.2.1`
 (`:latest` points at the same manifest), digest
-`sha256:662b6218c367ce4cacae4dd3dd3a4f0b6c3f12cbb27fa2597cf2bb91f830c931`, running as
-`ailog_ailog.1` on `swarm-worker1`. Redeploy after a push with:
+`sha256:1703dfdbf62bbc4956cd371d9c1317a3a145252bcd80d1e8a6c38600e010985d`, running as
+`ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
+(`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
+playbook only executes with `--check --diff`. Redeploy after a push with:
 
 ```bash
 docker service update --with-registry-auth --force ailog_ailog
@@ -763,7 +766,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.2.0 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.2.1 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -773,7 +776,8 @@ uses (`ansible.posix`, `community.docker`, `community.general`), plus the whole
 `remediations/` tree, so plans and dry runs work with no extra setup.
 
 **Execution is off by default.** Cards and the catalog are visible, but `plan`
-and `apply` return 403 until the service is told otherwise:
+and `apply` return 403 until the service is told otherwise. The homelab stack
+runs `dry_run`, so plans work and nothing changes on a host:
 
 ```yaml
 # stacks/ailog/stack.yml -> environment
@@ -795,7 +799,7 @@ Verify the deployment:
 ```bash
 curl -s http://<node>:5001/api/remediation/settings \
   | jq '{mode: .policy.mode, runner: .policy.runner_available, catalog: (.catalog|length)}'
-# => {"mode":"off","runner":true,"catalog":12}
+# => {"mode":"dry_run","runner":true,"catalog":12}
 ```
 
 `runner: false` means the image was built without the Ansible extras — rebuild
@@ -1163,6 +1167,26 @@ The application provides detailed startup logs showing:
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
 ## 📝 Recent Updates
+
+### v3.2.1 - Remediation is reachable (and honest when it has nothing to offer)
+- 🐛 **Fixed: no card could ever appear.** Rules declare `source: syslog`, but clusters carry a qualified key
+  (`file:syslog`, `journal:nginx.service`, `docker:web.1.abc`). The comparison was against the whole string, so
+  every source-filtered rule was skipped and every report produced zero remedies. Sources now match by key
+  segment and a rule may list several families.
+- 📚 **Catalog sources widened** to `[syslog, journal]` for the systemd/disk/kernel/docker-daemon remedies:
+  a failed unit is equally visible in `journal:<unit>`, and restricting to syslog silently hid it.
+- 📊 **Severity is numeric in clusters** (2 warn, 3 error, 4 crit); the confidence bonus now reads it as an int
+  instead of comparing against the strings `error`/`crit`.
+- 🧭 **You can start a run without a report.** `/remediation` has a **Start a run** form (remedy + host + dry
+  run) that opens the same reviewed plan dialog; previously the only entry point was a matched card.
+- 💬 **Empty state that explains itself.** A report with no matches now says why (informational findings, not a
+  fixable fault), links to the catalog, and offers **Re-match**. Report and reports-list pages link to
+  `/remediation`.
+- 🧪 Tests use the **real cluster shape** (`file:syslog`, integer severity) plus explicit regressions for
+  segment matching and multi-family sources, so this cannot silently regress again.
+- 🚀 **Deployed as `v3.2.1`** (`sha256:1703dfdb…10985d`) with production in **`dry_run`**, and a verified
+  end-to-end run: plan → signed token → `ansible-runner` over SSH to `swarm-manager` → `checked`
+  (both tasks skipped: no failed units, which is the correct answer).
 
 ### v3.2.0 - Self-healing remediation (approval-gated, catalog-only)
 - 🩺 **Remedy cards on every report.** The correlation stage already clusters the evidence; a deterministic

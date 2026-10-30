@@ -71,3 +71,11 @@
 .rem-target { display: flex; justify-content: space-between; gap: .5rem; font-size: .78rem;
   padding: .3rem .45rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
 .rem-confirm { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; font-size: .8rem; color: var(--text); }
+/* Empty state: explain why no card appeared, and where to go next. */
+.rem-empty-sub {
+  margin-top: .35rem;
+  font-size: .85em;
+  color: var(--muted);
+  max-width: 62ch;
+  line-height: 1.5;
+}

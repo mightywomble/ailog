@@ -12,7 +12,7 @@ match:
   any:
   - signature_regex: (unit|service).*(disabled|not enabled).*(failed|not started)|Failed
       to start
-    source: syslog
+    source: [syslog, journal]
     min_count: 1
 blast_radius:
   changes:

@@ -9,3 +9,31 @@
 .rem-host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .4rem; }
 .rem-host { display: flex; gap: .4rem; align-items: center; font-size: .8rem; color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .35rem .5rem; background: var(--surface-2); }
+/* A label that sits inline with a checkbox in the compact forms. */
+.rem-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .85rem;
+  color: var(--muted);
+}
+
+.rem-form label {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+.rem-form select {
+  background: var(--surface-sunken);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .4rem .55rem;
+  font-size: .9rem;
+  min-width: 12rem;
+}
+
+.hidden { display: none !important; }

@@ -104,11 +104,16 @@ def test_the_run_stream_handles_the_documented_event_types():
         assert kind in body, f'the renderer ignores {kind} events'
 
 
-def test_the_admin_page_never_builds_html_from_data():
-    """It only talks to the API and reloads; nothing is interpolated into markup."""
+def test_the_admin_page_escapes_the_plan_it_renders():
+    """The plan panel builds markup, so every server string must go through esc()."""
     body = _read(JS, 'remediation-admin.js')
-    assert 'innerHTML' not in body
-    assert 'insertAdjacentHTML' not in body
+    assert 'const esc = ' in body
+    assert "'&': '&amp;'" in body and "'<': '&lt;'" in body
+    for field in ('plan.title', 'plan.risk', 'plan.scope', 't.label'):
+        assert '${esc(' + field + ')}' in body, f'{field} is interpolated unescaped'
+    assert "${esc(t.why || '')}" in body
+    # Plan text blocks (playbook / verify / rollback) go through block().
+    assert 'function block(' in body and '${esc(text)}' in body
 
 
 def test_the_palette_offers_the_remediation_entry_points():

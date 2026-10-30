@@ -24,7 +24,13 @@ def _report(db, host_key, clusters, verdict='degraded', truncated=False):
     return row
 
 
-def _cluster(sig, count=5, src='syslog', sev='error', label=None):
+def _cluster(sig, count=5, src='file:syslog', sev=3, label=None):
+    """A cluster shaped exactly like serverreport/normalize.py emits.
+
+    src is a qualified key ("file:syslog", "journal:nginx.service",
+    "docker:web.1.abc") and sev is an int (2 warn, 3 error, 4 crit) - not the
+    bare family names and severity strings an earlier fixture invented.
+    """
     return {'sig': sig, 'count': count, 'src': src, 'sev': sev, 'label': label or sig}
 
 
@@ -67,9 +73,37 @@ def test_min_count_is_respected(models, db, host):
 
 def test_source_filter_is_respected(models, db, host):
     entries = [e for e in matcher.catalog.load_all() if e['slug'] == 'restart-failed-units']
-    report = _report(db, host, [_cluster('Failed to start thing.service', count=9, src='totally-different')])
+    report = _report(db, host, [_cluster('Failed to start thing.service', count=9, src='docker:web.1.abc')])
     summary = matcher.match_report(report, models, db, entries=entries, with_ideas=False)
     assert summary['matched'] == []
+
+
+def test_a_file_qualified_source_matches_the_rule_family(models, db, host):
+    """Regression: `source: syslog` must match the real `file:syslog` key.
+
+    Before this was fixed every rule was skipped, so no report could ever
+    produce a card - the feature was invisible in production."""
+    from remediation import matcher as m
+    assert m._source_matches('file:syslog', {'syslog'}) is True
+    assert m._source_matches('journal:nginx.service', {'journal'}) is True
+    assert m._source_matches('docker:web.1.abc', {'docker'}) is True
+    assert m._source_matches('file:auth.log', {'syslog'}) is False
+    assert m._source_matches('file:syslog', set()) is True
+
+
+def test_a_journal_cluster_can_match_a_systemd_remedy(models, db, host):
+    report = _report(db, host, [_cluster('Failed to start nginx.service',
+                                         count=3, src='journal:nginx.service')])
+    summary = matcher.match_report(report, models, db, with_ideas=False)
+    assert 'restart-failed-units' in summary['matched']
+
+
+def test_a_rule_can_accept_several_source_families():
+    from remediation import matcher as m
+    rule = {'signature_regex': 'x', 'source': ['syslog', 'journal']}
+    assert m._wanted_sources(rule) == {'syslog', 'journal'}
+    assert m._wanted_sources({'source': 'docker'}) == {'docker'}
+    assert m._wanted_sources({}) == set()
 
 
 def test_unknown_verdict_suppresses_every_card(models, db, host):
@@ -89,7 +123,7 @@ def test_truncated_evidence_suppresses_every_card(models, db, host):
 
 def test_confidence_is_higher_with_more_evidence(models, db, host):
     low = _report(db, host, [_cluster('Failed to start a.service', count=2)])
-    high = _report(db, host, [_cluster('Failed to start a.service', count=200, sev='crit')], verdict='failing')
+    high = _report(db, host, [_cluster('Failed to start a.service', count=200, sev=4)], verdict='failing')
     matcher.match_report(low, models, db, with_ideas=False)
     matcher.match_report(high, models, db, with_ideas=False)
     low_card = models.RemediationMatch.query.filter_by(report_id=low.id, slug='restart-failed-units').first()

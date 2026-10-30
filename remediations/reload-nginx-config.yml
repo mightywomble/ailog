@@ -11,7 +11,7 @@ requires: []
 match:
   any:
   - signature_regex: nginx.*(configuration file|emerg|test failed)|reload failed
-    source: syslog
+    source: [syslog, journal]
     min_count: 1
 blast_radius:
   changes:

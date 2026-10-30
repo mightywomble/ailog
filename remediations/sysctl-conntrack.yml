@@ -10,7 +10,7 @@ requires: []
 match:
   any:
   - signature_regex: nf_conntrack.*(table full|dropping packet)|conntrack table full
-    source: syslog
+    source: [syslog, journal]
     min_count: 1
 blast_radius:
   changes:
