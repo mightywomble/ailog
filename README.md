@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-30 | v3.7.0 | **Phones get a card-first host screen.** On a touch device the first screen is a grid of host tiles (2 across on a phone, 3 on an unfolded Fold or in landscape): the green `>_` on a tile opens the SSH terminal **full screen**, and tapping the tile body opens a slim detail sheet (status, OS, Docker, last seen, `SSH terminal` / `Logs & info`). Every action is thumb-sized (44px+). Desktop is untouched - the sidebar, dashboard and logs view are exactly as before. | ✅ Complete |
 | 2026-10-30 | v3.6.2 | **Fixed: the SSH prompt opened the previous host.** Each socket's handlers closed over the *shared* `sshSocket` variable, so when a second host was opened, `closeSshSocket()` shut the first socket down and its late `error`/`close` event called `closeSshSocket()` again - this time closing the brand-new connection. The new socket never reached `onopen`, no `connectToHost` was sent, and the tab/terminal kept showing the session you had just left. Handlers are now bound to their own socket and detached before closing. Also: the OS badge is bigger and Ubuntu hosts show the circle-of-friends mark instead of a generic penguin. | ✅ Complete |
 | 2026-10-30 | v3.6.0 | **The fleet card answers "which ones are down?".** `10/16 online` is now a button, and the dashboard has an *Offline devices* card of its own: every unreachable host with how long it has been out and the moment it was last seen. The collector now records `Host.last_seen` whenever a probe succeeds (at most once a minute per host), so the time is real rather than the moment the poll noticed. | ✅ Complete |
 | 2026-10-30 | v3.4.2 | **Fixed: the dashboard came up empty.** v3.4.1 deleted a `const dashboardOpenMonitoringBtn` that a surviving listener still used, so `init()` threw a `ReferenceError` and everything after it - the host list, the toolbar, every modal - silently stopped wiring. The declaration is restored, and a test now fails if any `*Btn` variable is used but never declared. | ✅ Complete |
@@ -757,9 +758,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.6.0`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.7.0`
 (`:latest` points at the same manifest), digest
-`sha256:58164a2ec14f1aaaed14bca06180e5b511f49f37542d4e54b39fb50d28142305`, running as
+`sha256:55b233e44e6ba19d58034747fe9115f11147ae37f66a93de6ed2973f6541f89c`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -768,7 +769,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.6.0 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.7.0 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -1175,6 +1176,26 @@ The application provides detailed startup logs showing:
 6. **Model** (`llm.py`) – fenced untrusted evidence, required sections, one call (or
    map/reduce passes), verdict parsed
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
+
+### v3.7.0 - Phones get a card-first hosts screen
+- 📱 **The first screen on a phone is the fleet.** A new phone-only view (`#mobile-hosts-view`) renders the same host
+  cards as the sidebar through the same factory (`createHostCard(id, host, 'mobile')`): name centred, reachability dot
+  and OS mark top-left, 🐳 Docker bottom-left, green `>_` bottom-right.
+- 🖐️ **Thumbs, not cursors.** The `>_` corner is 44×44, the sheet buttons are 48px tall, *Refresh* is 44px, and the
+  sheet pads itself for `env(safe-area-inset-bottom)`. Tiles are `touch-action: manipulation` so a tap is a tap.
+- 🖥️ **`>_` opens the terminal full screen.** The tile selects the host, opens the existing SSH dialog and auto-expands
+  it — no half-height inline pane on a 390px viewport.
+- 🗂️ **The body opens a slim sheet, not a page.** Status line (Online / Offline + last seen, with the OS name), four
+  facts (group, Docker, last online, host key) and two actions: *SSH terminal* and *Logs & info*. Written with
+  `textContent` only, closes on backdrop, ✕ or Escape, and hides SSH for the app's own machine.
+- 📐 **Two columns on a phone, three when the Fold is open or the phone is landscape** (`repeat(2)`, then `repeat(3)`
+  from 560px). The view is gated on `(max-width: 640px)` or `(max-width: 900px) and (pointer: coarse)` — the same
+  queries as `isMobileLayout()` — so a narrow desktop window keeps the desktop layout.
+- 🔁 **Live without a reload.** A layout change swaps grid ↔ dashboard, the bottom-tab *Hosts* button now opens the
+  grid instead of the drawer (`aria-current` follows the view), and the 20s status poll decorates both mounts.
+- 🧪 **17 new tests** (`tests/test_mobile_hosts_view.py`) and headless-Edge verification at 390×844, 760×900 and
+  1440×900: 6 tiles, a 44×44 prompt, a populated sheet, three columns unfolded, and the dashboard still first on
+  desktop.
 
 ### v3.6.0 - Homescreen: logo goes home, honest host cards
 - 🏠 **The logo is the way home.** `Homelab Manager` (mark + title) is now an anchor to `/` that is intercepted in JS:

@@ -10,7 +10,7 @@
     const sidebar = document.getElementById('hosts-sidebar');
     const openBtn = document.getElementById('mobile-menu-btn');
     const tabbar = document.getElementById('mobile-tabbar');
-    const views = ['dashboard-view', 'logs-view', 'suricata-stats-view'];
+    const views = ['dashboard-view', 'mobile-hosts-view', 'logs-view', 'suricata-stats-view'];
 
     const isOpen = () => body.classList.contains('sidebar-open');
 
@@ -61,6 +61,7 @@
         tabbar.querySelectorAll('[data-tab]').forEach((btn) => {
             const tab = btn.dataset.tab;
             const current = (tab === 'overview' && view === 'dashboard-view')
+                || (tab === 'hosts' && view === 'mobile-hosts-view')
                 || (tab === 'logs' && view === 'logs-view');
             if (current) btn.setAttribute('aria-current', 'page');
             else btn.removeAttribute('aria-current');
@@ -78,7 +79,9 @@
             if (typeof window.showLogs === 'function') window.showLogs();
             else document.getElementById('hosts-sidebar') && setOpen(true);
         } else if (tab === 'hosts') {
-            setOpen(true);
+            // The grid, not the drawer: hosts are the first screen on a phone.
+            if (typeof window.showMobileHosts === 'function') window.showMobileHosts();
+            else setOpen(true);
         } else if (tab === 'monitor') {
             if (typeof window.openMetricsModal === 'function') window.openMetricsModal('');
             else window.open('/metrics', '_blank', 'noopener');
@@ -101,6 +104,7 @@
     // Exported for the command palette: jump to a specific view.
     window.ailogShell = { showView: (name) => {
         if (name === 'dashboard') window.showDashboard?.();
+        else if (name === 'hosts') window.showMobileHosts?.();
         else if (name === 'logs') window.showLogs?.();
         else if (name === 'suricata') document.getElementById('suricata-stats-btn')?.click();
         syncTabs();
