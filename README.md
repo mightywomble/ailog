@@ -753,9 +753,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.3.1`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.4.0`
 (`:latest` points at the same manifest), digest
-`sha256:c75e0bc904f20862ae085f83c6e7a51c61745dd718048ba1a696e5114b09f0f0`, running as
+`sha256:06d52de26276af3e44b2d58036046b5d693aad5ebb24413509731417e666d5cb`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -764,7 +764,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.3.1 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.4.0 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -772,7 +772,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.3.1 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.4.0 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -1192,7 +1192,7 @@ The application provides detailed startup logs showing:
 - 🧪 Guards: report links carry the embed flag and no `target="_blank"`, the report page drops its Back link inside the
   dialog, `?embed=1` keeps *All reports* / *Remediation* / *view previous* in the frame, the dashboard and analyser go
   through `openReportModal`, and the card layout is one column plus an optional ideas column.
-- 🚀 **Deployed as `v3.4.0`** (`__DIGEST_SHORT__`), verified with a real click: dashboard row -> dialog with
+- 🚀 **Deployed as `v3.4.0`** (`sha256:06d52de2…66d5cb`), verified with a real click: dashboard row -> dialog with
   `/reports/1?embed=1`; *All reports* inside it -> same dialog, `/reports?embed=1`; row -> back to the report, URL
   never leaves `/`.
 
