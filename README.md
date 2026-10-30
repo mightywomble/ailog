@@ -752,9 +752,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.3.0`
+**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.3.1`
 (`:latest` points at the same manifest), digest
-`sha256:eac22ab743eccc881cbb183cf306c2583119a870ed34464fb12afc53629c55f7`, running as
+`sha256:c75e0bc904f20862ae085f83c6e7a51c61745dd718048ba1a696e5114b09f0f0`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -763,7 +763,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.3.0 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.3.1 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -771,7 +771,7 @@ list and the digest running in the swarm will not match the one you tagged:
 
 ```bash
 docker build --provenance=false --sbom=false -f docker/Dockerfile \
-  -t zot.safehomelan.com/ailog:v3.3.0 -t zot.safehomelan.com/ailog:latest .
+  -t zot.safehomelan.com/ailog:v3.3.1 -t zot.safehomelan.com/ailog:latest .
 ```
 
 #### Self-healing remediation in the swarm
@@ -1185,6 +1185,8 @@ The application provides detailed startup logs showing:
 - ⌘K *Open Remediation* opens the dialog as well, falling back to navigation.
 - 🧪 Guards added: the href and modal markup both exist, the class is token-driven (`var(--ok)`, no hex), the
   frame is blanked on `appmodal:close`, modifier-clicks are not swallowed, and the embed flag drops the Back link.
+- 🚀 **Deployed as `v3.3.1`** (`sha256:c75e0bc9…4b09f0f0`), green button and embedded dialog verified on
+  `ailog.safehomelan.com`.
 
 ### v3.3.0 - The plan is a wizard, and the run is visible
 - 🧭 ***Plan* now opens a wizard, not a single dialog.** Four steps: **Review** (risk, targets and why each host is
