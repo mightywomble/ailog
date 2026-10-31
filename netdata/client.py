@@ -51,6 +51,8 @@ UA = 'ailog-netdata/1.0'
 # stable in tests and in the query cache key.
 FLEET_CONTEXTS = ('system.cpu', 'system.ram', 'system.load', 'disk.space')
 DISK_CONTEXT = 'disk.space'
+# Present only on nodes running Docker; also carries the container count.
+DOCKER_CONTEXT = 'docker.containers.running'
 ANOMALY_CONTEXT = 'anomaly_detection.anomaly_rate'
 
 _cache: Dict[str, Tuple[float, Any]] = {}
@@ -569,6 +571,7 @@ def fleet_cards(after: int = -120, points: int = 30, ttl: Optional[float] = 2.0)
     disk = _group(query([DISK_CONTEXT]), [DISK_CONTEXT], guids)
     load = _group(query(['system.load']), ['system.load'], guids)
     anomaly = _group(query([ANOMALY_CONTEXT]), [ANOMALY_CONTEXT], guids)
+    docker = _group(query([DOCKER_CONTEXT]), [DOCKER_CONTEXT], guids)
 
     def dims(group, guid, context):
         return _root_instance(((group.get(guid) or {}).get(context) or {}))
@@ -583,6 +586,14 @@ def fleet_cards(after: int = -120, points: int = 30, ttl: Optional[float] = 2.0)
         ar_dims = next((v for k, v in ar_instances.items() if k.endswith(guid)), {}) \
             or _root_instance(ar_instances)
         ar_values = (ar_dims.get('anomaly_rate') or ar_dims.get('value') or {}).get('value') or []
+        # Docker presence without SSH: the context only exists where Docker does.
+        docker_instances = (docker.get(guid) or {}).get(DOCKER_CONTEXT) or {}
+        docker_running = 0
+        for _inst, _dims in docker_instances.items():
+            for _dim in (_dims or {}).values():
+                last = (_dim or {}).get('value') or []
+                if last and last[-1] is not None:
+                    docker_running += int(last[-1] or 0)
 
         out[guid] = {
             **node,
@@ -595,6 +606,8 @@ def fleet_cards(after: int = -120, points: int = 30, ttl: Optional[float] = 2.0)
             'disk_percent': _last_values(disk_values),
             'load1': _last_values((load_dims.get('load1') or {}).get('value') or []),
             'anomaly_rate': _last_values(ar_values),
+            'docker_installed': bool(docker_instances),
+            'docker_running': docker_running,
             'anomaly_max': _max(ar_values),
             'stats': {},
             'series': {

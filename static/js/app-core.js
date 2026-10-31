@@ -2039,30 +2039,83 @@ export function init() {
         // servers) and only decorates the cards - it never re-renders them, so
         // drag order, focus and selection survive a refresh.
         const HOST_STATUS_POLL_MS = 20000;
-        const OS_GLYPHS = { linux: '🐧', darwin: '🍎', bsd: '😈', windows: '🪟', unknown: '🖥' };
 
-        // Distro marks beat a generic penguin. The Ubuntu "circle of friends"
-        // is three dots on a ring, which is cheap and stays crisp at 15px.
-        const OS_BADGES = {
-            ubuntu: {
-                title: 'Ubuntu',
-                html: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">'
-                    + '<circle cx="12" cy="12" r="8.4"/>'
-                    + '<circle cx="12" cy="3.2" r="2.1" fill="currentColor" stroke="none"/>'
-                    + '<circle cx="4.4" cy="16.2" r="2.1" fill="currentColor" stroke="none"/>'
-                    + '<circle cx="19.6" cy="16.2" r="2.1" fill="currentColor" stroke="none"/>'
-                    + '</svg>',
-            },
+        // Numix-square-inspired marks: flat, geometric, monochrome, drawn in a
+        // 24-unit box. The square tile itself is CSS (one size for every icon
+        // on the card), so the glyph only has to fill the inside.
+        const HC_GLYPHS = {
+            ubuntu: '<circle cx="12" cy="12" r="5.6"/>'
+                + '<circle cx="12" cy="4.9" r="1.4" fill="currentColor" stroke="none"/>'
+                + '<circle cx="5.9" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>'
+                + '<circle cx="18.1" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>',
+            debian: '<path d="M12.4 5.6c3.5 0 6.2 2.4 6.2 5.5 0 2.6-2.1 4.7-4.7 4.7-2.1 0-3.8-1.5-3.8-3.5 0-1.6 1.3-2.9 2.9-2.9 1.3 0 2.3.9 2.3 2.1"/>'
+                + '<path d="M10.6 18.4c-2.9-.6-5-2.9-5-5.8 0-1 .2-1.9.7-2.7"/>',
+            alpine: '<path d="M3.4 17.6h5.2l3.4-7.4 2.6 5 1.7-2.6 4.3 5z" fill="currentColor" stroke="none"/>',
+            arch: '<path d="M12 4.2 4.8 19.8h3.1L12 10.4l4.1 9.4h3.1z" fill="currentColor" stroke="none"/>',
+            fedora: '<circle cx="12" cy="12" r="5.8"/>'
+                + '<path d="M13.7 6.6v10.8"/>',
+            hat: '<path d="M7.4 16.4h9.2l-1.9-4.6h2.7L12 4.8 6.6 11.8h2.7z" fill="currentColor" stroke="none"/>',
+            suse: '<path d="M6.6 5.6h10.8v3.2H6.6zM6.6 10.4h10.8v3.2H6.6zM6.6 15.2h6.4v3.2H6.6z" fill="currentColor" stroke="none"/>',
+            apple: '<path d="M12.1 8.6c1.5-1.5 3.7-.8 3.7 1.1 0 2.8-2.1 6-3.7 7-1.6-1-3.7-4.2-3.7-7 0-1.9 2.2-2.6 3.7-1.1z" fill="currentColor" stroke="none"/>'
+                + '<path d="M12.3 8.4c0-1.7.8-2.7 2.1-3.1"/>',
+            windows: '<path d="M4.6 5.4h6.6v6.6H4.6zM12.8 5.4h6.6v6.6h-6.6zM4.6 12.8h6.6v6.6H4.6zM12.8 12.8h6.6v6.6h-6.6z" fill="currentColor" stroke="none"/>',
+            bsd: '<path d="M6.3 9.6c1.4.3 2.2 1 2.6 2h6.2c.4-1 1.2-1.7 2.6-2 .5 2.7-.7 5.5-2.9 7.1-1.5 1-3.7 1-5.2 0-2.2-1.6-3.4-4.4-2.9-7.1z" fill="currentColor" stroke="none"/>'
+                + '<circle cx="10" cy="12.6" r=".9" fill="var(--surface, #000)" stroke="none"/>'
+                + '<circle cx="14" cy="12.6" r=".9" fill="var(--surface, #000)" stroke="none"/>',
+            linux: '<ellipse cx="12" cy="13.6" rx="5.2" ry="6.2" fill="currentColor" stroke="none"/>'
+                + '<circle cx="10.2" cy="10.4" r="1" fill="var(--surface, #000)" stroke="none"/>'
+                + '<circle cx="13.8" cy="10.4" r="1" fill="var(--surface, #000)" stroke="none"/>'
+                + '<path d="M10.4 12.9h3.2l-1.6 1.9z" fill="var(--surface, #000)" stroke="none"/>',
+            unknown: '<rect x="5.2" y="6.4" width="13.6" height="9.2" rx="1.2"/>'
+                + '<path d="M9.6 18.6h4.8M12 15.6v3"/>',
+        };
+
+        const HC_BADGE_KEYS = {
+            ubuntu: 'ubuntu', debian: 'debian', raspbian: 'debian', linuxmint: 'debian',
+            alpine: 'alpine', arch: 'arch', manjaro: 'arch', endeavouros: 'arch',
+            fedora: 'fedora',
+            rhel: 'hat', centos: 'hat', rocky: 'hat', almalinux: 'hat', ol: 'hat',
+            amzn: 'hat', oracle: 'hat',
+            suse: 'suse', opensuse: 'suse', 'opensuse-leap': 'suse', 'opensuse-tumbleweed': 'suse',
+            darwin: 'apple', macos: 'apple', osx: 'apple',
+            windows: 'windows', wsl: 'windows',
+            freebsd: 'bsd', openbsd: 'bsd', netbsd: 'bsd', bsd: 'bsd',
+            linux: 'linux', unknown: 'unknown',
+        };
+
+        const squareGlyph = (key) => {
+            const glyph = HC_GLYPHS[key] || HC_GLYPHS.unknown;
+            return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+                + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + glyph + '</svg>';
         };
 
         const OS_TITLES = { linux: 'Linux', darwin: 'macOS', bsd: 'BSD', windows: 'Windows', unknown: 'Unknown OS' };
 
         const osBadge = (os) => {
+            // Some collectors report the OS as a bare name ("Ubuntu"); treat it
+            // like a distro id so the mark is not lost to an "unknown" glyph.
+            if (typeof os === 'string') {
+                const name = os.trim();
+                const probe = name.toLowerCase();
+                let key = HC_BADGE_KEYS[probe];
+                if (!key) {
+                    key = Object.keys(HC_BADGE_KEYS).find((candidate) => probe.includes(candidate));
+                }
+                return { title: name || 'Unknown OS', html: squareGlyph(key || 'unknown') };
+            }
             const distro = String(os?.id || '').toLowerCase();
-            if (distro && OS_BADGES[distro]) return OS_BADGES[distro];
-            const family = os?.family || 'unknown';
-            return { title: os?.name || OS_TITLES[family] || family, text: OS_GLYPHS[family] || OS_GLYPHS.unknown };
+            const family = String(os?.family || 'unknown').toLowerCase();
+            const key = HC_BADGE_KEYS[distro] || HC_BADGE_KEYS[family] || 'unknown';
+            return { title: os?.name || OS_TITLES[family] || family || 'Unknown OS', html: squareGlyph(key) };
         };
+
+        // The Docker mark sits beside SSH; it is a square like every other icon.
+        const DOCKER_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" '
+            + 'stroke-linejoin="round" aria-hidden="true">'
+            + '<path d="M4.6 11.4h3v3h-3zM8.2 11.4h3v3h-3zM11.8 11.4h3v3h-3zM8.2 7.8h3v3h-3z"/>'
+            + '<path d="M3.4 16.2c1.3 2.9 4.1 4.4 7.7 4.4 4.1 0 7.2-2.1 8.1-5.4"/>'
+            + '<path d="M18.2 12.4c.9-.5 1.7-.3 2.4.5"/>'
+            + '</svg>';
 
         // Latest poll per host, for the detail sheet (the cards only need classes).
         const hostStatusById = new Map();
@@ -2447,10 +2500,11 @@ export function init() {
                 </div>
             ` : '';
 
-            // One card shape for every host: name in the middle, OS glyph and
-            // reachability dot in the top-left, a Docker mark bottom-left and
-            // the SSH prompt bottom-right. Status starts as "unknown" until the
-            // metrics poll says otherwise (see syncHostStatuses).
+            // One card shape for every host: the name sits top-centre, and a
+            // single row of equal square icons runs along the bottom --
+            // reachability, OS, Docker, then SSH pinned to the far right.
+            // Status starts as "unknown" until the metrics poll says otherwise
+            // (see syncHostStatuses).
             const groupLabel = (hostData.group_names && hostData.group_names.length)
                 ? hostData.group_names.join(', ') : 'none';
             const hostName = hostData.friendly_name || hostData.ip || hostId;
@@ -2461,20 +2515,20 @@ export function init() {
             }
             card.innerHTML = `
                 ${grabHandleHtml}
-                <span class="hc-corner">
-                    <span class="hc-dot" data-state="unknown" title="Checking reachability…" aria-hidden="true"></span>
-                    <span class="hc-os" data-host-os="unknown" title="Operating system unknown" aria-hidden="true">🖥</span>
-                </span>
                 <div class="hc-main">
                     <h3 class="host-card-name font-bold termix-text">${escapeHtml(hostName)}</h3>
                     <p class="hc-sub">${escapeHtml(hostData.user)}@${escapeHtml(hostData.ip)}</p>
                 </div>
-                <span class="hc-docker" title="Docker host" aria-hidden="true" hidden>🐳</span>
-                ${hostId === 'local' ? '' : `
-                    <button type="button" class="hc-ssh" data-hc-ssh
-                            title="Open an SSH terminal on ${escapeHtml(hostName)}"
-                            aria-label="Open an SSH terminal on ${escapeHtml(hostName)}">&gt;_</button>
-                `}
+                <div class="hc-foot">
+                    <span class="hc-dot" data-state="unknown" title="Checking reachability…" aria-hidden="true"></span>
+                    <span class="hc-os" data-host-os="unknown" title="Operating system unknown" aria-hidden="true">${squareGlyph('unknown')}</span>
+                    <span class="hc-docker" title="Docker host" aria-hidden="true" hidden>${DOCKER_GLYPH}</span>
+                    ${hostId === 'local' ? '' : `
+                        <button type="button" class="hc-ssh" data-hc-ssh
+                                title="Open an SSH terminal on ${escapeHtml(hostName)}"
+                                aria-label="Open an SSH terminal on ${escapeHtml(hostName)}">&gt;_</button>
+                    `}
+                </div>
             `;
 
             // Desktop: clicking the card selects the host (logs view).

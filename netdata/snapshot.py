@@ -27,6 +27,43 @@ def match_nodes(fleet: Dict[str, Any], hosts: List[Dict[str, Any]]) -> Dict[str,
     return out
 
 
+# Netdata reports the OS as one human string ("Ubuntu", "Debian GNU/Linux 13",
+# "macOS 15.1"). The SSH collector reports ``{family, id, name}``, and the host
+# card picks its icon from ``id``/``family`` -- so a raw string silently drew
+# the "unknown OS" monitor glyph on every Netdata-matched host.
+_OS_IDS = {
+    'ubuntu': 'ubuntu', 'debian': 'debian', 'raspbian': 'raspbian', 'mint': 'linuxmint',
+    'alpine': 'alpine', 'arch': 'arch', 'manjaro': 'manjaro', 'endeavour': 'endeavouros',
+    'fedora': 'fedora', 'centos': 'centos', 'red hat': 'rhel', 'rhel': 'rhel',
+    'rocky': 'rocky', 'alma': 'almalinux', 'oracle': 'ol', 'amazon': 'amzn',
+    'opensuse': 'opensuse', 'suse': 'suse',
+    'freebsd': 'freebsd', 'openbsd': 'openbsd', 'netbsd': 'netbsd',
+    'macos': 'macos', 'darwin': 'macos', 'osx': 'macos', 'windows': 'windows',
+}
+
+
+def os_shape(raw: Any) -> Any:
+    """``{family, id, name}`` from Netdata's OS string (passthrough if unset)."""
+    if isinstance(raw, dict) or not raw:
+        return raw
+    name = str(raw).strip()
+    probe = name.lower()
+    distro = ''
+    for prefix, ident in _OS_IDS.items():
+        if probe.startswith(prefix) or prefix in probe:
+            distro = ident
+            break
+    if distro in ('macos', 'darwin'):
+        family = 'darwin'
+    elif distro == 'windows':
+        family = 'windows'
+    elif distro in ('freebsd', 'openbsd', 'netbsd'):
+        family = 'bsd'
+    else:
+        family = 'linux'
+    return {'family': family, 'id': distro, 'name': name}
+
+
 def as_snapshot(host: Dict[str, Any], node: Dict[str, Any]) -> Dict[str, Any]:
     """One Netdata node as a Monitoring-page server snapshot."""
     ram_total = node.get('ram_total') or 0
@@ -44,13 +81,15 @@ def as_snapshot(host: Dict[str, Any], node: Dict[str, Any]) -> Dict[str, Any]:
         'online': node.get('online') is not False,
         'error': None,
         'hostname': node.get('hostname') or node.get('name'),
-        'os': node.get('os'),
+        'os': os_shape(node.get('os')),
         'uptime': None,
-        # Docker counts need an SSH/API round trip; not worth doing every two
-        # seconds just to draw a badge. The Docker page already owns that data.
-        'docker_installed': False,
-        'docker_reachable': False,
-        'docker_running': 0,
+        # Docker presence comes from Netdata's docker.containers.running
+        # context (present only where Docker runs), so the card badge survives
+        # without an SSH round trip. Per-container detail still needs the
+        # Docker page: only the running count is known here.
+        'docker_installed': bool(node.get('docker_installed')),
+        'docker_reachable': bool(node.get('docker_installed')),
+        'docker_running': int(node.get('docker_running') or 0),
         'docker_total': 0,
         'metrics_source': 'netdata',
         'node_guid': node.get('guid'),

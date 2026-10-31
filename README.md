@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-31 | v3.13.3 | **Host cards redesigned.** The server name sits top-centre and one row of equal square icons (22px desktop, 24px phone) runs along the bottom: a solid green/red reachability square, then the OS mark — Numix-square-inspired, flat and monochrome, drawn from the detected distro (Ubuntu, Debian, Alpine, Arch, Fedora, RHEL family, SUSE, macOS, Windows, BSD, generic Linux) — then Docker, with the `>_` SSH button on the far right. The SSH square keeps a thumb-sized invisible hit pad. Netdata-matched hosts now report their OS as `{family, id, name}` like the SSH collector, so the mark is no longer a generic monitor, and Docker presence comes from Netdata's `docker.containers.running` context. | ✅ Complete |
 | 2026-10-31 | v3.13.2 | **Dashboard no longer stalls behind SSH.** `servers_payload` held one lock for the whole collection round, so a phone and a laptop polling together queued behind each other — and `/api/overview` waits on the same function, which is why the whole app felt slow and timed out. It now serves a fresh snapshot as-is and the previous one (stale-while-revalidate) while a round is in flight; only a cold start waits. Also fixed `_idea_pass` raising `AttributeError: module 'app' has no attribute 'app_context'` (it had the module, not the Flask instance) so the remediation ideas pass actually runs. | ✅ Complete |
 | 2026-10-31 | v3.13.1 | **Netdata dashboard card reads anomaly rates honestly.** The overview card counts a node as anomalous only at ≥0.5% ML anomaly rate (a few hundredths is normal background), and both the dashboard and `/netdata` show two decimal places so `0.04%` can no longer look like `0.0%`. | ✅ Complete |
 | 2026-10-31 | v3.13.0 | **Netdata on the dashboard.** The homepage fleet grid gains a *Netdata* card: online / anomalous / alert / streaming chips and the four nodes with the highest ML anomaly rate, linked to `/netdata` for the full cards and drill-down. Settings → Netdata (URL + write-only token) is unchanged and remains the one place to configure the connection. | ✅ Complete |
@@ -770,9 +771,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.13.2`
+**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.13.3`
 (`:latest` points at the same manifest), digest
-`sha256:7baacf5f6bbf5413efc530975119c00de8f9ae7d32310e2b23d216d2e10d9836`, running as
+`sha256:27eb935de93bd5507c4138871a2db0779c763559ddaee63f3f631d35a6e242be`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -781,7 +782,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.13.2 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.13.3 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest

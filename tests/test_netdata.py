@@ -128,13 +128,22 @@ ANOM_PAYLOAD = {
 }
 
 
+DOCKER_PAYLOAD = {
+    'series': {
+        'running,docker.containers.running,guid-a,docker.containers.running':
+            {'value': [6.0], 'arp': [0]},
+    }
+}
+
+
 def _fake_fetch(contexts, **kwargs):
     context = list(contexts)[0]
     return {
         'system.cpu': CPU_PAYLOAD, 'system.ram': RAM_PAYLOAD,
         'disk.space': DISK_PAYLOAD, 'system.load': LOAD_PAYLOAD,
+        nd_client.DOCKER_CONTEXT: DOCKER_PAYLOAD,
         nd_client.ANOMALY_CONTEXT: ANOM_PAYLOAD,
-    }[context]
+    }.get(context, {'series': {}})
 
 
 NODE_A = {
@@ -156,7 +165,9 @@ def test_fleet_card_calculates_saturation_and_node_anomaly(monkeypatch):
     assert node['mem_percent'] == 50.0          # 2000 / (2000+1000+900+100)
     assert node['disk_percent'] == 40.0
     assert node['load1'] == 1.25
-    assert node['anomaly_rate'] == 7.5          # not the parent instance's 0
+    assert node['anomaly_rate'] == 7.5
+    assert node['docker_installed'] is True       # context present => Docker here
+    assert node['docker_running'] == 6          # not the parent instance's 0
     assert node['alerts']['warning'] == 1
 
 
@@ -202,7 +213,7 @@ def test_reconcile_lists_both_directions(monkeypatch):
 
 # --- monitoring page adapter ---------------------------------------------
 
-def test_snapshot_has_the_metrics_page_shape_and_no_invented_docker():
+def test_snapshot_has_the_metrics_page_shape_without_ssh():
     snap = snapshot.as_snapshot({'key': 'db-7', 'friendly_name': 'Build'},
                                 {**NODE_A, 'cpu_percent': 12.0, 'mem_percent': 50.0,
                                  'disk_percent': 25.0, 'load1': 0.5,
@@ -211,7 +222,7 @@ def test_snapshot_has_the_metrics_page_shape_and_no_invented_docker():
     assert snap['cpu']['percent'] == 12.0
     assert snap['mem']['used'] == NODE_A['ram_total'] // 2
     assert snap['disk']['percent'] == 25.0
-    assert snap['docker_installed'] is False
+    assert snap['docker_installed'] is False        # node reported no Docker
     assert snap['metrics_source'] == 'netdata'
     assert snap['anomaly_rate'] == 3.0
 
@@ -462,3 +473,43 @@ def test_settings_has_a_netdata_navigation_entry_and_live_status():
     assert 'id="netdata-status"' in html
     assert 'Parent URL' in html
     assert 'API token' in html
+
+
+def test_netdata_os_string_becomes_the_shape_the_cards_read():
+    """Netdata says "Ubuntu"; the SSH collector says {family, id, name}.
+
+    The host card picks its OS mark from ``id``/``family``, so a bare string
+    drew the "unknown OS" monitor glyph on every Netdata-matched host.
+    """
+    from netdata import snapshot
+
+    ubuntu = snapshot.os_shape('Ubuntu 24.04.5 LTS')
+    assert ubuntu['id'] == 'ubuntu' and ubuntu['family'] == 'linux'
+    assert ubuntu['name'] == 'Ubuntu 24.04.5 LTS'
+
+    assert snapshot.os_shape('Debian GNU/Linux 13 (trixie)')['id'] == 'debian'
+    assert snapshot.os_shape('macOS 15.1')['family'] == 'darwin'
+    assert snapshot.os_shape('FreeBSD 14')['family'] == 'bsd'
+    assert snapshot.os_shape('Microsoft Windows Server 2022')['family'] == 'windows'
+
+    # already-shaped input passes through untouched, as does nothing at all
+    shaped = {'family': 'linux', 'id': 'arch', 'name': 'Arch'}
+    assert snapshot.os_shape(shaped) is shaped
+    assert snapshot.os_shape(None) is None
+
+
+def test_docker_presence_comes_from_the_netdata_context():
+    """The card's Docker badge must survive on Netdata-matched hosts.
+
+    ``as_snapshot`` used to hard-code docker_installed=False because counting
+    containers needs SSH -- which silently removed the badge from every node
+    Netdata covered. The docker.containers.running context already answers
+    "is Docker here?", so the badge is truthful and costs no SSH.
+    """
+    node = {**NODE_A, 'docker_installed': True, 'docker_running': 6}
+    snap = snapshot.as_snapshot({'key': 'db-7', 'friendly_name': 'Build'}, node)
+    assert snap['docker_installed'] is True
+    assert snap['docker_reachable'] is True
+    assert snap['docker_running'] == 6
+    # per-container detail is still not invented
+    assert snap['docker_total'] == 0
