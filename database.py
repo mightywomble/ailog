@@ -1041,3 +1041,47 @@ class AuditEvent(db.Model):
             'object_id': self.object_id,
             'detail': detail,
         }
+
+
+class RemediationLearned(db.Model):
+    """A model-suggested playbook an operator ran and confirmed on a real host.
+
+    Nothing lands here by itself: the test endpoint only does `--check`, and a
+    human has to say it worked. The row is the library entry - kept as YAML so
+    it can be copied, re-tested against another host, and offered back to the
+    idea channel as prior art.
+    """
+    __tablename__ = 'remediation_learned'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(96), nullable=False, unique=True, index=True)
+    title = db.Column(db.String(255), nullable=False)
+    summary = db.Column(db.Text)
+    risk = db.Column(db.String(16), default='medium')
+    yaml_text = db.Column(db.Text, nullable=False)
+    verify_text = db.Column(db.Text)
+    rollback_text = db.Column(db.Text)
+    source_report_id = db.Column(db.Integer, index=True)
+    source_match_id = db.Column(db.Integer, index=True)
+    host_key = db.Column(db.String(128), index=True)
+    confirmed_by = db.Column(db.String(128))
+    confirmed_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    uses = db.Column(db.Integer, nullable=False, default=0)
+    last_used_at = db.Column(db.DateTime)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'slug': self.slug,
+            'title': self.title,
+            'summary': self.summary,
+            'risk': self.risk,
+            'yaml': self.yaml_text,
+            'verify': self.verify_text,
+            'rollback': self.rollback_text,
+            'source_report_id': self.source_report_id,
+            'host_key': self.host_key,
+            'confirmed_by': self.confirmed_by,
+            'confirmed_at': self.confirmed_at.isoformat() if self.confirmed_at else None,
+            'uses': self.uses,
+        }

@@ -114,6 +114,37 @@
     </section>
 
     <section class="rem-block">
+      <h2>Learned remedies <span class="rem-muted">({{ learned|length }})</span></h2>
+      <p class="rem-muted">
+        AI-written playbooks an operator tested with <code>--check</code> and then confirmed on a real
+        host. They are not in the reviewed catalog and never run automatically: copy or test one
+        before using it on another host.
+      </p>
+      {% if learned %}
+      <table class="rem-table">
+        <thead><tr><th>Remedy</th><th>Risk</th><th>Confirmed</th><th>Playbook</th><th></th></tr></thead>
+        <tbody>
+        {% for row in learned %}
+          <tr>
+            <td><strong>{{ row.title }}</strong><div class="rem-muted">{{ row.slug }}</div></td>
+            <td><span class="rem-badge risk-{{ row.risk }}">{{ row.risk }}</span></td>
+            <td class="rem-muted">{% if row.confirmed_at %}{{ row.confirmed_at.strftime('%Y-%m-%d') }}{% endif %}
+              by {{ row.confirmed_by or 'anonymous' }}{% if row.host_key %} on {{ row.host_key }}{% endif %}</td>
+            <td><details><summary class="rem-muted">show YAML</summary><pre class="rem-pre">{{ row.yaml_text }}</pre></details></td>
+            <td><button type="button" class="rem-btn danger" data-delete-learned="{{ row.id }}">Delete</button></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="rem-empty">
+        Nothing confirmed yet. Run a report, ask the AI for a suggested fix on the empty
+        self-healing state, test it, and confirm it once it works.
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="rem-block">
       <h2>Maintenance windows</h2>
       <p class="rem-muted">A blocking window stops a run for hosts in the selected group (or every host when no group is set). Windows wrap over midnight.</p>
       <table class="rem-table">

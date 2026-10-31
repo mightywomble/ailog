@@ -31,6 +31,16 @@ document.querySelectorAll('[data-delete-window]').forEach((button) => {
     });
 });
 
+document.querySelectorAll('[data-delete-learned]').forEach((button) => {
+    button.addEventListener('click', async () => {
+        if (!window.confirm('Delete this learned remedy?')) return;
+        try {
+            await api(`/api/remediation/learned/${button.dataset.deleteLearned}`, { method: 'DELETE' });
+            window.location.reload();
+        } catch (error) { window.alert(error.message); }
+    });
+});
+
 document.querySelectorAll('[data-protect]').forEach((checkbox) => {
     checkbox.addEventListener('change', async () => {
         try {
