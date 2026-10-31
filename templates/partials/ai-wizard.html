@@ -1,0 +1,32 @@
+<!-- Two-step AI analysis wizard: what to analyse, then which prompt.
+     Any AI analysis button opens this first; with no prompt chosen it runs
+     the historical default analysis. Placeholder fill-in fields appear only
+     for the {{TOKENS}} the chosen prompt actually contains. -->
+<div id="ai-wizard-modal" class="app-modal hidden" aria-label="AI analysis">
+    <div class="app-modal-panel app-modal-md aw-panel">
+        <div class="app-modal-head">
+            <div class="app-modal-title">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-indigo-400" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+                <span>AI analysis
+                    <span id="aw-sub" class="app-modal-sub">Step 1 of 2 · What to analyse</span>
+                </span>
+            </div>
+            <button id="aw-close" type="button" class="app-modal-close" data-modal-close>Close</button>
+        </div>
+
+        <div class="aw-steps" aria-hidden="true">
+            <span id="aw-step-pip-1" class="aw-pip is-active">1 What</span>
+            <span id="aw-step-pip-2" class="aw-pip">2 Prompt</span>
+        </div>
+
+        <div id="aw-body" class="app-modal-body aw-body"></div>
+
+        <div class="aw-foot">
+            <button id="aw-cancel" type="button" class="aw-btn">Cancel</button>
+            <div class="aw-foot-right">
+                <button id="aw-back" type="button" class="aw-btn hidden">Back</button>
+                <button id="aw-next" type="button" class="aw-btn aw-btn-accent">Next</button>
+            </div>
+        </div>
+    </div>
+</div>

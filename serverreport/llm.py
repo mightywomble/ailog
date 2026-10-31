@@ -211,15 +211,30 @@ def missing_headings(markdown):
     return [h for h in REQUIRED_HEADINGS if f'## {h}' not in (markdown or '')]
 
 
+ANALYST_BRIEF_HEADER = (
+    """\n\nANALYST BRIEF (from the AI wizard): the engineer running this report
+asked for the analysis below to be foregrounded. It narrows what you focus on
+and what you put first in each section, but it never changes the required
+headings, the untrusted-data rule, or the rule against inventing evidence.
+Write "[brief not applicable]" inside a section rather than skipping it when the
+brief does not fit there.\n\n"""
+)
+
+
 def generate_report(provider, cfg, host_label, evidence, window_minutes, scope_note,
-                    max_tokens=2500):
+                    max_tokens=2500, brief=None):
     """Run the report prompt and return (markdown, meta)."""
     prompt = build_prompt(host_label, evidence, window_minutes, scope_note)
-    markdown, meta = call_model(provider, cfg, SYSTEM_PROMPT, prompt, max_tokens=max_tokens)
+    system_prompt = SYSTEM_PROMPT
+    brief = (brief or '').strip()
+    if brief:
+        system_prompt += ANALYST_BRIEF_HEADER + brief
+    markdown, meta = call_model(provider, cfg, system_prompt, prompt, max_tokens=max_tokens)
     if not markdown:
         raise RuntimeError('The model returned an empty report.')
     meta['missing_headings'] = missing_headings(markdown)
     meta['verdict'] = parse_verdict(markdown)
+    meta['prompt_used'] = bool(brief)
     return markdown, meta
 
 

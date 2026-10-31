@@ -135,7 +135,7 @@ def test_the_log_body_is_text_only():
 
 def test_analyse_in_the_dialog_runs_the_same_pipeline():
     js = _js()
-    assert 'const runAiAnalysis = async ({ logName, content, button = null } = {}) => {' in js
+    assert 'const runAiAnalysis = async ({ logName, content, button = null, host = null, sourceLabel = null } = {}) => {' in js
     assert 'aiAnalyseBtn.addEventListener(\'click\', () => runAiAnalysis({' in js
     block = _phone_logs_js()
     assert "mlogAnalyse?.addEventListener('click', () => runAiAnalysis({" in block

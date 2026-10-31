@@ -18,6 +18,8 @@ import time
 
 from flask import (Blueprint, Response, current_app, jsonify, render_template, request, stream_with_context, url_for)
 
+import aiprompts
+
 from database import LogReport, db
 from . import diff as rdiff
 from . import collect, correlate, llm, normalize, pack, severity, sizing
@@ -447,6 +449,7 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
         return llm.generate_report(
             provider, cfg, host_label, evidence_text, window_minutes,
             scope_note, max_tokens=max_tokens,
+            brief=(data or {}).get('prompt'),
         )
 
     try:
@@ -754,6 +757,12 @@ def stream_report():
     include_docker = bool(data.get('include_docker', True))
     include_stopped = bool(data.get('include_stopped', False))
 
+    # The wizard's analyst brief is additive: it focuses the report without
+    # replacing the structured report prompt (headings/verdict stay intact).
+    brief = (data.get('prompt') or '').strip()
+    if brief:
+        brief = aiprompts.fill_prompt(brief, {'HOST': host_label})
+
     def generate():
         def ev(payload):
             return 'data: ' + json.dumps(payload, default=str) + '\n\n'
@@ -779,7 +788,8 @@ def stream_report():
         def work():
             def run():
                 return run_pipeline(
-                    host_key, host_label, window_minutes, provider, model, data,
+                    host_key, host_label, window_minutes, provider, model,
+                    dict(data, prompt=brief),
                     include_files=include_files,
                     include_journal=include_journal,
                     include_docker=include_docker,

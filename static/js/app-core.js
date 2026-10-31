@@ -972,6 +972,10 @@ export function init() {
             }
         };
 
+        // The report dialog has its own step 1 (window/sources/severity), so the
+        // shared wizard contributes step 2 here: the same prompt library, saved
+        // prompts and free-text field as every other AI analysis.
+        let serverReportPicker = null;
         const openServerReportModal = async () => {
             if (!serverReportModal || !selectedHostId) return;
             resetServerReportModal();
@@ -981,6 +985,11 @@ export function init() {
                     `Correlate every log source on ${hostName} into one report.`;
             }
             openModal(serverReportModal);
+            if (!serverReportPicker && window.ailogAiWizard) {
+                serverReportPicker = window.ailogAiWizard.mountPicker(
+                    document.getElementById('server-report-prompt'),
+                    { host: hostName });
+            }
             await loadServerReportDefaults();
         };
 
@@ -1093,6 +1102,10 @@ export function init() {
                 serverReportError?.classList.add('hidden');
 
                 const requestBody = currentScopeBody();
+                if (serverReportPicker) {
+                    const serverPrompt = await serverReportPicker.getPrompt();
+                    if (serverPrompt) requestBody.prompt = serverPrompt;
+                }
 
                 if (!requestBody.include_files && !requestBody.include_journal && !requestBody.include_docker) {
                     serverReportError.textContent = 'Select at least one log source type.';
@@ -2312,6 +2325,8 @@ export function init() {
             logName: mobileLogSource?.name || 'log',
             content: mobileLogText,
             button: mlogAnalyse,
+            host: mobileLogsName(),
+            sourceLabel: mobileLogSource?.name || 'Log data',
         }));
         mlogShare?.addEventListener('click', () => shareText(
             mobileLogText,
@@ -4671,10 +4686,27 @@ const shareText = async (text, title = 'Log analysis') => {
 // One analysis pipeline for both surfaces: the desktop AI Analyse button and
 // the phone's full-screen log dialog. `button` is optional and only used for
 // the Analysing... label.
-const runAiAnalysis = async ({ logName, content, button = null } = {}) => {
+const runAiAnalysis = async ({ logName, content, button = null, host = null, sourceLabel = null } = {}) => {
             if (!content) {
                 window.showToast('No log content to analyse.', 'error');
                 return;
+            }
+
+            // Every AI analysis entry point runs the shared wizard first:
+            // 1) what to analyse, 2) which prompt (library / saved / free text).
+            // Cancelling it cancels the analysis; no prompt chosen keeps the
+            // historical default analysis.
+            let brief = { prompt: '', promptTitle: 'Default analysis', content, promptValues: {} };
+            if (window.ailogAiWizard && typeof window.ailogAiWizard.choose === 'function') {
+                const chosen = await window.ailogAiWizard.choose({
+                    logName: logName || 'log',
+                    content,
+                    host: host || (typeof mobileLogsName === 'function' ? mobileLogsName() : null),
+                    sourceLabel: sourceLabel || logName || 'Log data',
+                });
+                if (!chosen) return;                 // cancelled in the wizard
+                brief = chosen;
+                content = chosen.content || content;
             }
             
             // Get provider configuration from backend
@@ -4715,6 +4747,11 @@ const runAiAnalysis = async ({ logName, content, button = null } = {}) => {
                     webhook_url: localStorage.getItem('discord_webhook_url'),
                     provider: provider
                 };
+                if (brief.prompt) {
+                    requestBody.prompt = brief.prompt;
+                    requestBody.prompt_values = brief.promptValues || {};
+                    requestBody.host = host || undefined;
+                }
                 
                 // Add provider-specific auth
                 if (provider === 'openai') {
@@ -4745,6 +4782,7 @@ const runAiAnalysis = async ({ logName, content, button = null } = {}) => {
                 if (result.provider) metaBits.push(String(result.provider).toUpperCase());
                 if (result.model) metaBits.push(result.model);
                 if (result.elapsed) metaBits.push(`${result.elapsed}s`);
+                if (brief.prompt && brief.promptTitle) metaBits.push(`prompt: ${brief.promptTitle}`);
                 if (metaBits.length) {
                     aiAnalysisContent.insertAdjacentHTML('afterbegin',
                         `<div class="text-[11px] termix-muted mb-3">Analysed with ${escapeHtml(metaBits.join(' \u00b7 '))}</div>`);
@@ -4769,6 +4807,8 @@ aiAnalyseBtn.addEventListener('click', () => runAiAnalysis({
             logName: currentLogName,
             content: currentLogContent,
             button: aiAnalyseBtn,
+            host: selectedHostId !== 'local' ? (hosts[selectedHostId]?.friendly_name || selectedHostId) : 'this server',
+            sourceLabel: currentLogName,
         }));
         
         // --- Multi-schedule UI (DB-backed schedules) ---

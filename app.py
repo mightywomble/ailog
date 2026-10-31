@@ -31,6 +31,7 @@ from monitoring.sshkeys import (
 )
 from core.sse_sessions import create_session as create_wizard_session_id
 from core.timeutil import utcnow
+import aiprompts
 
 # --- APPLICATION FACTORY ---
 
@@ -38,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.9.0'
+APP_VERSION = '3.10.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -320,6 +321,137 @@ def get_suricata_prompt():
 
 def set_suricata_prompt(prompt: str):
     _setting_set('suricata.prompt', (prompt or DEFAULT_SURICATA_PROMPT).strip())
+
+
+# --- AI PROMPT LIBRARY (the wizard's step 2) ---
+
+#: Prompts the user wrote themselves and asked to keep. Same DB-backed setting
+#: pattern as suricata.prompt, but a list so the library can grow.
+SAVED_PROMPTS_KEY = 'ai.saved_prompts'
+SAVED_PROMPT_LIMIT = 50
+
+
+def get_saved_prompts():
+    raw = _setting_get(SAVED_PROMPTS_KEY, [])
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get('prompt') or '').strip()
+        if not text:
+            continue
+        out.append({
+            'id': str(item.get('id') or uuid.uuid4().hex),
+            'title': str(item.get('title') or '').strip() or text.splitlines()[0][:60],
+            'prompt': text,
+            'saved_at': item.get('saved_at'),
+        })
+    return out
+
+
+def save_saved_prompt(title, prompt):
+    """Add/replace a saved prompt (same text = same entry). Returns the list."""
+    prompt = (prompt or '').strip()
+    if not prompt:
+        raise ValueError('The prompt is empty.')
+    title = (title or '').strip() or prompt.splitlines()[0][:60]
+    items = get_saved_prompts()
+    items = [i for i in items if i['prompt'] != prompt]
+    items.insert(0, {
+        'id': uuid.uuid4().hex,
+        'title': title[:80],
+        'prompt': prompt,
+        'saved_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+    items = items[:SAVED_PROMPT_LIMIT]
+    _setting_set(SAVED_PROMPTS_KEY, items)
+    return items
+
+
+def delete_saved_prompt(prompt_id):
+    items = [i for i in get_saved_prompts() if i['id'] != prompt_id]
+    _setting_set(SAVED_PROMPTS_KEY, items)
+    return items
+
+
+def prompt_defaults(log_name, log_content, host=None):
+    """Values the server can infer for ``{{PLACEHOLDER}}`` tokens."""
+    start, end = extract_log_time_range(log_content)
+    try:
+        tz_name = datetime.datetime.now().astimezone().tzname() or 'UTC'
+    except Exception:
+        tz_name = 'UTC'
+    guesses = {
+        'HOST': host or '',
+        'START': start or '',
+        'END': end or '',
+        'TZ': tz_name,
+        'BOOT_ID': '',
+    }
+    # A log name is not a host name: HOST is only filled when the caller knows it.
+    return {k: v for k, v in guesses.items() if v}
+
+
+def resolve_analysis_prompt(data, log_name, log_content, host=None):
+    """The prompt text for one analysis, or None to use the default.
+
+    Accepts a finished prompt (``prompt``) or a library id (``prompt_id``).
+    Placeholder values come from ``prompt_values`` (the wizard's fill-in
+    fields) merged over what the server can infer from the log itself.
+    """
+    data = data or {}
+    template = (data.get('prompt') or '').strip()
+    if not template:
+        template = aiprompts.get_prompt(data.get('prompt_id')) or ''
+    template = template.strip()
+    if not template:
+        return None
+
+    values = prompt_defaults(log_name, log_content, host=host)
+    supplied = data.get('prompt_values')
+    if isinstance(supplied, dict):
+        for key, value in supplied.items():
+            key = str(key or '').strip()
+            value = '' if value is None else str(value).strip()
+            if key and value:
+                values[key] = value
+
+    # Anything still blank stays as [TOKEN] so the model sees an explicit blank
+    # instead of template noise, and the analyst knows what was unanswered.
+    return aiprompts.fill_prompt(template, values)
+
+
+@core_routes.route('/ai/prompts', methods=['GET'])
+def ai_prompts():
+    """The wizard's step 2 data: library, saved prompts and the default."""
+    return jsonify({
+        'success': True,
+        'prompts': aiprompts.public_prompts(),
+        'saved': get_saved_prompts(),
+        'default_prompt': aiprompts.DEFAULT_ANALYSIS_PROMPT,
+        'placeholder_labels': aiprompts.PLACEHOLDER_LABELS,
+    })
+
+
+@core_routes.route('/ai/prompts/save', methods=['POST'])
+def ai_prompt_save():
+    data = request.get_json(silent=True) or {}
+    try:
+        items = save_saved_prompt(data.get('title'), data.get('prompt'))
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, 'saved': items})
+
+
+@core_routes.route('/ai/prompts/delete', methods=['POST'])
+def ai_prompt_delete():
+    data = request.get_json(silent=True) or {}
+    prompt_id = str(data.get('id') or '').strip()
+    if not prompt_id:
+        return jsonify({'success': False, 'error': 'Missing prompt id.'}), 400
+    return jsonify({'success': True, 'saved': delete_saved_prompt(prompt_id)})
 
 
 def get_ai_alert_keywords():
@@ -2000,8 +2132,33 @@ def ollama_config():
             'analysis_provider': config.get('analysis_provider', 'openai')
         })
 
-def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
-    """Analyze log using Ollama"""
+def _analysis_messages(log_name, truncated_content, prompt=None):
+    """Chat messages for one analysis.
+
+    Shared by OpenRouter, the inline OpenAI call and (as a single flattened
+    string) Ollama so every provider gets exactly the same instruction. With no
+    prompt this is the historical default analysis, unchanged.
+    """
+    instruction = (prompt or '').strip()
+    system = aiprompts.SYSTEM_PROMPT
+    if instruction:
+        system += aiprompts.UNTRUSTED_DATA_NOTE
+        user = f"{instruction}\n\n--- LOG DATA for {log_name} ---\n{truncated_content}"
+    else:
+        user = (aiprompts.DEFAULT_ANALYSIS_PROMPT.format(log_name=log_name)
+                + f"\n\n{truncated_content}")
+    return [
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': user},
+    ]
+
+
+def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model, prompt=None):
+    """Analyze log using Ollama.
+
+    ``prompt`` is a fully-rendered analyst brief from the wizard; when it is
+    empty the historical generic analysis prompt is used instead.
+    """
     if not ollama_url.startswith('http'):
         ollama_url = f'http://{ollama_url}'
     ollama_url = ollama_url.rstrip('/')
@@ -2010,14 +2167,15 @@ def analyse_with_ollama(log_content, log_name, ollama_url, ollama_model):
     if len(log_content) > MAX_CHAR_COUNT:
         truncated_content = "[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
     
-    prompt = f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"
-    
+    messages = _analysis_messages(log_name, truncated_content, prompt)
+    body = '\n\n'.join(m['content'] for m in messages)
+
     try:
         endpoint_url = f'{ollama_url}/api/generate'
         response = requests.post(
             endpoint_url,
             allow_redirects=False,
-            json={'model': ollama_model, 'prompt': prompt, 'stream': False},
+            json={'model': ollama_model, 'prompt': body, 'stream': False},
             timeout=60
         )
 
@@ -2123,8 +2281,12 @@ def test_saved_openrouter_key():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-def analyse_with_openrouter(log_content, log_name, api_key, model):
-    """Analyze log using OpenRouter (OpenAI-compatible API)"""
+def analyse_with_openrouter(log_content, log_name, api_key, model, prompt=None):
+    """Analyze log using OpenRouter (OpenAI-compatible API).
+
+    ``prompt`` is a fully-rendered analyst brief from the wizard; empty means
+    the historical generic analysis prompt.
+    """
     truncated_content = log_content
     if len(log_content) > MAX_CHAR_COUNT:
         truncated_content = "[--- Log truncated due to size limit... ---]\n" + log_content[-MAX_CHAR_COUNT:]
@@ -2138,10 +2300,7 @@ def analyse_with_openrouter(log_content, log_name, api_key, model):
             },
             json={
                 'model': model,
-                'messages': [
-                    {'role': 'system', 'content': 'You are a helpful assistant that analyses log files.'},
-                    {'role': 'user', 'content': f'Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}'}
-                ]
+                'messages': _analysis_messages(log_name, truncated_content, prompt)
             },
             timeout=60
         )
@@ -2270,21 +2429,25 @@ def _analysis_config(provider, data, model=None):
     return {'api_key': api_key, 'model': override or DEFAULT_OPENAI_MODEL}
 
 
-def _run_analysis(provider, data, log_content, log_name, model=None):
+def _run_analysis(provider, data, log_content, log_name, model=None, prompt=None, host=None):
     """Run one analysis against the selected provider.
+
+    ``prompt`` is the analyst brief chosen in the AI wizard (already rendered);
+    when it is empty the historical default analysis prompt is used.
 
     Returns ``(analysis_text, meta)`` where meta carries the provider and model
     that were used. Raises ``AnalysisConfigError`` for configuration problems.
     """
     cfg = _analysis_config(provider, data, model=model)
+    prompt = (prompt or '').strip() or None
 
     if provider == 'ollama':
-        analysis = analyse_with_ollama(log_content, log_name, cfg['url'], cfg['model'])
-        return analysis, {'provider': 'ollama', 'model': cfg['model']}
+        analysis = analyse_with_ollama(log_content, log_name, cfg['url'], cfg['model'], prompt=prompt)
+        return analysis, {'provider': 'ollama', 'model': cfg['model'], 'prompt_used': bool(prompt)}
 
     if provider == 'openrouter':
-        analysis = analyse_with_openrouter(log_content, log_name, cfg['api_key'], cfg['model'])
-        return analysis, {'provider': 'openrouter', 'model': cfg['model']}
+        analysis = analyse_with_openrouter(log_content, log_name, cfg['api_key'], cfg['model'], prompt=prompt)
+        return analysis, {'provider': 'openrouter', 'model': cfg['model'], 'prompt_used': bool(prompt)}
 
     api_key = cfg['api_key']
 
@@ -2295,12 +2458,10 @@ def _run_analysis(provider, data, log_content, log_name, model=None):
     client = openai.OpenAI(api_key=api_key)
     response = client.chat.completions.create(
         model=cfg['model'],
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that analyses log files."},
-            {"role": "user", "content": f"Analyse this log for {log_name} for errors, create a summary report, and give troubleshooting tips.\n\n{truncated_content}"}
-        ]
+        messages=_analysis_messages(log_name, truncated_content, prompt),
     )
-    return response.choices[0].message.content, {'provider': 'openai', 'model': cfg['model']}
+    return response.choices[0].message.content, {'provider': 'openai', 'model': cfg['model'],
+                                                 'prompt_used': bool(prompt)}
 
 
 def _notify_if_alerting(webhook_url, log_name, log_content, analysis):
@@ -2330,10 +2491,13 @@ def analyse_log():
     if not log_content:
         return jsonify({'error': 'Missing log_content.'}), 400
 
+    prompt = resolve_analysis_prompt(data, log_name, log_content, host=data.get('host'))
+
     try:
-        analysis, _meta = _run_analysis(provider, data, log_content, log_name)
+        analysis, _meta = _run_analysis(provider, data, log_content, log_name, prompt=prompt)
         discord_sent = _notify_if_alerting(webhook_url, log_name, log_content, analysis)
-        return jsonify({'analysis': analysis, 'discord_sent': discord_sent})
+        return jsonify({'analysis': analysis, 'discord_sent': discord_sent,
+                        'prompt_used': bool(prompt)})
     except AnalysisConfigError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
@@ -2359,6 +2523,9 @@ def analyse_log_stream():
         return jsonify({'error': 'Missing log_content.'}), 400
 
     provider_label = ANALYSIS_PROVIDER_LABELS.get(provider, provider)
+    # Resolve the wizard's analyst brief up front (it needs the log for its
+    # time-range placeholders); no prompt selected keeps the default analysis.
+    prompt = resolve_analysis_prompt(data, log_name, log_content, host=data.get('host'))
 
     def generate():
         def ev(payload):
@@ -2398,7 +2565,7 @@ def analyse_log_stream():
 
         def work():
             def run():
-                return _run_analysis(provider, data, log_content, log_name)
+                return _run_analysis(provider, data, log_content, log_name, prompt=prompt)
             try:
                 if worker_app is not None:
                     with worker_app.app_context():
@@ -2440,7 +2607,7 @@ def analyse_log_stream():
 
         yield ev({'type': 'result', 'analysis': analysis, 'discord_sent': discord_sent,
                   'provider': meta.get('provider'), 'model': meta.get('model'),
-                  'elapsed': elapsed()})
+                  'prompt_used': bool(prompt), 'elapsed': elapsed()})
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream',
                     headers=SOURCES_STREAM_HEADERS)
