@@ -85,7 +85,9 @@ def test_the_renderer_defines_a_local_esc_helper():
 
 def test_model_cards_are_labelled_and_have_no_apply_affordance():
     body = _read(JS, 'remediation.js')
-    assert 'Unverified suggestion — copy and run yourself' in body
+    assert 'Untested AI playbook — test with --check, then run it yourself' in body
+    # Suggestions are still never executable by the app: testing is --check only.
+    assert "data-test=" in body and '--check' in body
     # The apply path must be gated on executable, never on source alone.
     assert 'executable' in body
     assert re.search(r'if\s*\([^)]*!?card\.executable', body) or \

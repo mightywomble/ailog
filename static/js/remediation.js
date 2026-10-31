@@ -64,7 +64,7 @@ function cardHtml(card) {
     return `<article class="rem-card ${idea ? 'is-idea' : ''} ${dismissed ? 'is-dismissed' : ''}" data-card-id="${card.id}">
         <div class="rem-card-top">
             ${riskBadge(card.risk)}
-            ${idea ? '<span class="rem-badge idea">Unverified suggestion</span>' : `<span class="rem-badge">${Math.round((card.confidence || 0) * 100)}% confidence</span>`}
+            ${idea ? '<span class="rem-badge idea">AI suggestion · untested</span>' : `<span class="rem-badge">${Math.round((card.confidence || 0) * 100)}% confidence</span>`}
             ${card.est_seconds ? `<span class="rem-meta">~${esc(card.est_seconds)}s</span>` : ''}
             <span class="rem-meta" style="margin-left:auto">${esc(card.source === 'llm' ? 'model' : 'catalog')}</span>
         </div>
@@ -73,14 +73,21 @@ function cardHtml(card) {
         ${evidenceHtml(card)}
         ${listHtml('What it does', card.changes)}
         ${listHtml('Will NOT do', card.does_not)}
-        ${idea ? '<div class="rem-badge idea">Unverified suggestion — copy and run yourself</div>' : ''}
-        ${codeBlock(idea ? 'Suggested commands' : 'Playbook (what will run)', card.code, 'open')}
+        ${idea ? `<div class="rem-badge idea">Untested AI playbook — test with --check, then run it yourself</div>` : ''}
+        ${codeBlock(idea ? 'Ansible playbook (AI-generated, untested)' : 'Playbook (what will run)', card.code, 'open')}
         ${codeBlock('How to test', card.verify)}
         ${card.rollback ? codeBlock('Rollback', card.rollback) : ''}
+        ${idea ? `<pre class="rem-pre hidden" data-test-output="${card.id}"></pre>` : ''}
         <div class="rem-actions">
             ${canApply && !dismissed ? `<button type="button" class="rem-btn primary" data-plan="${card.id}">Review &amp; fix…</button>` : ''}
-            ${!dismissed ? `<select class="rem-select" data-reason="${card.id}" aria-label="Dismiss reason">${reasons.map((r) => `<option value="${r}">${esc(r.replace('_', ' '))}</option>`).join('')}</select>` : ''}
-            ${!dismissed ? `<button type="button" class="rem-btn" data-dismiss="${card.id}">No, dismiss</button>` : `<span class="rem-badge">dismissed: ${esc(card.dismissed_reason || '')}</span>`}
+            ${idea && !dismissed ? `<button type="button" class="rem-btn" data-test="${card.id}">Test with --check</button>` : ''}
+            ${idea && !dismissed ? `<button type="button" class="rem-btn" data-worked="${card.id}">I ran it — it worked</button>` : ''}
+            ${idea && !dismissed ? `<button type="button" class="rem-btn" data-failed="${card.id}">Tried — didn't work</button>` : ''}
+            ${!idea && !dismissed ? `<select class="rem-select" data-reason="${card.id}" aria-label="Dismiss reason">${reasons.map((r) => `<option value="${r}">${esc(r.replace('_', ' '))}</option>`).join('')}</select>` : ''}
+            ${!idea && !dismissed ? `<button type="button" class="rem-btn" data-dismiss="${card.id}">No, dismiss</button>` : ''}
+            ${!idea && dismissed ? `<span class="rem-badge">dismissed: ${esc(card.dismissed_reason || '')}</span>` : ''}
+            ${idea && card.state === 'confirmed' ? '<span class="rem-badge">added to your library</span>' : ''}
+            ${idea && card.state === 'rejected' ? '<span class="rem-badge">marked as not working</span>' : ''}
         </div>
     </article>`;
 }
@@ -91,7 +98,7 @@ function summaryLabel(cards) {
     const catalog = cards.length - ideas;
     const parts = [];
     if (catalog) parts.push(`${catalog} from the reviewed catalog`);
-    if (ideas) parts.push(`${ideas} unverified model suggestion${ideas === 1 ? '' : 's'}`);
+    if (ideas) parts.push(`${ideas} untested AI playbook${ideas === 1 ? '' : 's'}`);
     if (!parts.length) return 'nothing to fix in this report';
     return parts.join(' \u00b7 ');
 }
@@ -136,8 +143,14 @@ function render() {
                 reviewed catalog entry's signature matches a cluster in this report.
             </div>
             <div class="rem-actions" style="margin-top:.6rem">
+                <button type="button" class="rem-btn primary" data-ideas>Ask AI for a suggested fix&hellip;</button>
                 <a class="rem-btn" href="/remediation">Browse the reviewed remedies</a>
                 <button type="button" class="rem-btn" data-refresh>Re-match this report</button>
+            </div>
+            <div class="rem-empty-sub">
+                The AI writes an Ansible playbook, clearly marked untested. You test it with
+                <code>--check</code> (nothing is applied), run it yourself if it looks right, and
+                tell the app whether it worked &mdash; confirmed fixes are added to your library.
             </div>
         </div>`}
     `;
@@ -215,6 +228,70 @@ function bind() {
             await dismiss(Number(dismissId), select ? select.value : 'other');
             return;
         }
+        if (target.matches('[data-ideas]')) {
+            target.disabled = true;
+            target.textContent = 'Asking the model…';
+            try {
+                const body = await api(`/api/reports/${state.reportId}/ideas`, { method: 'POST' });
+                if (body.already) window.alert('This report already has AI suggestions.');
+                else if (!body.ideas) window.alert(body.suppressed
+                    ? `The model was not asked: ${body.suppressed}.`
+                    : 'The model did not propose anything safe to run for this report.');
+                await load();
+            } catch (error) {
+                window.alert(error.message);
+                target.disabled = false;
+                target.textContent = 'Ask AI for a suggested fix…';
+            }
+            return;
+        }
+
+        const testId = target.getAttribute('data-test');
+        if (testId) {
+            const output = host.querySelector(`[data-test-output="${testId}"]`);
+            target.disabled = true;
+            const original = target.textContent;
+            target.textContent = 'Checking…';
+            try {
+                const body = await api(`/api/remediation-matches/${testId}/test`, { method: 'POST' });
+                if (output) {
+                    output.textContent = (body.ok ? 'CHECK PASSED (rc=0)' : `CHECK FAILED (rc=${body.rc})`)
+                        + ` — ${body.changed || 0} change(s) would be made\n\n` + (body.output || '(no output)');
+                    output.classList.remove('hidden');
+                }
+                window.alert(body.ok
+                    ? 'Check mode passed: the playbook parses and would run. Now run it yourself, then confirm.'
+                    : 'Check mode reported a problem. Read the output; do not run this yet.');
+            } catch (error) {
+                window.alert(error.message);
+            } finally {
+                target.disabled = false;
+                target.textContent = original;
+            }
+            return;
+        }
+
+        const workedId = target.getAttribute('data-worked');
+        if (workedId) {
+            if (!window.confirm('Add this playbook to your library as a remedy that works?')) return;
+            try {
+                await api(`/api/remediation-matches/${workedId}/confirm`,
+                    { method: 'POST', body: JSON.stringify({ worked: true }) });
+                await load();
+            } catch (error) { window.alert(error.message); }
+            return;
+        }
+
+        const failedId = target.getAttribute('data-failed');
+        if (failedId) {
+            try {
+                await api(`/api/remediation-matches/${failedId}/confirm`,
+                    { method: 'POST', body: JSON.stringify({ worked: false }) });
+                await load();
+            } catch (error) { window.alert(error.message); }
+            return;
+        }
+
         const copy = target.getAttribute('data-copy');
         if (copy) {
             const block = target.closest('.rem-blockdoc')?.querySelector('[data-copy-text]');

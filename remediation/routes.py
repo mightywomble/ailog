@@ -5,10 +5,13 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import re
+import uuid
+from pathlib import Path
 
 from flask import Blueprint, Response, current_app, g, jsonify, render_template, request, stream_with_context
 
-from remediation import catalog, policy, progress, runner, service
+from remediation import catalog, inventory, policy, progress, runner, service
 
 log = logging.getLogger(__name__)
 remediation_bp = Blueprint('remediation', __name__)
@@ -69,6 +72,181 @@ def api_refresh_cards(report_id: int):
     from remediation import matcher
     summary = matcher.match_report(report, models, db, with_ideas=False)
     return jsonify({'ok': True, 'summary': summary})
+
+
+@remediation_bp.route('/api/reports/<int:report_id>/ideas', methods=['POST'])
+def api_generate_ideas(report_id: int):
+    """Ask the model for Ansible playbooks the catalog did not cover.
+
+    This is the button on the "no catalog remedy matches" state: it never
+    executes anything, it only adds unverified cards.
+    """
+    models, db = _models(), _db()
+    report = models.LogReport.query.get(report_id)
+    if not report:
+        return jsonify({'error': 'Report not found'}), 404
+    if not policy.idea_channel_enabled():
+        return jsonify({'error': 'The AI suggestion channel is disabled '
+                                 '(AILOG_REMEDIATION_IDEAS=off).'}), 403
+    from remediation import matcher
+    existing = (models.RemediationMatch.query
+                .filter_by(report_id=report_id, source='llm').all())
+    if existing:
+        return jsonify({'ok': True, 'ideas': len(existing), 'already': True})
+    summary = matcher.match_report(report, models, db, with_ideas=True)
+    return jsonify({'ok': True, 'ideas': summary.get('ideas', 0),
+                    'suppressed': summary.get('suppressed') or ''})
+
+
+def _host_for(models, host_key):
+    if not host_key:
+        return None
+    try:
+        return models.Host.query.get(int(str(host_key).split('-', 1)[1]))
+    except (ValueError, TypeError, IndexError):
+        return None
+
+
+def _idea_paths(run_dir: Path, match_id: int):
+    playbooks = run_dir / 'project' / 'remediations' / 'playbooks'
+    playbooks.mkdir(parents=True, exist_ok=True)
+    return playbooks, Path('playbooks') / f'idea-{match_id}.yml'
+
+
+def _write_idea_playbook(run_dir: Path, match_id: int, text: str) -> str:
+    playbooks, relative = _idea_paths(run_dir, match_id)
+    (playbooks / relative.name).write_text(text if text.endswith('\n') else text + '\n',
+                                           encoding='utf-8')
+    return str(relative)
+
+
+@remediation_bp.route('/api/remediation-matches/<int:match_id>/test', methods=['POST'])
+def api_test_idea(match_id: int):
+    """Run an AI playbook with `--check --diff` on its host. Read-only.
+
+    Check mode connects, gathers and reports what *would* change; it cannot
+    apply anything, so an untrusted suggestion can be exercised safely before
+    a human decides to run it for real.
+    """
+    models, db = _models(), _db()
+    card = models.RemediationMatch.query.get(match_id)
+    if not card or card.source != 'llm':
+        return jsonify({'error': 'Only AI suggestions can be tested here.'}), 404
+    if not policy.enabled():
+        return _disabled()
+    if not runner.available():
+        return jsonify({'error': 'ansible-runner is not installed in this image.'}), 503
+    host = _host_for(models, card.host_key)
+    if not host:
+        return jsonify({'error': f'No host for {card.host_key!r}.'}), 404
+    if getattr(host, 'do_not_remediate', False):
+        return jsonify({'error': 'This host is protected from remediation.'}), 403
+    text = (card.code_text or '').strip()
+    if not text:
+        return jsonify({'error': 'This suggestion has no playbook.'}), 400
+
+    run_uuid = uuid.uuid4().hex
+    run_dir = Path(policy.artifact_root()) / 'ideas' / run_uuid
+    try:
+        runner.ensure_project(run_dir)
+        playbook = _write_idea_playbook(run_dir, match_id, text)
+        started = datetime.datetime.utcnow()
+        result = runner.run_playbook(
+            playbook, inventory.build([host]), [inventory.host_key(host)], {},
+            True, run_dir, timeout=min(180, policy.run_timeout()),
+        )
+    except Exception as exc:  # noqa: BLE001 - shown to the user
+        log.exception('idea test failed')
+        return jsonify({'error': f'The check could not run: {exc}'}), 500
+
+    key = inventory.host_key(host)
+    detail = (result.get('hosts') or {}).get(key) or {}
+    ok = bool(detail.get('ok')) and int(result.get('rc') or 0) == 0
+    service.audit(db, models, _actor(), 'remediation.idea_test', 'remediation_match', match_id,
+                  {'host': card.host_key, 'rc': result.get('rc'), 'ok': ok,
+                   'seconds': (datetime.datetime.utcnow() - started).total_seconds()})
+    return jsonify({
+        'ok': ok,
+        'check_only': True,
+        'rc': result.get('rc'),
+        'status': result.get('status'),
+        'changed': result.get('changed'),
+        'output': (detail.get('output') or '')[-12000:],
+        'artifact_dir': result.get('artifact_dir'),
+    })
+
+
+def _slugify(text: str) -> str:
+    slug = re.sub(r'[^a-z0-9]+', '-', (text or '').lower()).strip('-')
+    return (slug[:70] or 'learned-remedy')
+
+
+@remediation_bp.route('/api/remediation-matches/<int:match_id>/confirm', methods=['POST'])
+def api_confirm_idea(match_id: int):
+    """Record the human verdict on an AI suggestion.
+
+    worked=true promotes the playbook into the learned library (visible on
+    /remediation, offered back to the idea channel). worked=false marks the
+    card as rejected so it stops asking.
+    """
+    models, db = _models(), _db()
+    card = models.RemediationMatch.query.get(match_id)
+    if not card or card.source != 'llm':
+        return jsonify({'error': 'Only AI suggestions can be confirmed here.'}), 404
+    data = request.get_json(silent=True) or {}
+    worked = bool(data.get('worked'))
+    notes = str(data.get('notes') or '').strip()[:1000]
+
+    if not worked:
+        card.state = 'rejected'
+        card.dismissed_reason = 'tried_failed'
+        db.session.commit()
+        service.audit(db, models, _actor(), 'remediation.idea_rejected',
+                      'remediation_match', match_id, {'notes': notes})
+        return jsonify({'ok': True, 'learned': None})
+
+    title = str(data.get('title') or '').strip()[:200] or card.title
+    base = 'learned-' + _slugify(title)
+    slug, suffix = base, 2
+    while models.RemediationLearned.query.filter_by(slug=slug).first():
+        slug = f'{base}-{suffix}'
+        suffix += 1
+
+    row = models.RemediationLearned(
+        slug=slug, title=title, summary=(card.rationale or card.summary or '')[:2000],
+        risk=card.risk or 'medium', yaml_text=card.code_text or '',
+        verify_text=card.verify_text, rollback_text=card.rollback_text,
+        source_report_id=card.report_id, source_match_id=card.id,
+        host_key=card.host_key, confirmed_by=_actor(),
+    )
+    db.session.add(row)
+    card.state = 'confirmed'
+    db.session.commit()
+    service.audit(db, models, _actor(), 'remediation.idea_promoted', 'remediation_learned',
+                  row.id, {'slug': slug, 'match_id': match_id, 'notes': notes})
+    return jsonify({'ok': True, 'learned': row.to_dict()})
+
+
+@remediation_bp.route('/api/remediation/learned')
+def api_learned():
+    models = _models()
+    rows = (models.RemediationLearned.query
+            .order_by(models.RemediationLearned.confirmed_at.desc()).all())
+    return jsonify({'learned': [row.to_dict() for row in rows]})
+
+
+@remediation_bp.route('/api/remediation/learned/<int:row_id>', methods=['DELETE'])
+def api_learned_delete(row_id: int):
+    models, db = _models(), _db()
+    row = models.RemediationLearned.query.get(row_id)
+    if not row:
+        return jsonify({'error': 'Not found'}), 404
+    slug = row.slug
+    db.session.delete(row)
+    db.session.commit()
+    service.audit(db, models, _actor(), 'remediation.learned_deleted',
+                  'remediation_learned', row_id, {'slug': slug})
+    return jsonify({'ok': True})
 
 
 @remediation_bp.route('/api/remediation-matches/<int:match_id>/dismiss', methods=['POST'])
@@ -308,6 +486,8 @@ def page():
         'remediation.html',
         policy=_mode_payload(),
         remediation_catalog=models.Remediation.query.order_by(models.Remediation.risk, models.Remediation.title).all(),
+        learned=models.RemediationLearned.query.order_by(
+            models.RemediationLearned.confirmed_at.desc()).all(),
         windows=models.RemediationWindow.query.order_by(models.RemediationWindow.name).all(),
         groups=models.Group.query.order_by(models.Group.name).all(),
         runs=runs,
