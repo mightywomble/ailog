@@ -767,7 +767,7 @@ by the `stacks/ailog/stack.yml` stack file.
 
 **Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.10.0`
 (`:latest` points at the same manifest), digest
-`sha256:32acdf751ecd4875faa0dd70b966a4834d2f4487cf08efbe0993eaac6831a13a`, running as
+`sha256:d354a425917fd0004b1c04b8f1414a5e379977f9826ca2107767f5aa2ab00e10`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
