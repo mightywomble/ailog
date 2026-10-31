@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Homelab Manager</title>
+    <!-- Installable app (PWA): manifest, icons, theme and the iOS standalone hints. -->
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <meta name="theme-color" content="#0f1520">
+    <meta name="application-name" content="Homelab Manager">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Homelab">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     <script src="/static/vendor/tailwindcss-3.4.16.js" integrity="sha384-mS5Uq7sE90lgbBDN8xgf34ibEgbZo4gB3tfLY40ZRle+M188BQw8onzNHg6GUZaA"></script>
     <!-- Markdown rendering for AI output (sanitised with DOMPurify) -->
     <script src="/static/vendor/marked-12.0.2.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi"></script>
@@ -191,6 +200,11 @@
                     aria-label="Search and commands" title="Search and commands">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 <span class="header-label" data-palette-hint>⌘K</span>
+            </button>
+            <button id="install-app-btn" class="icon-btn hidden" type="button" hidden
+                    aria-label="Install Homelab Manager" title="Install Homelab Manager as an app">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v11m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+                <span class="header-label">Install</span>
             </button>
             <button id="theme-toggle-btn" class="icon-btn" type="button" data-theme-toggle
                     aria-label="Switch to light theme" title="Switch to light theme">

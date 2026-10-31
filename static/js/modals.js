@@ -48,6 +48,13 @@
         const focusable = modal.querySelector('.app-modal-close') || modal.querySelector('button');
         if (focusable) setTimeout(() => focusable.focus({ preventScroll: true }), 0);
         modal.dispatchEvent(new CustomEvent('appmodal:open', { bubbles: false }));
+        // One history entry per dialog, so Back closes it instead of leaving
+        // the app. The entry keeps the current view state (app-core's `ailog`)
+        // and adds the dialog id on top of it.
+        const state = history.state || {};
+        if (state.ailogModal !== modal.id) {
+            history.pushState({ ...state, ailogModal: modal.id }, '', location.href);
+        }
         return modal;
     };
 
@@ -58,6 +65,12 @@
         modal.classList.add('hidden');
         const at = stack.indexOf(modal);
         if (at !== -1) stack.splice(at, 1);
+        // Drop our entry by rewriting it (not history.back()), so a close that
+        // happens as part of a view change cannot fight with the Back button.
+        const state = history.state;
+        if (state && state.ailogModal === modal.id) {
+            history.replaceState({ ...state, ailogModal: null }, '', location.href);
+        }
         modal.dispatchEvent(new CustomEvent('appmodal:close', { bubbles: false }));
         return modal;
     };
@@ -106,6 +119,16 @@
                 .filter((m) => !m.classList.contains('hidden'));
             return visible.length ? visible[visible.length - 1] : null;
         };
+
+        // Back: if the entry we returned to is not a dialog but one is open,
+        // close it. (View/screen entries are owned by app-core.)
+        window.addEventListener('popstate', (event) => {
+            const state = event.state || {};
+            if (state.ailogModal) return;      // still inside another dialog
+            const top = topmost();
+            if (!top) return;
+            window.closeAppModal(top);
+        });
 
         document.addEventListener('keydown', (event) => {
             if (event.key !== 'Escape') return;

@@ -1,6 +1,6 @@
 import subprocess
 import io
-from flask import Blueprint, Flask, render_template, jsonify, request, Response, stream_with_context, has_app_context, current_app
+from flask import Blueprint, Flask, render_template, jsonify, request, Response, stream_with_context, has_app_context, current_app, send_from_directory
 from flask_sock import Sock
 import paramiko
 import shlex
@@ -38,7 +38,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.8.3'
+APP_VERSION = '3.9.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -920,6 +920,36 @@ def index():
 @core_routes.route('/favicon.ico')
 def favicon():
     return '', 204  # No content response for favicon
+
+
+@core_routes.route('/sw.js')
+def service_worker():
+    """Serve the PWA worker from the root so its scope is the whole app.
+
+    A worker registered from /static/sw.js could only control /static/, so the
+    file lives there but is served here, with Service-Worker-Allowed for the
+    root scope. Never cached: a stale worker outliving a deploy is the exact
+    problem the network-first strategy in sw.js exists to avoid.
+    """
+    response = send_from_directory(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'),
+        'sw.js',
+        mimetype='application/javascript',
+    )
+    response.headers['Service-Worker-Allowed'] = '/'
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+
+@core_routes.route('/static/manifest.webmanifest')
+def web_manifest():
+    response = send_from_directory(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'),
+        'manifest.webmanifest',
+        mimetype='application/manifest+json',
+    )
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
 
 # SSE responses must not be buffered by reverse proxies (nginx proxy manager),
 # otherwise the browser shows nothing until the first buffer flush and the

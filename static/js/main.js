@@ -14,3 +14,4 @@ import './iframe-modals.js';     // docker + reports dialogs (iframes)
 import './shell.js';              // responsive shell: drawer, tab bar, view state
 import './command-palette.js';    // ⌘K fast path over views/hosts/actions
 import './overview.js';           // dashboard overview cards
+import './pwa.js';                // installable app: service worker + install button
