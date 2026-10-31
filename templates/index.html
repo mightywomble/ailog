@@ -479,23 +479,7 @@
                 </div>
             </div>
             
-            <!-- SSH Terminal Container (outside log panes for independent visibility) -->
-            <div id="ssh-terminal-container" class="hidden w-full flex-1 flex flex-col termix-panel rounded-lg border" style="min-height: 200px;">
-                <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10">
-                    <div class="text-lg font-semibold termix-text">SSH Terminal</div>
-                    <div class="flex items-center gap-3">
-                        <div id="ssh-terminal-status" data-ssh-status class="text-xs termix-muted">Disconnected</div>
-                        <button id="ssh-terminal-expand-btn" type="button"
-                                class="icon-btn ssh-expand-btn" aria-label="Expand terminal to a window"
-                                aria-expanded="false" aria-controls="ssh-terminal-overlay"
-                                title="Expand terminal to a window">
-                            <svg class="ssh-icon-expand" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/></svg>
-                            <svg class="ssh-icon-contract" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5"/></svg>
-                        </button>
-                    </div>
-                </div>
-                <div id="ssh-terminal-body" class="flex-1 overflow-hidden w-full p-3" style="min-height: 200px;"></div>
-            </div>
+            {% include "partials/ssh-terminal-inline.html" %}
             
             <!-- Log Content Area (Bottom 50%) -->
             <div id="logs-bottom-pane" class="glass-container p-4 flex flex-col" style="height: 50%; min-height: 250px;">

@@ -612,6 +612,13 @@ a.ov-row-main:hover { text-decoration: underline; }
 }
 
 /* ------------------------------------------------ SSH terminal: expand/contract */
+/* Belt and braces: whatever wrapper the terminal is mounted in, this element
+   must never carry padding -- xterm would count it as a row and clip the
+   prompt. Spacing belongs on the parent (.ssh-modal-body / the inline wrapper). */
+#ssh-terminal-body {
+  padding: 0 !important;
+  box-sizing: border-box;
+}
 .ssh-expand-btn { width: 30px; height: 26px; padding: 0; }
 .ssh-expand-btn svg { width: 15px; height: 15px; }
 .ssh-icon-contract { display: none; }
