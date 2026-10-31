@@ -11,6 +11,7 @@ The pipeline is:
 """
 import datetime
 import json
+import logging
 import math
 import queue
 import threading
@@ -23,6 +24,8 @@ import aiprompts
 from database import LogReport, db
 from . import diff as rdiff
 from . import collect, correlate, llm, normalize, pack, severity, sizing
+
+log = logging.getLogger(__name__)
 
 reports_bp = Blueprint('serverreport', __name__)
 
@@ -308,8 +311,18 @@ def prepare_bundle(host_key, host_label, window_minutes, include_files, include_
           f"{len(corr['gaps'])} gap(s) found.",
           correlations=len(corr['correlations']))
 
+    # Netdata evidence is optional: a report must still run when Netdata is
+    # down or the host is not monitored by it.
+    metrics = None
+    try:
+        from netdata import evidence as nd_evidence
+        metrics = nd_evidence.for_host(host_key, host_label, window_minutes)
+    except Exception as exc:
+        log.debug('netdata evidence unavailable: %s', exc)
+
     return {
         'severities': sel,
+        'metrics': metrics,
         'collected': collected,
         'norm': norm,
         'corr': corr,
@@ -368,9 +381,11 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
     note('summarise', 'Building evidence pack...')
     # Size the host from the *standard* view (depth 3): measuring the deepest
     # pack would always recommend maximum depth, which defeats the purpose.
-    baseline_pack = pack.build_pack(host_label, norm, corr, collected, containers, depth=3)
+    baseline_pack = pack.build_pack(host_label, norm, corr, collected, containers, depth=3,
+                                    metrics=bundle.get('metrics'))
     baseline_tokens = pack.estimate_tokens(baseline_pack)
-    max_pack = pack.build_pack(host_label, norm, corr, collected, containers, depth=5)
+    max_pack = pack.build_pack(host_label, norm, corr, collected, containers, depth=5,
+                               metrics=bundle.get('metrics'))
     max_tokens = pack.estimate_tokens(max_pack)
 
     recommendation = sizing.recommend({
@@ -387,7 +402,8 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
     chosen_depth = recommendation['depth']
 
     # Depth decides what is *sent*, so build the pack at the chosen level.
-    evidence = pack.build_pack(host_label, norm, corr, collected, containers, depth=chosen_depth)
+    evidence = pack.build_pack(host_label, norm, corr, collected, containers, depth=chosen_depth,
+                               metrics=bundle.get('metrics'))
     tokens = pack.estimate_tokens(evidence)
 
     chunks_needed = 1
@@ -655,7 +671,8 @@ def preflight():
          'label': pack_limits_label(d),
          'tokens': pack.estimate_tokens(
              pack.build_pack(host_label, norm, bundle['corr'], bundle['collected'],
-                             bundle['containers'], depth=d))}
+                             bundle['containers'], depth=d,
+                             metrics=bundle.get('metrics')))}
         for d in sorted(pack.PACK_LIMITS)
     ]
     cost_by_depth = {c['depth']: c['tokens'] for c in depth_costs}

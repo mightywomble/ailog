@@ -66,7 +66,7 @@ def _coverage(norm):
     return ok, failed, quiet
 
 
-def build_pack(host_label, norm, corr, collect_meta, containers, depth=None):
+def build_pack(host_label, norm, corr, collect_meta, containers, depth=None, metrics=None):
     """Render the evidence pack text."""
     limits = limits_for(depth)
     max_clusters = limits['clusters']
@@ -142,6 +142,12 @@ def build_pack(host_label, norm, corr, collect_meta, containers, depth=None):
                 flags.append(f"exit={c['exit_code']}")
             suffix = (' | ' + ' '.join(flags)) if flags else ''
             lines.append(f"{c.get('name')} | {c.get('image')} | {c.get('status')}{suffix}")
+
+    # --- metrics and Netdata alerts -----------------------------------------
+    if metrics:
+        from netdata import evidence as nd_evidence
+        lines.extend(nd_evidence.render(metrics))
+        lines.extend(nd_evidence.fleet_quality_text())
 
     # --- clusters -----------------------------------------------------------
     clusters = norm.get('clusters') or []

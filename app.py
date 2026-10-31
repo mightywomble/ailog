@@ -39,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.11.0'
+APP_VERSION = '3.12.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -124,6 +124,10 @@ def create_app(config: dict | None = None) -> Flask:
     # Threshold alerting over the metrics the samplers collect (modular bolt-on)
     from alerting import alerts_bp
     app.register_blueprint(alerts_bp)
+
+    # Netdata fleet metrics, alerts and report evidence (read-only bolt-on)
+    from netdata import netdata_bp as _netdata_bp
+    app.register_blueprint(_netdata_bp)
 
     # One request for the dashboard (aggregate + ETag)
     from overview import overview_bp
@@ -3392,6 +3396,17 @@ def _docker_endpoint_refresh_job():
     except Exception as e:
         print(f'[WARN] Docker endpoint refresh job failed: {e}')
 
+def _netdata_alert_poll_job():
+    try:
+        from netdata import client as _netdata_client
+        if not _netdata_client.configured():
+            return
+        from alerting import engine as _alerts_engine
+        _alerts_engine.poll_netdata_alerts(after=-300)
+    except Exception as e:
+        print(f'[WARN] Netdata alert poll failed: {e}')
+
+
 def startup_scheduler():
     """Start APScheduler and sync jobs from DB schedules."""
     with app.app_context():
@@ -3408,6 +3423,22 @@ def startup_scheduler():
             )
         except Exception as e:
             print(f'[WARN] Monitoring scheduler job not started: {e}')
+
+        # Netdata alert ingestion: pull transitions so an alert that fired in
+        # Netdata appears on the incident timeline and in Discord even if the
+        # operator never opened the Netdata dashboard.
+        try:
+            scheduler.add_job(
+                _netdata_alert_poll_job,
+                trigger='interval',
+                seconds=60,
+                id='netdata_alert_poll',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        except Exception as e:
+            print(f'[WARN] Netdata alert job not started: {e}')
 
         # Docker endpoint refresh (re-probes configured hosts for a Docker API).
         # Cadence is configurable: AILOG_DOCKER_REFRESH_SECONDS (default 300s).

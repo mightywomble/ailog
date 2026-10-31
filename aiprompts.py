@@ -202,6 +202,9 @@ or intermittent.""",
         'prompt': """Turn these logs and my notes into an on-call handoff and postmortem
 skeleton.
 
+Use the METRICS and NETDATA ALERTS sections, when present, as the timeline
+spine: an alert transition is an observed fact, not an inference.
+
 Produce: (a) 5-line executive summary in plain language, no jargon;
 (b) impact and duration with the exact first-symptom and last-symptom
 timestamps; (c) timeline table; (d) what we know vs what we're guessing,
@@ -212,6 +215,31 @@ and the log query that would prove it worked.
 
 Do not write a confident narrative where the logs are ambiguous — where
 evidence is thin, say "unknown, needs {{specific check}}".""",
+    },
+    {
+        'id': 'capacity',
+        'title': 'Capacity & saturation forensics',
+        'summary': 'Separate a real capacity wall from a transient spike, using the metric window as evidence.',
+        'prompt': """Analyse the supplied logs together with the METRICS and
+NETDATA ALERTS sections for {{HOST}}. I need to know whether this is a
+capacity problem, a saturation spike, or something else wearing a
+capacity costume.
+
+Produce:
+(a) a per-resource table for CPU, memory, disk and load: average, peak and
+    the time of peak, taken only from the metric evidence provided;
+(b) the difference between "sustained" (the resource stayed high across
+    several samples) and "spiky" (one peak with a normal average) — say which
+    one the data actually shows;
+(c) the services or log signatures that line up with each peak, and whether
+    the peak preceded or followed them;
+(d) a headroom estimate: at the observed peak, how much room was left, and
+    what would have to grow for this to become an outage;
+(e) three recommendations ranked by effort, each naming the metric that
+    would prove it worked.
+
+If the metric window is missing or too short to distinguish sustained from
+spiky, say so explicitly. Do not infer capacity from log volume alone.""",
     },
 ]
 

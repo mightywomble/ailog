@@ -141,12 +141,47 @@ def _note_online(results: List[Dict[str, Any]]) -> None:
             pass
 
 
+def _netdata_round(hosts: List[Dict[str, Any]]):
+    """Try one fleet query from Netdata.
+
+    Returns ``(matched, extra, meta)`` where ``matched`` maps a host key to a
+    ready snapshot, ``extra`` are Netdata-only nodes and ``meta`` describes the
+    round. On any failure the caller falls back to SSH per host — a Netdata
+    outage must never empty the Monitoring page.
+    """
+    try:
+        from netdata import client, snapshot
+        if not client.configured():
+            return {}, [], None
+        fleet = client.fleet_cards(after=-120, points=30)
+    except Exception as exc:
+        logger.debug('metrics: netdata round failed: %s', exc)
+        return {}, [], None
+
+    by_key = snapshot.match_nodes(fleet, hosts)
+    matched = {key: snapshot.as_snapshot(host, node)
+               for host in hosts
+               for key in [host.get('key')]
+               if (node := by_key.get(key))}
+    extra = [snapshot.synthetic_host(node) for node in fleet.get('nodes') or []
+             if client.resolve_host_key(node, hosts) is None]
+    meta = {'source': 'netdata', 'nodes': len(fleet.get('nodes') or []),
+            'ts': fleet.get('ts')}
+    return matched, extra, meta
+
+
 def collect_servers() -> Dict[str, Any]:
-    """One round: every host in parallel, system stats for each."""
+    """One round: Netdata for the fleet, SSH only for what it cannot see."""
     hosts = _host_list()
     results: List[Dict[str, Any]] = []
+    matched, extra, netdata_meta = _netdata_round(hosts)
 
     def one(host):
+        key = host.get('key')
+        if key in matched:
+            snap = matched[key]
+            snap['docker'] = _docker_block(snap)
+            return snap
         snap = collect.system_snapshot(host)
         snap['docker'] = _docker_block(snap)
         return snap
@@ -154,6 +189,7 @@ def collect_servers() -> Dict[str, Any]:
     if hosts:
         with ThreadPoolExecutor(max_workers=min(SNAPSHOT_WORKERS, len(hosts))) as pool:
             results = list(pool.map(one, hosts))
+    results.extend(extra)
 
     # Read last_seen before recording this round, so an offline host shows the
     # last time it *was* up instead of the moment we noticed it was down.
@@ -163,7 +199,10 @@ def collect_servers() -> Dict[str, Any]:
     _note_online(results)
 
     results.sort(key=lambda s: (not s.get('online'), str(s.get('name')).lower()))
-    return {'success': True, 'ts': time.time(), 'servers': results}
+    payload = {'success': True, 'ts': time.time(), 'servers': results}
+    if netdata_meta:
+        payload['source'] = netdata_meta
+    return payload
 
 
 def servers_payload(force: bool = False) -> Dict[str, Any]:
@@ -194,6 +233,14 @@ def api_containers():
     host_key = request.args.get('host')
     if not host_key:
         return jsonify({'success': False, 'error': 'host is required'}), 400
+    try:
+        from netdata import snapshot
+        if snapshot.is_netdata_key(host_key):
+            return jsonify({'success': True, 'host_key': host_key, 'ts': time.time(),
+                            'reachable': False, 'containers': [],
+                            'error': 'Netdata-only node: containers are not collected without SSH'})
+    except Exception:
+        pass
     data = collect.container_snapshot(host_key)
     return jsonify({'success': True, 'host_key': host_key,
                     'ts': time.time(), **data})

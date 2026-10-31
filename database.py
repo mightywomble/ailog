@@ -762,11 +762,23 @@ class AlertEvent(db.Model):
     notify_error = db.Column(db.Text)
     started_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     resolved_at = db.Column(db.DateTime)
+    # v3.12.0 - events pulled from Netdata's alert manager. ``external_id`` is
+    # Netdata's transition id, which makes polling idempotent across restarts.
+    source = db.Column(db.String(16), default='ailog', index=True)
+    external_id = db.Column(db.String(64), index=True)
+    node_guid = db.Column(db.String(64))
+    context = db.Column(db.String(96))
+    units = db.Column(db.String(16))
 
     def to_dict(self):
         return {
             'id': self.id,
             'rule_id': self.rule_id,
+            'source': self.source or 'ailog',
+            'external_id': self.external_id,
+            'node_guid': self.node_guid,
+            'context': self.context,
+            'units': self.units,
             'rule_name': self.rule_name,
             'host_key': self.host_key,
             'metric': self.metric,

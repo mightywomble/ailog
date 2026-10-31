@@ -28,6 +28,7 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime
 
 import requests
 from core.timeutil import utcnow
@@ -432,6 +433,120 @@ def send_test():
 # --------------------------------------------------------------------------
 # read side (page + API)
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# Netdata ingestion (pull, not push)
+# --------------------------------------------------------------------------
+#
+# Netdata is the threshold owner: an alert fires there first. ailog does not
+# re-evaluate it, it records the transition so the incident timeline, the
+# report pack and Discord all tell the same story. Dedupe is by Netdata's
+# transition id, so overlapping poll windows and restarts are safe.
+
+NETDATA_SOURCE = 'netdata'
+
+
+def _netdata_host_key(transition):
+    """Map a Netdata transition to the host key the rest of ailog uses."""
+    from netdata import client
+    hosts = client._ailog_hosts()
+    node = {'guid': transition.get('guid'), 'name': transition.get('hostname'),
+            'hostname': transition.get('hostname')}
+    return client.resolve_host_key(node, hosts) or f"nd:{transition.get('hostname')}"
+
+
+def ingest_netdata_transitions(transitions, notify_transitions=True):
+    """Store new transitions. Idempotent on the Netdata transition id."""
+    _, AlertEvent, db = _models()
+    added, skipped = [], 0
+    for transition in transitions or []:
+        external_id = str(transition.get('id') or '')
+        if not external_id:
+            skipped += 1
+            continue
+        if AlertEvent.query.filter_by(source=NETDATA_SOURCE,
+                                      external_id=external_id).first():
+            skipped += 1
+            continue
+        status = str(transition.get('status') or '').upper()
+        when = float(transition.get('when') or time.time())
+        host_key = _netdata_host_key(transition)
+        resolved = status in ('CLEAR', 'UNDEFINED')
+        value = transition.get('value')
+        units = transition.get('units') or ''
+        severity = 'critical' if status == 'CRITICAL' else (
+            'warning' if status == 'WARNING' else 'info')
+        message = (
+            f"{host_key}: {transition.get('alert')}"
+            + (f" ({transition.get('instance')})" if transition.get('instance') else '')
+            + (f" = {value:g}{units}" if isinstance(value, (int, float)) else '')
+            + f" — {transition.get('summary') or transition.get('info') or status}"
+        )
+        try:
+            event = AlertEvent(
+                rule_id=0,
+                rule_name=f"netdata: {transition.get('alert')}",
+                host_key=str(host_key),
+                metric='netdata_alert',
+                value=float(value) if isinstance(value, (int, float)) else None,
+                severity=severity,
+                state='resolved' if resolved else 'firing',
+                message=message[:2000],
+                started_at=datetime.utcfromtimestamp(when),
+                resolved_at=utcnow() if resolved else None,
+                source=NETDATA_SOURCE,
+                external_id=external_id,
+                node_guid=transition.get('guid'),
+                context=transition.get('context'),
+                units=units[:16],
+            )
+            db.session.add(event)
+            db.session.commit()
+        except Exception as exc:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            log.warning('[alerts] could not store netdata transition: %s', exc)
+            continue
+        payload = event.to_dict()
+        added.append(payload)
+        if notify_transitions and not resolved:
+            ok, error = notify(payload)
+            try:
+                event.notified = bool(ok)
+                event.notify_error = error
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+    return added, skipped
+
+
+def poll_netdata_alerts(after=-300, meta=False):
+    """Pull recent transitions from Netdata and record the new ones."""
+    from netdata import client
+    if not client.configured():
+        return {'added': 0, 'skipped': 0, 'error': 'Netdata is not configured'} if meta else 0
+    try:
+        data = client.alert_transitions(after=after, limit=500, ttl=0)
+    except client.NetdataError as exc:
+        log.debug('[alerts] netdata poll failed: %s', exc)
+        return {'added': 0, 'skipped': 0, 'error': str(exc)} if meta else 0
+    added, skipped = ingest_netdata_transitions(data.get('transitions') or [])
+    if meta:
+        return {'added': len(added), 'skipped': skipped,
+                'events': added[:20]}
+    return len(added)
+
+
+def netdata_events(limit=20, host_key=None):
+    _, AlertEvent, _ = _models()
+    query = AlertEvent.query.filter_by(source=NETDATA_SOURCE)
+    if host_key:
+        query = query.filter(AlertEvent.host_key == str(host_key))
+    rows = query.order_by(AlertEvent.started_at.desc()).limit(max(1, min(limit, 200))).all()
+    return [row.to_dict() for row in rows]
+
 
 def active_events():
     _, AlertEvent, _ = _models()
