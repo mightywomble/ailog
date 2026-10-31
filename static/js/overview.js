@@ -229,7 +229,10 @@
         }
         const nodes = nd.nodes || [];
         const online = nodes.filter((n) => n.online !== false);
-        const anomalies = nodes.filter((n) => Number(n.anomaly_rate || 0) > 0);
+        // Netdata's ML anomaly rate is a percentage of metrics behaving unusually;
+        // a few hundredths is normal background noise. At or above half a percent
+        // is worth putting on the dashboard.
+        const anomalies = nodes.filter((n) => Number(n.anomaly_rate || 0) >= 0.5);
         const alerts = nodes.reduce((sum, n) => sum + (n.alerts?.warning || 0) + (n.alerts?.critical || 0), 0);
         const quality = nd.quality || {};
         const streamingIssues = (quality.unstable || []).length + (quality.not_streaming || []).length;
@@ -244,12 +247,12 @@
             const cls = cpu >= 90 ? 'is-bad' : (cpu >= 75 ? 'is-warn' : '');
             return `
               <li class="ov-row ov-nd-row">
-                <span class="ov-sev ${ar > 0 ? 'is-warning' : ''}" title="${ar > 0 ? `ML anomaly ${ar.toFixed(1)}%` : 'No anomaly'}"></span>
+                <span class="ov-sev ${ar > 0 ? 'is-warning' : ''}" title="${ar > 0 ? `ML anomaly ${ar.toFixed(2)}%` : 'No anomaly'}"></span>
                 <a class="ov-row-main" href="/netdata">${esc(n.name || n.hostname || 'node')}</a>
                 <span class="ov-nd-metrics ${cls}">
                   <span title="CPU">CPU ${fmtPct(cpu)}</span>
                   <span title="RAM">RAM ${fmtPct(mem)}</span>
-                  ${ar > 0 ? `<span class="ov-nd-anom" title="Netdata ML anomaly rate">ML ${ar.toFixed(1)}%</span>` : ''}
+                  ${ar > 0 ? `<span class="ov-nd-anom" title="Netdata ML anomaly rate">ML ${ar.toFixed(2)}%</span>` : ''}
                 </span>
               </li>`;
         }).join('');

@@ -107,7 +107,7 @@ function renderCards(nodes) {
         if (ar > 0) {
             const b = document.createElement('span');
             b.className = 'nd-badge ar';
-            b.textContent = `anomaly ${ar.toFixed(1)}%`;
+            b.textContent = `anomaly ${ar.toFixed(2)}%`;
             b.title = 'Netdata ML anomaly rate (rolling 1 minute)';
             badges.appendChild(b);
         }
