@@ -440,3 +440,25 @@ def test_netdata_blueprint_and_poller_are_registered():
     assert 'from netdata import netdata_bp' in app_py
     assert 'netdata_alert_poll' in app_py
     assert 'poll_netdata_alerts' in app_py
+
+
+def test_dashboard_card_is_anomaly_first_and_links_to_the_fleet_page():
+    js = _js('overview.js')
+    css = open(os.path.join(ROOT, 'static', 'css', 'ui.css')).read()
+    assert '/api/netdata/fleet?window=120&points=30' in js
+    assert 'function renderNetdata()' in js
+    assert 'sort((a, b) => (b.anomaly_rate || 0)' in js
+    assert 'Not reachable' in js
+    assert '/netdata' in js
+    assert '.ov-nd-anom' in css
+    # The dashboard must not turn a missing configuration into a red error box.
+    assert '/not configured/i.test(message)' in js
+
+
+def test_settings_has_a_netdata_navigation_entry_and_live_status():
+    html = open(os.path.join(ROOT, 'templates', 'partials', 'settings.html')).read()
+    assert 'data-section="netdata"' in html
+    assert 'id="netdata-section"' in html
+    assert 'id="netdata-status"' in html
+    assert 'Parent URL' in html
+    assert 'API token' in html
