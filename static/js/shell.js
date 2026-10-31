@@ -10,7 +10,7 @@
     const sidebar = document.getElementById('hosts-sidebar');
     const openBtn = document.getElementById('mobile-menu-btn');
     const tabbar = document.getElementById('mobile-tabbar');
-    const views = ['dashboard-view', 'mobile-hosts-view', 'logs-view', 'suricata-stats-view'];
+    const views = ['dashboard-view', 'mobile-hosts-view', 'mobile-logs-view', 'logs-view', 'suricata-stats-view'];
 
     const isOpen = () => body.classList.contains('sidebar-open');
 
@@ -62,7 +62,7 @@
             const tab = btn.dataset.tab;
             const current = (tab === 'overview' && view === 'dashboard-view')
                 || (tab === 'hosts' && view === 'mobile-hosts-view')
-                || (tab === 'logs' && view === 'logs-view');
+                || (tab === 'logs' && (view === 'logs-view' || view === 'mobile-logs-view'));
             if (current) btn.setAttribute('aria-current', 'page');
             else btn.removeAttribute('aria-current');
         });
@@ -105,6 +105,7 @@
     window.ailogShell = { showView: (name) => {
         if (name === 'dashboard') window.showDashboard?.();
         else if (name === 'hosts') window.showMobileHosts?.();
+        else if (name === 'mobile-logs') window.showMobileLogs?.();
         else if (name === 'logs') window.showLogs?.();
         else if (name === 'suricata') document.getElementById('suricata-stats-btn')?.click();
         syncTabs();

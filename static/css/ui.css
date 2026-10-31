@@ -629,6 +629,10 @@ a.ov-row-main:hover { text-decoration: underline; }
 @media (max-width: 640px) {
   .ssh-modal-panel { width: 100vw; height: 92dvh; max-height: 92dvh; }
   .ssh-modal-host { display: none; }
+  /* On a phone the terminal is opened full screen and closed with its X, so a
+     half-height inline pane (and the button that expands to it) is dead weight. */
+  #ssh-terminal-expand-btn,
+  #ssh-terminal-contract-btn { display: none; }
 }
 
 /* ------------------------------------------- phone / Fold card-first hosts
@@ -685,7 +689,7 @@ a.ov-row-main:hover { text-decoration: underline; }
   .mh-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 12px;
     align-content: start;
     padding-bottom: 4px;
   }
@@ -701,8 +705,8 @@ a.ov-row-main:hover { text-decoration: underline; }
     align-items: center;
     justify-content: center;
     text-align: center;
-    min-height: 116px;
-    padding: 2.1rem .6rem 3.1rem;
+    min-height: 124px;
+    padding: 2.2rem .7rem 3.2rem;
     overflow: hidden;
     border-radius: var(--radius);
     background: var(--surface-2);
@@ -923,3 +927,234 @@ a.ov-row-main:hover { text-decoration: underline; }
 }
 
 body.mh-sheet-open { overflow: hidden; }
+
+/* ------------------------------------------------ phone: a host's log files
+ * Same card-first idea as the host grid: Pull logs and AI analyse host in the
+ * header, one card per source in a single scrolling list, and a full-screen
+ * dialog for reading one log. */
+.mobile-logs { display: none; }
+@media (max-width: 640px), (max-width: 900px) and (pointer: coarse) {
+  #mobile-logs-view:not(.hidden) {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .mlv-head {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 2px 2px 0;
+  }
+  .mlv-head-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .mlv-icon-btn {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .mlv-icon-btn svg { width: 20px; height: 20px; }
+  .mlv-icon-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .mlv-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .mlv-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 0 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: .8rem;
+    font-weight: 600;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .mlv-btn svg { width: 18px; height: 18px; flex: 0 0 auto; }
+  .mlv-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .mlv-btn[disabled] { opacity: .55; cursor: progress; }
+  .mlv-btn-primary {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
+  .ml-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 4px;
+  }
+  .ml-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 68px;
+    padding: 12px 14px;
+    text-align: left;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ml-card:active { border-color: var(--border-strong); }
+  .ml-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .ml-glyph {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--accent);
+  }
+  .ml-glyph svg { width: 17px; height: 17px; }
+  .ml-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .ml-name {
+    font-size: .84rem;
+    font-weight: 600;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ml-meta {
+    font-family: ui-monospace, 'JetBrains Mono', monospace;
+    font-size: .66rem;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ml-tag {
+    flex: 0 0 auto;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: .58rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .ml-tag[data-type="docker"] { color: var(--info, var(--accent)); }
+  .ml-chev { flex: 0 0 auto; width: 16px; height: 16px; color: var(--faint); }
+  .ml-empty {
+    margin: 0;
+    padding: 28px 16px;
+    text-align: center;
+    font-size: .8rem;
+    color: var(--muted);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+  }
+
+  /* one source, the whole screen: reading a log is the point */
+  .ml-panel {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border: 0;
+  }
+  .ml-head { flex-wrap: wrap; gap: 8px; }
+  .ml-head-text { display: flex; flex-direction: column; min-width: 0; }
+  .mlog-name {
+    font-size: .9rem;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mlog-sub {
+    font-family: ui-monospace, 'JetBrains Mono', monospace;
+    font-size: .66rem;
+    color: var(--faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ml-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .ml-head-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: .74rem;
+    font-weight: 600;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .ml-head-btn svg { width: 16px; height: 16px; }
+  .ml-head-btn[disabled] { opacity: .5; }
+  .ml-head-btn-accent {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  .mlog-status {
+    margin: 0;
+    padding: 8px 14px;
+    font-size: .7rem;
+    color: var(--warn);
+    border-bottom: 1px solid var(--border);
+  }
+  .ml-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 0 !important;
+    background: var(--term-bg, var(--bg));
+  }
+  .ml-pre {
+    margin: 0;
+    padding: 12px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+    font-family: ui-monospace, 'JetBrains Mono', monospace;
+    font-size: .72rem;
+    line-height: 1.45;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}

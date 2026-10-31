@@ -6,6 +6,8 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-31 | v3.8.1 | Small polish on the new phone log cards: while a pull is streaming the subtitle counts what it has found (`41 sources so far…`) instead of repeating the global progress strip, and settles to `N sources · tap one to read it` when the stream completes. | ✅ Complete |
+| 2026-10-31 | v3.8.0 | **The phone is card-first all the way down.** A host's log sources are now cards in one scrolling list, with *Pull logs* and *AI analyse host* in the header. Tapping a card opens the log full screen in a dialog whose header carries **AI analyse** and **Share** (Android share sheet, clipboard fallback); the finished analysis has the same share button. The SSH expand/contract toggles are gone on a phone (the terminal is opened full screen and closed with its ✕), and the search strip is one compact row instead of three. | ✅ Complete |
 | 2026-10-30 | v3.7.1 | **Fixed: the phone grid would not scroll.** The new hosts view was mounted inside the fixed-height shell but was not part of the shell's view rules, so the shell clipped it: hosts past the fold were unreachable. It now joins `#dashboard-view`/`#logs-view` as a scroll container (`overflow: auto`, `min-height: 0`) and owns the single phone grid column (the sidebar is a fixed overlay there). | ✅ Complete |
 | 2026-10-30 | v3.7.0 | **Phones get a card-first host screen.** On a touch device the first screen is a grid of host tiles (2 across on a phone, 3 on an unfolded Fold or in landscape): the green `>_` on a tile opens the SSH terminal **full screen**, and tapping the tile body opens a slim detail sheet (status, OS, Docker, last seen, `SSH terminal` / `Logs & info`). Every action is thumb-sized (44px+). Desktop is untouched - the sidebar, dashboard and logs view are exactly as before. | ✅ Complete |
 | 2026-10-30 | v3.6.2 | **Fixed: the SSH prompt opened the previous host.** Each socket's handlers closed over the *shared* `sshSocket` variable, so when a second host was opened, `closeSshSocket()` shut the first socket down and its late `error`/`close` event called `closeSshSocket()` again - this time closing the brand-new connection. The new socket never reached `onopen`, no `connectToHost` was sent, and the tab/terminal kept showing the session you had just left. Handlers are now bound to their own socket and detached before closing. Also: the OS badge is bigger and Ubuntu hosts show the circle-of-friends mark instead of a generic penguin. | ✅ Complete |
@@ -759,9 +761,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-30): `zot.safehomelan.com/ailog:v3.7.1`
+**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.8.1`
 (`:latest` points at the same manifest), digest
-`sha256:55b233e44e6ba19d58034747fe9115f11147ae37f66a93de6ed2973f6541f89c`, running as
+`sha256:88a5472589e558976bdde2f9f6818fccf815d33e4cb10bab9ec7cb88e1502cc8`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -770,7 +772,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.7.1 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.8.1 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
@@ -1178,6 +1180,32 @@ The application provides detailed startup logs showing:
    map/reduce passes), verdict parsed
 7. **Store** (`routes.py`) – `log_reports` row; page renders through marked + DOMPurify
 
+### v3.8.0 - The phone is card-first all the way down
+- 🗂️ **A host's logs are cards.** `#mobile-logs-view` replaces the desktop split panes on a touch device: *Pull logs*
+  and *AI analyse host* in the header, then one card per source (name, size, when it changed, a `FILE`/`JOURNAL`/
+  `DOCKER` chip) in a single scrolling list. The same `/sources/...` stream feeds both mounts, so a pull in the card
+  list is the pull the desktop list would have shown.
+- 📖 **Tap a card, read it full screen.** The log opens in a dialog that owns the whole viewport: a header with the
+  file name, the host and type, **AI analyse**, **Share** and Close; the body is a wrapping monospace reader with its
+  own scroll and a safe-area pad. Log text is written with `textContent` only.
+- 🤖 **AI analyse in the dialog header** runs the *same* pipeline as the desktop button (`runAiAnalysis`), so stages,
+  truncation warning, provider/model metadata and the result dialog are identical. *AI analyse host* opens the
+  existing correlated server report.
+- 📤 **Share, not download.** `navigator.share` opens the Android share sheet with the log (or the finished analysis);
+  the clipboard is the fallback, and cancelling the sheet does nothing. The analysis dialog has the same button.
+- 🧹 **Removed on a phone:** the SSH expand/contract toggles (the terminal already opens full screen and closes with
+  its ✕), and the three-row search strip is now one compact row with an icon-only case-sensitive checkbox — about 90px
+  of a 844px screen handed back to the cards.
+- 🐛 **A pull is not restarted by its own selection.** `selectHost()` used to paint the desktop info pane straight over
+  the phone's pull, bumping the stream token so every event was ignored ("Pulling log sources…" forever). On a phone it
+  now shows the card list, and `showMobileLogs()` will not open a second stream for the same host.
+- 🔍 **Verified on production** (`v3.8.0`/`v3.8.1`, 390×844): tapping **files** pulls 42 sources as cards in a 621px
+  viewport with 3,387px of scroll, the subtitle counting `42 sources so far…` while the stream runs; the README card
+  opens 1,041 characters full screen with AI analyse and Share enabled; *AI analyse host* opens the server report.
+- 🧪 **16 new tests** (`tests/test_mobile_logs_view.py`) plus headless-Edge verification at 390×844: 4 cards from a
+  canned stream, a 22k-character log scrolling in the dialog (749px viewport / 11,026px content), Share copying to the
+  clipboard, AI analyse host opening the report, and the desktop layout unchanged.
+
 ### v3.7.0 - Phones get a card-first hosts screen
 - 📱 **The first screen on a phone is the fleet.** A new phone-only view (`#mobile-hosts-view`) renders the same host
   cards as the sidebar through the same factory (`createHostCard(id, host, 'mobile')`): name centred, reachability dot
@@ -1187,7 +1215,7 @@ The application provides detailed startup logs showing:
 - 🖥️ **`>_` opens the terminal full screen.** The tile selects the host, opens the existing SSH dialog and auto-expands
   it — no half-height inline pane on a 390px viewport.
 - 🗂️ **The body opens a slim sheet, not a page.** Status line (Online / Offline + last seen, with the OS name), four
-  facts (group, Docker, last online, host key) and two actions: *SSH terminal* and *Logs & info*. Written with
+  facts (group, Docker, last online, host key) and two actions: *SSH terminal* and *Logs & analyse* (see v3.8.0). Written with
   `textContent` only, closes on backdrop, ✕ or Escape, and hides SSH for the app's own machine.
 - 📐 **Two columns on a phone, three when the Fold is open or the phone is landscape** (`repeat(2)`, then `repeat(3)`
   from 560px). The view is gated on `(max-width: 640px)` or `(max-width: 900px) and (pointer: coarse)` — the same

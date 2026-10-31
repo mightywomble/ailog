@@ -27,7 +27,7 @@ def _css():
 
 def _sheet_js():
     js = _js()
-    return js[js.index('function closeMobileHostSheet'):js.index('const applyHostStatus')]
+    return js[js.index('function closeMobileHostSheet'):js.index('// ------------------------------------------------- phone log screen')]
 
 
 # ------------------------------------------------------------------ markup
@@ -41,8 +41,12 @@ def test_the_phone_grid_view_exists_and_starts_hidden():
     assert 'id="mobile-hosts-refresh"' in html
 
 
+def _sheets_html():
+    return _read('templates', 'partials', 'mobile-sheets.html')
+
+
 def test_the_detail_sheet_exists_with_two_actions():
-    html = _read('templates', 'index.html')
+    html = _read('templates', 'index.html') + _sheets_html()
     assert 'id="mobile-host-sheet"' in html
     assert 'role="dialog"' in html and 'aria-modal="true"' in html
     assert 'id="mh-sheet-title"' in html and 'id="mh-sheet-facts"' in html
@@ -75,8 +79,8 @@ def test_two_columns_on_a_phone_and_three_when_unfolded():
 def test_the_tiles_are_thumb_sized():
     css = _css()
     block = css[css.index('#mobile-host-cards .host-card {'):]
-    block = block[:block.index('/* ------------------------------------------------ slim host detail sheet')]
-    assert 'min-height: 116px' in block
+    block = block[:block.index('/* ------------------------------------------------ phone: a host\'s log files')]
+    assert 'min-height: 124px' in block
     ssh = block[block.index('.hc-ssh {'):]
     ssh = ssh[:ssh.index('}')]
     assert 'width: 44px' in ssh and 'height: 44px' in ssh
@@ -211,4 +215,5 @@ def test_the_grid_is_the_scroll_container_on_a_phone():
     assert 'grid-column: 2' in placement
     # the sidebar is a fixed overlay on a phone: one full-width column
     phone = css[css.index('  /* the sidebar is fixed here, so the view owns the whole single column */'):]
-    assert '.app-body > #mobile-hosts-view { grid-column: 1 / -1; grid-row: 1; }' in phone[:200]
+    assert '.app-body > #mobile-hosts-view,' in phone[:300]
+    assert 'grid-column: 1 / -1; grid-row: 1;' in phone[:300]

@@ -3,7 +3,14 @@
         <div class="app-modal-panel app-modal-lg">
             <div class="app-modal-head">
                 <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-indigo-400"><path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg> AI Analysis Result</div>
-                <button id="close-ai-modal-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
+                <div class="ml-head-actions">
+                    <!-- Phone: hand the report to another app (Android share sheet), or the clipboard. -->
+                    <button id="ai-analysis-share" type="button" class="ml-head-btn" aria-label="Share this analysis" title="Share this analysis">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342a3 3 0 100-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316M18 8a3 3 0 100-6 3 3 0 000 6zm0 14a3 3 0 100-6 3 3 0 000 6z"/></svg>
+                        <span>Share</span>
+                    </button>
+                    <button id="close-ai-modal-btn" type="button" class="app-modal-close" data-modal-close>Close</button>
+                </div>
             </div>
             <div id="ai-analysis-content" class="app-modal-body termix-muted"></div>
         </div>
