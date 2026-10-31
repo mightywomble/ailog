@@ -1255,3 +1255,24 @@ body.mh-sheet-open { overflow: hidden; }
   .aw-panel { max-height: 100dvh; height: 100dvh; width: 100vw; border-radius: 0; }
   .aw-btn, .aw-scope { min-height: 46px; }
 }
+
+/* ------------------------------------------------------ netdata overview */
+/* The dashboard card is a taster, not the fleet page: four rows, one line of
+   chips, and a link. Values stay tabular so a row does not jump when the
+   anomaly rate changes. */
+.ov-nd-head { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ov-nd-rows { gap: 4px; }
+.ov-nd-row { gap: 6px; }
+.ov-nd-metrics {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: .66rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ov-nd-metrics.is-warn { color: var(--warn); }
+.ov-nd-metrics.is-bad { color: var(--bad); }
+.ov-nd-anom { color: var(--accent); font-weight: 650; }

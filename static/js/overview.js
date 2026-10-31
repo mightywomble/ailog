@@ -209,6 +209,67 @@
           </div>`;
     }
 
+    /* Netdata fleet card: the same numbers as /netdata, compressed to the
+     * question a dashboard asks — "which machine is behaving unusually?".
+     * Cards are already anomaly-first; here we show the top few and let the
+     * full page carry the drill-down. */
+    function renderNetdata() {
+        const nd = window.__ovNetdata;
+        if (!nd) return '';
+        if (nd.error) {
+            return `
+              <div class="ov-card" data-ov="netdata">
+                <div class="ov-card-head">
+                  <h3>Netdata</h3>
+                  <a href="/netdata" class="ov-link">Open</a>
+                </div>
+                <p class="ov-sub">Not reachable: ${esc(nd.error)}</p>
+                <p class="ov-sub"><a class="ov-link" href="/">Check Settings → Netdata</a></p>
+              </div>`;
+        }
+        const nodes = nd.nodes || [];
+        const online = nodes.filter((n) => n.online !== false);
+        const anomalies = nodes.filter((n) => Number(n.anomaly_rate || 0) > 0);
+        const alerts = nodes.reduce((sum, n) => sum + (n.alerts?.warning || 0) + (n.alerts?.critical || 0), 0);
+        const quality = nd.quality || {};
+        const streamingIssues = (quality.unstable || []).length + (quality.not_streaming || []).length;
+        const top = [...nodes]
+            .sort((a, b) => (b.anomaly_rate || 0) - (a.anomaly_rate || 0)
+                || (b.cpu_percent || 0) - (a.cpu_percent || 0))
+            .slice(0, 4);
+        const rows = top.map((n) => {
+            const ar = Number(n.anomaly_rate || 0);
+            const cpu = Number(n.cpu_percent || 0);
+            const mem = Number(n.mem_percent || 0);
+            const cls = cpu >= 90 ? 'is-bad' : (cpu >= 75 ? 'is-warn' : '');
+            return `
+              <li class="ov-row ov-nd-row">
+                <span class="ov-sev ${ar > 0 ? 'is-warning' : ''}" title="${ar > 0 ? `ML anomaly ${ar.toFixed(1)}%` : 'No anomaly'}"></span>
+                <a class="ov-row-main" href="/netdata">${esc(n.name || n.hostname || 'node')}</a>
+                <span class="ov-nd-metrics ${cls}">
+                  <span title="CPU">CPU ${fmtPct(cpu)}</span>
+                  <span title="RAM">RAM ${fmtPct(mem)}</span>
+                  ${ar > 0 ? `<span class="ov-nd-anom" title="Netdata ML anomaly rate">ML ${ar.toFixed(1)}%</span>` : ''}
+                </span>
+              </li>`;
+        }).join('');
+
+        return `
+          <div class="ov-card" data-ov="netdata">
+            <div class="ov-card-head">
+              <h3>Netdata</h3>
+              <a href="/netdata" class="ov-link">Open fleet</a>
+            </div>
+            <div class="ov-nd-head">
+              <span class="ov-chip ${online.length === nodes.length ? 'is-ok' : 'is-warn'}">${online.length}/${nodes.length} online</span>
+              <span class="ov-chip ${anomalies.length ? 'is-warn' : 'is-ok'}">${anomalies.length} anomalous</span>
+              <span class="ov-chip ${alerts ? 'is-warn' : 'is-ok'}">${alerts} alert${alerts === 1 ? '' : 's'}</span>
+              <span class="ov-chip ${streamingIssues ? 'is-warn' : 'is-ok'}">${streamingIssues ? `${streamingIssues} streaming issue${streamingIssues === 1 ? '' : 's'}` : 'streaming ok'}</span>
+            </div>
+            <ul class="ov-rows ov-nd-rows">${rows || '<li class="ov-row"><span class="ov-row-main ov-sub">No nodes reported.</span></li>'}</ul>
+          </div>`;
+    }
+
     function renderError(what, err) {
         return `
           <div class="ov-card" data-ov="error">
@@ -254,6 +315,9 @@
         if (result.reports === null) cards.push(skeletonCard('Recent reports'));
         else cards.push(result.reports.error ? renderError('Reports', result.reports.error) : renderReports(result.reports.data));
 
+        const netdataCard = renderNetdata();
+        if (netdataCard) cards.push(netdataCard);
+
         mount.innerHTML = cards.join('');
         mount.dataset.updated = new Date().toISOString();
         painted = true;
@@ -284,6 +348,42 @@
             if (typeof window.openReportsModal === 'function') window.openReportsModal(null, '');
             else window.open('/reports', '_blank', 'noopener');
         });
+    }
+
+    /* Netdata poll is slower than the overview: Netdata itself updates its ML
+     * anomaly rate on a one-minute roll, so five seconds would just re-render
+     * the same number. */
+    let netdataAt = 0;
+    const NETDATA_MS = 15000;
+
+    async function loadNetdata() {
+        if (Date.now() - netdataAt < NETDATA_MS) return false;
+        netdataAt = Date.now();
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 5000);
+            let res;
+            try {
+                res = await fetch('/api/netdata/fleet?window=120&points=30',
+                    { headers: { Accept: 'application/json' }, signal: controller.signal });
+            } finally {
+                clearTimeout(timeout);
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok || body.success === false) {
+                const message = String(body.error || `${res.status}`);
+                // "not configured" is a deliberate state, not a dashboard error.
+                window.__ovNetdata = /not configured/i.test(message) ? null : { error: message };
+            } else {
+                window.__ovNetdata = {
+                    nodes: body.nodes || [],
+                    quality: body.quality || {},
+                };
+            }
+        } catch (error) {
+            window.__ovNetdata = { error: error.message || 'request failed' };
+        }
+        return true;
     }
 
     /* Fetch the aggregate. Returns false when the server said "not modified". */
@@ -321,6 +421,11 @@
                 result.servers = result.alerts = result.reports = null;
                 paint();
             }
+            // Netdata is decoration on this page: never let a slow parent delay
+            // the fleet/alerts/report cards. Its result repaints on its own.
+            loadNetdata().then((netdataChanged) => {
+                if (netdataChanged && dashboardVisible()) paint();
+            });
             const changed = await loadOverview();
             if (changed) {
                 failures = 0;

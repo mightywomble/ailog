@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-31 | v3.13.0 | **Netdata on the dashboard.** The homepage fleet grid gains a *Netdata* card: online / anomalous / alert / streaming chips and the four nodes with the highest ML anomaly rate, linked to `/netdata` for the full cards and drill-down. Settings → Netdata (URL + write-only token) is unchanged and remains the one place to configure the connection. | ✅ Complete |
 | 2026-10-31 | v3.12.0 | **Netdata integration (read-only).** Netdata owns thresholds; ailog pulls. One fleet query now feeds the Monitoring page for every host Netdata knows (SSH is only the fallback), with an **ML anomaly badge** on each card. A new **`/netdata`** page shows anomaly-first live cards, click-to-drill-down history from Netdata's tiers, p95 capacity/headroom, and a **host reconciliation** panel (matched / in Netdata only / in ailog only). Alert transitions are pulled every 60 s into the incident timeline (idempotent on Netdata's transition id) and into Discord. AI reports gain a deterministic **METRICS** and **NETDATA ALERTS IN WINDOW** section plus a streaming data-quality caveat, and the wizard ships an 11th prompt, *Capacity & saturation forensics*. Settings → Netdata stores the URL and a write-only token. Function-based diagnostics report the Cloud SSO requirement honestly (412) instead of failing silently. | ✅ Complete |
 | 2026-10-31 | v3.11.0 | **AI-suggested fixes when the catalog has nothing.** The "no catalog remedy matches" state now offers *Ask AI for a suggested fix*: the model writes an **Ansible playbook** (never executed by the app), shown with an *untested* badge. You can **Test with `--check`** (connects and reports what would change, applies nothing), copy it, run it yourself, then press **I ran it — it worked** to add it to a new *Learned remedies* library (or *Tried — didn't work* to retire it). Learned playbooks are listed on `/remediation`, deletable, and offered back to the model as prior art so it stops reinventing them. | ✅ Complete |
 | 2026-10-31 | v3.10.0 | **One AI wizard behind every AI button.** Any AI analysis — desktop *AI Analyse*, the phone log reader, and the host-wide report — now runs the same two steps first: **what to analyse** (whole log / last 500 / last 200 / errors-only, with a live size count) and **which prompt**. Step 2 offers ten curated sysadmin briefs (timeline reconstruction, cross-source correlation, anomaly deviation, security/auth forensics, crashloop forensics, resource exhaustion, error clustering, log-noise audit, boot/timer health, postmortem writer), your own saved prompts, and a free-text field with *save for later*. `{{HOST}}`/`{{START}}`/`{{SYMPTOM}}`-style placeholders are filled from the log (time range, timezone) or from the wizard's fill-in fields. Choosing no prompt keeps the classic analysis. Log text is fenced as untrusted data in the system message. | ✅ Complete |
@@ -767,9 +768,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.12.0`
+**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.13.0`
 (`:latest` points at the same manifest), digest
-`sha256:547edcc9b4591861d9b05f77b6885231a9462aca90eb5aa509640137d54f073a`, running as
+`sha256:b8b7858fa9bb3fbb60d42e8d631e2862012980883b9eea3b692d0e23f8063fcb`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -778,7 +779,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.12.0 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.13.0 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
