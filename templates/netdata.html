@@ -1,0 +1,134 @@
+{% set embedded = request.args.get('embed') == '1' %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Netdata fleet - Homelab Manager</title>
+  <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/netdata.css?v={{ app_version }}">
+  <script>
+    (function () {
+      try {
+        var r = document.documentElement;
+        var mode = localStorage.getItem('ui.mode') || 'system';
+        var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        r.dataset.theme = localStorage.getItem('ui.theme') || 'midnight';
+        r.dataset.ui = localStorage.getItem('ui.interface') || 'classic';
+        r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
+        r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
+        r.dataset.motion = localStorage.getItem('ui.motion') || 'full';
+        r.style.colorScheme = r.dataset.mode;
+      } catch (e) {}
+    })();
+  </script>
+  <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
+</head>
+<body>
+  <div class="nd-wrap">
+    <header class="nd-head">
+      <div class="nd-head-left">
+        {% if not embedded %}<a class="nd-back" href="/">← Back</a>{% endif %}
+        <div>
+          <h1 class="nd-title">Netdata fleet</h1>
+          <p class="nd-sub" id="nd-sub">Connecting…</p>
+        </div>
+      </div>
+      <div class="nd-head-right">
+        <label class="nd-field"><span>Window</span>
+          <select id="nd-window">
+            <option value="60">1 h</option>
+            <option value="360" selected>6 h</option>
+            <option value="1440">24 h</option>
+          </select>
+        </label>
+        <button id="nd-refresh" type="button" class="nd-btn">Refresh</button>
+      </div>
+    </header>
+
+    <div id="nd-banner" class="nd-banner hidden"></div>
+
+    <section class="nd-panel" aria-label="Live fleet cards">
+      <div class="nd-panel-head">
+        <h2>Live fleet</h2>
+        <span class="nd-muted" id="nd-fleet-note">Anomaly-first: the busiest ML anomaly rate is first.</span>
+      </div>
+      <div id="nd-cards" class="nd-cards"></div>
+    </section>
+
+    <div class="nd-split">
+      <section class="nd-panel" aria-label="Capacity and SLO">
+        <div class="nd-panel-head">
+          <h2>Capacity &amp; SLO</h2>
+          <span class="nd-muted">p95 over the window · thresholds owned by Netdata</span>
+        </div>
+        <div class="nd-table-wrap">
+          <table class="nd-table">
+            <thead><tr><th>Node</th><th>CPU p95</th><th>RAM p95</th><th>Disk p95</th><th>Headroom</th><th>State</th></tr></thead>
+            <tbody id="nd-capacity"><tr><td colspan="6" class="nd-muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="nd-panel" aria-label="Host reconciliation">
+        <div class="nd-panel-head">
+          <h2>Host reconciliation</h2>
+          <span class="nd-muted" id="nd-reconcile-note"></span>
+        </div>
+        <div id="nd-reconcile" class="nd-reconcile"></div>
+      </section>
+    </div>
+
+    <section class="nd-panel" aria-label="Alerts and transitions">
+      <div class="nd-panel-head">
+        <h2>Alerts &amp; transitions</h2>
+        <div class="nd-actions">
+          <button id="nd-ingest" type="button" class="nd-btn nd-btn-small">Pull into ailog</button>
+          <span id="nd-ingest-note" class="nd-muted"></span>
+        </div>
+      </div>
+      <div id="nd-alerts" class="nd-alerts"></div>
+    </section>
+
+    <section class="nd-panel" aria-label="On-demand diagnostics">
+      <div class="nd-panel-head">
+        <h2>On-demand diagnostics</h2>
+        <button id="nd-diag" type="button" class="nd-btn nd-btn-small">Probe functions API</button>
+      </div>
+      <p class="nd-muted" id="nd-diag-note">
+        Netdata's function API runs diagnostics on the agent itself (journal, processes,
+        systemd) without an SSH key. It requires the fleet to be claimed to Netdata Cloud.
+      </p>
+      <pre id="nd-diag-output" class="nd-pre hidden"></pre>
+    </section>
+  </div>
+
+  <div id="nd-modal" class="nd-modal hidden" role="dialog" aria-modal="true" aria-labelledby="nd-modal-title">
+    <div class="nd-modal-panel">
+      <header class="nd-modal-head">
+        <div>
+          <h2 id="nd-modal-title">History</h2>
+          <p class="nd-muted" id="nd-modal-sub"></p>
+        </div>
+        <div class="nd-actions">
+          <select id="nd-modal-window" aria-label="History window">
+            <option value="60">1 h</option>
+            <option value="360" selected>6 h</option>
+            <option value="1440">24 h</option>
+          </select>
+          <button type="button" class="nd-btn nd-btn-small" id="nd-modal-close">Close</button>
+        </div>
+      </header>
+      <div class="nd-modal-body">
+        <div class="nd-chart"><div class="nd-chart-top"><span>CPU</span><span id="nd-cpu-now">–</span></div><canvas id="nd-chart-cpu"></canvas></div>
+        <div class="nd-chart"><div class="nd-chart-top"><span>RAM</span><span id="nd-mem-now">–</span></div><canvas id="nd-chart-mem"></canvas></div>
+        <div class="nd-chart"><div class="nd-chart-top"><span>Disk</span><span id="nd-disk-now">–</span></div><canvas id="nd-chart-disk"></canvas></div>
+        <div class="nd-chart"><div class="nd-chart-top"><span>ML anomaly rate</span><span id="nd-anom-now">–</span></div><canvas id="nd-chart-anom"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/js/netdata-page.js?v={{ app_version }}"></script>
+</body>
+</html>

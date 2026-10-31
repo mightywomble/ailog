@@ -397,3 +397,16 @@ body { background: var(--bg); color: var(--text); }
   white-space: pre-wrap;
   opacity: .85;
 }
+
+
+/* Netdata badge: present only when ML reports an anomaly, so its absence is
+   meaningful. Colours come from the page palette, not a hard-coded hex. */
+.m-anom {
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: #fca5a5;
+  border: 1px solid currentColor;
+}
+.m-card[data-source="netdata"] .m-dot.up { box-shadow: 0 0 0 2px rgba(56, 189, 248, .18); }

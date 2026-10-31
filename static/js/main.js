@@ -6,6 +6,7 @@
 import './boot.js';
 import './modals.js';              // shared dialog chrome: Escape, backdrop, close
 import './ai-wizard.js';           // shared AI analysis wizard: what to analyse, then prompt
+import './netdata-settings.js';    // Settings → Netdata (URL + write-only token)
 import './groups.js';
 import './app-core.js';           // imports ./suricata.js and ./sshkeys.js
 import './toolbar.js';

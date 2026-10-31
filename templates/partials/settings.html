@@ -23,6 +23,9 @@
                         <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="notifications">
                             <span class="text-sm font-medium text-gray-200">🔔 Notifications</span>
                         </button>
+                        <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="netdata">
+                            <span class="text-sm font-medium text-gray-200">📈 Netdata</span>
+                        </button>
                         <button class="settings-nav-btn w-full text-left px-4 py-3 hover:bg-white/10 transition-colors border-l-4 border-transparent" data-section="scheduled-analysis">
                             <span class="text-sm font-medium text-gray-200">📅 Scheduled Analysis</span>
                         </button>
@@ -205,6 +208,34 @@
                     </section>
 
                     <!-- Scheduled Analysis Section -->
+                    <section id="netdata-section" class="settings-section space-y-4 hidden">
+                        <div>
+                            <h4 class="font-semibold text-lg text-white">Netdata</h4>
+                            <p class="text-sm termix-muted">Read-only integration with the Netdata parent. Netdata owns
+                                thresholds; ailog pulls fleet metrics, ML anomaly rates and alert transitions. The token is
+                                stored server-side and is never sent to the browser.</p>
+                        </div>
+                        <div class="space-y-2">
+                            <label for="netdata-url" class="block text-sm font-medium termix-muted">Parent URL</label>
+                            <input id="netdata-url" type="url" inputmode="url" placeholder="https://netdata.example.com"
+                                   class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500">
+                        </div>
+                        <div class="space-y-2">
+                            <label for="netdata-token" class="block text-sm font-medium termix-muted">API token <span id="netdata-token-state" class="text-xs termix-muted"></span></label>
+                            <input id="netdata-token" type="password" autocomplete="off" placeholder="leave blank to keep the stored token"
+                                   class="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500">
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button id="netdata-save" type="button" class="button px-4 py-2 text-sm">Save</button>
+                            <button id="netdata-test" type="button" class="button px-4 py-2 text-sm">Test</button>
+                            <button id="netdata-clear-token" type="button" class="bg-white/5 hover:bg-white/10 text-white px-3 py-2 text-sm rounded-md">Clear token</button>
+                            <span id="netdata-status" class="text-xs termix-muted"></span>
+                        </div>
+                        <p class="text-xs termix-muted">The parent currently answers anonymous data requests. Use a bearer token
+                            or an IP allowlist in front of it. Function-based diagnostics additionally require the fleet to be
+                            claimed to Netdata Cloud.</p>
+                    </section>
+
                     <section id="scheduled-analysis-section" class="settings-section space-y-4 hidden">
                         <div class="flex items-center justify-between">
                             <h4 class="font-semibold text-lg text-white">Scheduled Analysis</h4>

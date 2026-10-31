@@ -33,8 +33,8 @@ def _app_js():
 
 # --- the library itself ----------------------------------------------------
 
-def test_the_library_ships_the_ten_sysadmin_prompts():
-    assert len(aiprompts.PROMPTS) == 10
+def test_the_library_ships_the_eleven_sysadmin_prompts():
+    assert len(aiprompts.PROMPTS) == 11
     titles = [p['title'] for p in aiprompts.PROMPTS]
     assert titles == [
         'Timeline reconstruction',
@@ -47,6 +47,7 @@ def test_the_library_ships_the_ten_sysadmin_prompts():
         'Log noise and alert-fatigue audit',
         'Boot, unit-ordering and timer health',
         'Postmortem / handoff writer',
+        'Capacity & saturation forensics',
     ]
     ids = [p['id'] for p in aiprompts.PROMPTS]
     assert len(ids) == len(set(ids))
@@ -88,7 +89,7 @@ def test_the_default_prompt_is_the_historical_analysis():
 def test_the_library_is_served_with_saved_prompts(flask_app):
     payload = flask_app.test_client().get('/ai/prompts').get_json()
     assert payload['success'] is True
-    assert len(payload['prompts']) == 10
+    assert len(payload['prompts']) == 11
     assert payload['saved'] == []
     assert payload['placeholder_labels']['HOST'] == 'Host name'
     assert payload['prompts'][0]['placeholders']

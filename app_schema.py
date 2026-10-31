@@ -47,6 +47,14 @@ COLUMNS = {
     'remediation_runs': [
         ('scheduled_for', 'DATETIME'),
     ],
+    # v3.12.0 - Netdata alert ingestion (transition id makes polling idempotent)
+    'alert_events': [
+        ('source', "VARCHAR(16) DEFAULT 'ailog'"),
+        ('external_id', 'VARCHAR(64)'),
+        ('node_guid', 'VARCHAR(64)'),
+        ('context', 'VARCHAR(96)'),
+        ('units', 'VARCHAR(16)'),
+    ],
     # v3.2.0 - remediation protection flag
     'hosts': [
         ('do_not_remediate', 'BOOLEAN DEFAULT 0'),

@@ -157,6 +157,7 @@ function buildCard(server) {
           <span class="m-ip"></span>
         </div>
         <div class="m-card-flags">
+          <span class="m-anom hidden" title="Netdata ML anomaly rate">ML</span>
           <span class="m-docker hidden" title="Docker installed">${DOCKER_SVG}<span class="m-docker-count"></span></span>
           <span class="m-chev hidden">▾</span>
         </div>
@@ -206,6 +207,7 @@ function cardRefs(card) {
         name: card.querySelector('.m-name'),
         ip: card.querySelector('.m-ip'),
         docker: card.querySelector('.m-docker'),
+        anom: card.querySelector('.m-anom'),
         dockerCount: card.querySelector('.m-docker-count'),
         chev: card.querySelector('.m-chev'),
         error: card.querySelector('.m-card-error'),
@@ -279,6 +281,17 @@ function renderServer(server) {
     refs.name.textContent = server.name || key;
     refs.ip.textContent = server.ip || '';
     refs.card.classList.toggle('is-offline', server.online === false);
+    const anomaly = Number(server.anomaly_rate);
+    const hasAnomaly = Number.isFinite(anomaly) && anomaly > 0;
+    refs.anom.classList.toggle('hidden', !hasAnomaly);
+    if (hasAnomaly) {
+        refs.anom.textContent = `ML ${anomaly.toFixed(1)}%`;
+        refs.anom.title = `Netdata ML anomaly rate ${anomaly.toFixed(1)}% · thresholds owned by Netdata`;
+    }
+    if (server.metrics_source === 'netdata') {
+        refs.card.dataset.source = 'netdata';
+        refs.ip.title = 'Metrics from the Netdata parent (no SSH)';
+    }
 
     const online = server.online !== false;
     refs.dot.classList.toggle('up', online);
