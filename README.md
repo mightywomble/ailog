@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-31 | v3.13.2 | **Dashboard no longer stalls behind SSH.** `servers_payload` held one lock for the whole collection round, so a phone and a laptop polling together queued behind each other — and `/api/overview` waits on the same function, which is why the whole app felt slow and timed out. It now serves a fresh snapshot as-is and the previous one (stale-while-revalidate) while a round is in flight; only a cold start waits. Also fixed `_idea_pass` raising `AttributeError: module 'app' has no attribute 'app_context'` (it had the module, not the Flask instance) so the remediation ideas pass actually runs. | ✅ Complete |
 | 2026-10-31 | v3.13.1 | **Netdata dashboard card reads anomaly rates honestly.** The overview card counts a node as anomalous only at ≥0.5% ML anomaly rate (a few hundredths is normal background), and both the dashboard and `/netdata` show two decimal places so `0.04%` can no longer look like `0.0%`. | ✅ Complete |
 | 2026-10-31 | v3.13.0 | **Netdata on the dashboard.** The homepage fleet grid gains a *Netdata* card: online / anomalous / alert / streaming chips and the four nodes with the highest ML anomaly rate, linked to `/netdata` for the full cards and drill-down. Settings → Netdata (URL + write-only token) is unchanged and remains the one place to configure the connection. | ✅ Complete |
 | 2026-10-31 | v3.12.0 | **Netdata integration (read-only).** Netdata owns thresholds; ailog pulls. One fleet query now feeds the Monitoring page for every host Netdata knows (SSH is only the fallback), with an **ML anomaly badge** on each card. A new **`/netdata`** page shows anomaly-first live cards, click-to-drill-down history from Netdata's tiers, p95 capacity/headroom, and a **host reconciliation** panel (matched / in Netdata only / in ailog only). Alert transitions are pulled every 60 s into the incident timeline (idempotent on Netdata's transition id) and into Discord. AI reports gain a deterministic **METRICS** and **NETDATA ALERTS IN WINDOW** section plus a streaming data-quality caveat, and the wizard ships an 11th prompt, *Capacity & saturation forensics*. Settings → Netdata stores the URL and a write-only token. Function-based diagnostics report the Cloud SSO requirement honestly (412) instead of failing silently. | ✅ Complete |
@@ -769,9 +770,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.13.1`
+**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.13.2`
 (`:latest` points at the same manifest), digest
-`sha256:e6da53ec2d99461a3f65c6074333167271ad64e45d68b31ecd4a46ac139b6a6c`, running as
+`sha256:7baacf5f6bbf5413efc530975119c00de8f9ae7d32310e2b23d216d2e10d9836`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -780,7 +781,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.13.1 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.13.2 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest

@@ -38,6 +38,11 @@ SNAPSHOT_WORKERS = 8
 LAST_SEEN_WRITE_INTERVAL = 60
 
 _lock = threading.Lock()
+# Guards the *collection round*, not the cache.  It is deliberately separate
+# from ``_lock`` so a request only ever holds the cache lock for an assignment:
+# if a round is already in flight, everybody else is served the previous
+# snapshot instead of queueing behind SSH.
+_refresh_lock = threading.Lock()
 _cache: Dict[str, Any] = {'ts': 0.0, 'payload': None}
 
 _seen_lock = threading.Lock()
@@ -206,14 +211,42 @@ def collect_servers() -> Dict[str, Any]:
 
 
 def servers_payload(force: bool = False) -> Dict[str, Any]:
-    now = time.time()
+    """Return a snapshot, never blocking a request behind a live SSH round.
+
+    The old version held one lock for the whole collection, so with two open
+    tabs (desktop + phone) request B waited for request A's SSH round to finish
+    -- and ``/api/overview`` waits on this same function, so the dashboard, the
+    healthcheck and every other page queued behind it.  If a host was slow to
+    answer, that queue grew until the browser gave up.
+
+    Now: a fresh cache is returned as-is; if a round is already running the
+    caller gets the previous snapshot (stale-while-revalidate).  Only a cold
+    start -- no snapshot at all -- waits for the collection, because there is
+    nothing truthful to serve yet.
+    """
     with _lock:
-        if not force and _cache['payload'] and (now - _cache['ts']) < SNAPSHOT_TTL:
-            return _cache['payload']
+        cached = _cache['payload']
+        cached_ts = _cache['ts']
+    if cached is not None and not force and (time.time() - cached_ts) < SNAPSHOT_TTL:
+        return cached
+
+    # ``blocking=cached is None``: join an in-flight round only when we have
+    # nothing to serve.
+    if not _refresh_lock.acquire(blocking=cached is None):
+        return cached
+    try:
+        # Re-check: a round may have completed while we waited for the lock.
+        with _lock:
+            if _cache['payload'] is not None and not force and \
+                    (time.time() - _cache['ts']) < SNAPSHOT_TTL:
+                return _cache['payload']
         payload = collect_servers()
-        _cache['ts'] = time.time()
-        _cache['payload'] = payload
+        with _lock:
+            _cache['ts'] = time.time()
+            _cache['payload'] = payload
         return payload
+    finally:
+        _refresh_lock.release()
 
 
 @metrics_bp.get('/metrics')
