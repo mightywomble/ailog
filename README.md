@@ -1085,14 +1085,26 @@ failed, or the model stopped before finishing a section, the report page says so
    - Verify log file permissions
    - Look for timeout errors in browser console
 
-3. **SSH terminal says "Origin not allowed"**:
+3. **SSH terminal is blank behind nginx-proxy-manager (NPM) / Cloudflare**:
+   - Turn on **Websockets Support** on the NPM proxy host (Edit proxy host → Details).
+     Without it NPM forwards the upgrade as an ordinary request and xterm.js never
+     connects — the dialog opens but stays empty, with no error in the page.
+   - The whole site, not just the terminal, fails if the proxy host is missing or the
+     DNS record is wrong: check `curl -s -o /dev/null -w '%{http_code}' https://host/healthz`
+     first. A `101 Switching Protocols` from
+     `curl -i -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Origin: https://host' https://host/ssh/websocket`
+     means the proxy and origin guard are both fine.
+   - Behind Cloudflare the zone must have WebSockets enabled (it is on by default) and
+     the record must be proxied to the same origin NPM listens on.
+
+4. **SSH terminal says "Origin not allowed"**:
    - The terminal websocket only accepts same-host upgrades. Same host, `X-Forwarded-Host` and anything
      listed in `AILOG_WS_ALLOWED_ORIGINS` are accepted; set that variable (comma separated, `*` wildcards)
      if your reverse proxy rewrites the host *and* strips the forwarded header
    - The server log prints the rejected `origin=`, `host=` and `x-forwarded-host=` so the right value is easy to add
    - Never use `AILOG_WS_ALLOW_NO_ORIGIN=1` as a workaround; it disables the cross-site hijack guard
 
-4. **AI analysis errors**:
+5. **AI analysis errors**:
    - Validate OpenAI API key in Settings
    - Check API quota and billing
    - Ensure log content is not empty
