@@ -70,23 +70,29 @@ def test_the_logo_is_a_link_home():
     assert 'event.preventDefault();' in js
 
 
-def test_host_cards_are_uniform_tiles_with_the_four_corners():
+def test_host_cards_are_uniform_tiles_with_a_bottom_icon_row():
     js = _read('static', 'js', 'app-core.js')
-    for part in ('hc-corner', 'hc-dot', 'hc-os', 'hc-main', 'hc-docker', 'hc-ssh'):
+    for part in ('hc-foot', 'hc-dot', 'hc-os', 'hc-main', 'hc-docker', 'hc-ssh'):
         assert f'class="{part}' in js, part
     assert 'host-card-name' in js
+    # the old scattered corners are gone: one row along the bottom instead
+    assert 'hc-corner' not in js
     # one fixed shape, not a card that grows with the text
     css = _read('static', 'css', 'ui.css')
     block = css[css.index('#hosts-sidebar .host-card {'):css.index('#hosts-sidebar .host-card .hc-main')]
-    assert 'min-height: 88px' in block
-    assert 'justify-content: center' in block
+    assert 'min-height: 92px' in block
+    assert 'flex-direction: column' in block
 
 
 def test_the_card_name_is_centred_and_the_meta_is_small():
     css = _read('static', 'css', 'ui.css')
-    block = css[css.index('#hosts-sidebar .host-card {'):css.index('/* top-left')]
+    block = css[css.index('#hosts-sidebar .host-card {'):css.index('/* the bottom row')]
     assert 'text-align: center' in block
     assert 'hc-sub' in block
+    # the name is the first thing in the tile, so it reads top-centre
+    js = _read('static', 'js', 'app-core.js')
+    body = js[js.index('card.innerHTML = `'):js.index('// Desktop: clicking the card selects the host')]
+    assert body.index('host-card-name') < body.index('hc-foot')
 
 
 def test_the_ssh_prompt_opens_the_existing_terminal():
@@ -175,21 +181,31 @@ def test_the_ssh_button_opens_the_host_on_the_card():
 
 def test_ubuntu_hosts_get_the_ubuntu_mark():
     js = _read('static', 'js', 'app-core.js')
-    assert 'const OS_BADGES' in js
+    assert 'const HC_GLYPHS' in js
     assert 'ubuntu:' in js
-    assert '<circle cx="12" cy="12" r="8.4"/>' in js       # circle of friends
+    assert '<circle cx="12" cy="12" r="5.6"/>' in js       # circle of friends
     assert 'const osBadge = (os)' in js
     assert "String(os?.id || '').toLowerCase()" in js
     assert 'osBadge(snapshot.os)' in js
     # a distro we have a mark for wins over the generic penguin
     block = js[js.index('const osBadge = (os)'):js.index('const applyHostStatus')]
-    assert 'OS_BADGES[distro]' in block
+    assert 'HC_BADGE_KEYS[distro]' in block
 
 
-def test_the_badges_are_a_little_bigger():
+def test_every_icon_is_a_square_of_the_same_size():
     css = _read('static', 'css', 'ui.css')
-    block = css[css.index('#hosts-sidebar .host-card .hc-os {'):css.index('/* bottom-left: Docker mark')]
-    assert 'font-size: 1.1rem' in block
-    assert 'width: 18px; height: 18px' in block
-    assert '.hc-dot' in css[css.index('#hosts-sidebar .host-card .hc-dot {'):][:200]
-    assert 'width: 9px' in css[css.index('#hosts-sidebar .host-card .hc-dot {'):][:200]
+    card = css[css.index('#hosts-sidebar .host-card {'):css.index('/* Icon rail (tablet)')]
+    # one custom property drives the status square, the OS mark and SSH
+    assert '--hc-icon: 22px' in card
+    icons = card[card.index('#hosts-sidebar .host-card .hc-dot,'):
+                 card.index('/* solid square')]
+    assert 'width: var(--hc-icon)' in icons and 'height: var(--hc-icon)' in icons
+    assert 'border-radius: 4px' in icons
+    # the status square is filled green/red, not a round dot
+    assert 'border-radius: 999px' not in card
+    # bigger than the 18px glyph it replaced
+    assert '--hc-icon: 24px' in css          # phone tiles
+    # the SSH button is the same square and pinned to the far right
+    ssh = card[card.index('#hosts-sidebar .host-card .hc-ssh {'):]
+    assert 'margin-left: auto' in ssh
+    assert 'width: var(--hc-icon)' in ssh

@@ -80,11 +80,14 @@ def test_the_tiles_are_thumb_sized():
     css = _css()
     block = css[css.index('#mobile-host-cards .host-card {'):]
     block = block[:block.index('/* ------------------------------------------------ phone: a host\'s log files')]
-    assert 'min-height: 124px' in block
+    assert 'min-height: 104px' in block
     ssh = block[block.index('.hc-ssh {'):]
     ssh = ssh[:ssh.index('}')]
-    assert 'width: 44px' in ssh and 'height: 44px' in ssh
+    # same square as every other icon, with an invisible pad so it stays
+    # thumb-sized: --hc-icon is 24px and ::after extends the hit area
+    assert 'width: var(--hc-icon)' in ssh and 'height: var(--hc-icon)' in ssh
     assert 'touch-action: manipulation' in ssh
+    assert 'inset: -9px' in block
 
 
 def test_the_sheet_actions_are_touch_sized_and_carry_the_safe_area():
@@ -132,7 +135,7 @@ def test_the_desktop_view_is_unchanged_by_the_phone_grid():
     css = _css()
     # the sidebar tiles keep their own, separate rules
     assert '#hosts-sidebar .host-card {' in css
-    assert 'min-height: 88px' in css[css.index('#hosts-sidebar .host-card {'):][:300]
+    assert 'min-height: 92px' in css[css.index('#hosts-sidebar .host-card {'):][:300]
 
 
 def test_the_hosts_tab_opens_the_grid_not_the_drawer():

@@ -466,17 +466,19 @@ a.ov-row-main:hover { text-decoration: underline; }
 }
 
 /* --------------------------------------------------------- host cards
- * One uniform tile per host: OS + reachability top-left, name centred,
- * Docker bottom-left, SSH prompt bottom-right. */
+ * One uniform tile per host: name top-centre, then a bottom row of equal
+ * square icons -- reachability, OS, Docker, and SSH on the far right. */
 #hosts-sidebar .host-card {
+  --hc-icon: 22px;
   position: relative;
   box-sizing: border-box;
-  min-height: 88px;
+  min-height: 92px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   text-align: center;
-  padding: 1.55rem .7rem 1.5rem;
+  padding: .45rem .5rem .4rem;
   overflow: hidden;
 }
 #hosts-sidebar .host-card .hc-main { min-width: 0; width: 100%; }
@@ -498,63 +500,78 @@ a.ov-row-main:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
-/* top-left: reachability dot then the OS glyph */
-#hosts-sidebar .host-card .hc-corner {
-  position: absolute;
-  top: .5rem;
-  left: .55rem;
+/* the bottom row: every icon is the same square, SSH pushed to the right */
+#hosts-sidebar .host-card .hc-foot {
+  margin-top: auto;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: .3rem;
+  padding-top: .3rem;
+}
+#hosts-sidebar .host-card .hc-dot,
+#hosts-sidebar .host-card .hc-os,
+#hosts-sidebar .host-card .hc-docker {
+  box-sizing: border-box;
+  width: var(--hc-icon);
+  height: var(--hc-icon);
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
   line-height: 1;
 }
-#hosts-sidebar .host-card .hc-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  flex: 0 0 auto;
-  background: var(--faint);
-}
+/* solid square: green when the last poll answered, red when it did not */
+#hosts-sidebar .host-card .hc-dot { background: var(--faint); }
 #hosts-sidebar .host-card .hc-dot[data-state="up"] { background: var(--ok); }
 #hosts-sidebar .host-card .hc-dot[data-state="down"] { background: var(--bad); }
 #hosts-sidebar .host-card .hc-dot[data-state="unknown"] { background: var(--faint); }
 #hosts-sidebar .host-card .hc-os {
-  font-size: 1.1rem;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
   color: var(--text);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
-#hosts-sidebar .host-card .hc-os svg { width: 18px; height: 18px; display: block; }
-
-/* bottom-left: Docker mark, only on Docker hosts */
+#hosts-sidebar .host-card .hc-os svg {
+  width: calc(var(--hc-icon) - 5px);
+  height: calc(var(--hc-icon) - 5px);
+  display: block;
+}
 #hosts-sidebar .host-card .hc-docker {
-  position: absolute;
-  bottom: .4rem;
-  left: .55rem;
-  font-size: 1.05rem;
-  line-height: 1;
+  color: var(--faint);
+  border: 1px solid var(--border);
+}
+#hosts-sidebar .host-card .hc-docker svg {
+  width: calc(var(--hc-icon) - 5px);
+  height: calc(var(--hc-icon) - 5px);
+  display: block;
 }
 #hosts-sidebar .host-card .hc-docker[hidden] { display: none; }
 
-/* bottom-right: the prompt button that opens the SSH terminal */
+/* far right: the square prompt button that opens the SSH terminal */
 #hosts-sidebar .host-card .hc-ssh {
-  position: absolute;
-  bottom: .4rem;
-  right: .45rem;
-  width: 26px;
-  height: 21px;
+  margin-left: auto;
+  position: relative;
+  box-sizing: border-box;
+  width: var(--hc-icon);
+  height: var(--hc-icon);
   display: grid;
   place-items: center;
   padding: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   border: 1px solid color-mix(in srgb, var(--ok) 55%, transparent);
   background: color-mix(in srgb, var(--ok) 16%, transparent);
   color: var(--ok);
   font-family: ui-monospace, 'JetBrains Mono', monospace;
-  font-size: .62rem;
+  font-size: .58rem;
   font-weight: 700;
   cursor: pointer;
+}
+/* the square stays icon-sized; the invisible pad keeps it easy to hit */
+#hosts-sidebar .host-card .hc-ssh::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
 }
 #hosts-sidebar .host-card .hc-ssh:hover {
   background: color-mix(in srgb, var(--ok) 30%, transparent);
@@ -578,13 +595,14 @@ a.ov-row-main:hover { text-decoration: underline; }
   cursor: grab;
 }
 
-/* Icon rail (tablet): drop everything but the dot and the name. */
+/* Icon rail (tablet): keep the name and the status square, centred. */
 @media (max-width: 1024px) and (min-width: 641px) {
   #hosts-sidebar .host-card {
-    min-height: 62px;
-    padding: 1.2rem .25rem .5rem;
+    --hc-icon: 16px;
+    min-height: 66px;
+    padding: .45rem .2rem .35rem;
   }
-  #hosts-sidebar .host-card .hc-corner { top: .35rem; left: 50%; transform: translateX(-50%); }
+  #hosts-sidebar .host-card .hc-foot { justify-content: center; }
   #hosts-sidebar .host-card .hc-os,
   #hosts-sidebar .host-card .hc-docker,
   #hosts-sidebar .host-card .hc-ssh,
@@ -717,14 +735,17 @@ a.ov-row-main:hover { text-decoration: underline; }
 
   /* Tiles reuse the sidebar card anatomy but get thumb-sized targets. */
   #mobile-host-cards .host-card {
+    --hc-icon: 24px;
     position: relative;
     box-sizing: border-box;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     text-align: center;
-    min-height: 124px;
-    padding: 2.2rem .7rem 3.2rem;
+    min-width: 0;          /* long hostnames must not widen the grid */
+    min-height: 104px;
+    padding: .7rem .6rem .55rem;
     overflow: hidden;
     border-radius: var(--radius);
     background: var(--surface-2);
@@ -753,61 +774,78 @@ a.ov-row-main:hover { text-decoration: underline; }
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  #mobile-host-cards .host-card .hc-corner {
-    position: absolute;
-    top: .6rem;
-    left: .65rem;
+  /* same bottom row as the sidebar: one size for every square icon */
+  #mobile-host-cards .host-card .hc-foot {
+    margin-top: auto;
+    width: 100%;
     display: flex;
     align-items: center;
-    gap: .35rem;
+    gap: .4rem;
+    padding-top: .45rem;
+  }
+  #mobile-host-cards .host-card .hc-dot,
+  #mobile-host-cards .host-card .hc-os,
+  #mobile-host-cards .host-card .hc-docker {
+    box-sizing: border-box;
+    width: var(--hc-icon);
+    height: var(--hc-icon);
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 5px;
     line-height: 1;
   }
-  #mobile-host-cards .host-card .hc-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    flex: 0 0 auto;
-    background: var(--faint);
-  }
+  #mobile-host-cards .host-card .hc-dot { background: var(--faint); }
   #mobile-host-cards .host-card .hc-dot[data-state="up"] { background: var(--ok); }
   #mobile-host-cards .host-card .hc-dot[data-state="down"] { background: var(--bad); }
   #mobile-host-cards .host-card .hc-dot[data-state="unknown"] { background: var(--faint); }
   #mobile-host-cards .host-card .hc-os {
-    display: inline-flex;
-    align-items: center;
-    font-size: 1.15rem;
-    line-height: 1;
     color: var(--text);
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--text) 6%, transparent);
   }
-  #mobile-host-cards .host-card .hc-os svg { width: 19px; height: 19px; display: block; }
+  #mobile-host-cards .host-card .hc-os svg {
+    width: calc(var(--hc-icon) - 6px);
+    height: calc(var(--hc-icon) - 6px);
+    display: block;
+  }
   #mobile-host-cards .host-card .hc-docker {
-    position: absolute;
-    bottom: .55rem;
-    left: .7rem;
-    font-size: 1.1rem;
-    line-height: 1;
+    color: var(--faint);
+    border: 1px solid var(--border);
+  }
+  #mobile-host-cards .host-card .hc-docker svg {
+    width: calc(var(--hc-icon) - 5px);
+    height: calc(var(--hc-icon) - 5px);
+    display: block;
   }
   #mobile-host-cards .host-card .hc-docker[hidden] { display: none; }
 
-  /* the reason you are here: 44x44 of green prompt */
+  /* the reason you are here: a square green prompt on the far right */
   #mobile-host-cards .host-card .hc-ssh {
-    position: absolute;
-    bottom: .45rem;
-    right: .5rem;
-    width: 44px;
-    height: 44px;
+    margin-left: auto;
+    position: relative;
+    box-sizing: border-box;
+    width: var(--hc-icon);
+    height: var(--hc-icon);
     display: grid;
     place-items: center;
     padding: 0;
-    border-radius: 10px;
+    border-radius: 5px;
     border: 1px solid color-mix(in srgb, var(--ok) 55%, transparent);
     background: color-mix(in srgb, var(--ok) 16%, transparent);
     color: var(--ok);
     font-family: ui-monospace, 'JetBrains Mono', monospace;
-    font-size: .8rem;
+    font-size: .66rem;
     font-weight: 700;
     cursor: pointer;
     touch-action: manipulation;
+  }
+  /* icon-sized square, thumb-sized hit area */
+  #mobile-host-cards .host-card .hc-ssh::after {
+    content: '';
+    position: absolute;
+    inset: -9px;
   }
   #mobile-host-cards .host-card .hc-ssh:active {
     background: color-mix(in srgb, var(--ok) 30%, transparent);
