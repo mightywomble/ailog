@@ -470,6 +470,102 @@ export function init() {
 
 
 
+        // ------------------------------------------------------------- history
+        // Back should undo the last tap, not leave the app. Every screen is a
+        // history entry, and every layer (host sheet, log reader, SSH window)
+        // adds one on top of it; Back closes the top layer, then walks the
+        // screens. `history.pushState` keeps the URL clean - only the deep
+        // links use a hash.
+        let navApplying = false;
+
+        const navViewId = () => {
+            if (mobileLogsView && !mobileLogsView.classList.contains('hidden')) return 'logs';
+            if (mobileHostsView && !mobileHostsView.classList.contains('hidden')) return 'hosts';
+            if (logsView && !logsView.classList.contains('hidden')) return 'logs';
+            return 'dashboard';
+        };
+
+        const navCurrent = () => {
+            const state = history.state && history.state.ailog;
+            return state || { view: navViewId(), layers: [] };
+        };
+
+        const navPush = (state) => {
+            if (navApplying) return;
+            history.pushState({ ailog: state }, '', location.href);
+        };
+
+        const navReplace = (state) => {
+            if (navApplying) return;
+            history.replaceState({ ailog: state }, '', location.href);
+        };
+
+        const navSetView = (view) => {
+            // First paint: adopt the entry the browser already has.
+            if (!history.state || !history.state.ailog) {
+                navReplace({ view, layers: [] });
+                return;
+            }
+            if (navApplying) return;
+            if (history.state.ailog.view === view && !history.state.ailog.layers.length) return;
+            navPush({ view, layers: [] });
+        };
+
+        const navOpenLayer = (name) => {
+            const state = navCurrent();
+            if (state.layers.includes(name)) return;
+            navPush({ view: state.view, layers: [...state.layers, name] });
+        };
+
+        const navCloseLayer = (name) => {
+            // UI-initiated close: rewrite the current entry instead of popping,
+            // so a view change that closes a layer does not fight with Back.
+            if (navApplying) return;
+            const state = navCurrent();
+            if (!state.layers.includes(name)) return;
+            navReplace({ view: state.view, layers: state.layers.filter((l) => l !== name) });
+        };
+
+        const navApplyView = (view) => {
+            navApplying = true;
+            try {
+                if (view === 'hosts') showMobileHosts();
+                else if (view === 'logs') { if (selectedHostId) showLogs(); else showMobileHosts(); }
+                else showDashboard();
+            } finally {
+                navApplying = false;
+            }
+        };
+
+        // What is actually on screen, regardless of what the history entry says.
+        const navOpenLayers = () => {
+            const open = [];
+            if (mobileHostSheet && !mobileHostSheet.classList.contains('hidden')) open.push('sheet');
+            if (sshMaximized) open.push('ssh');
+            return open;
+        };
+
+        window.addEventListener('popstate', (event) => {
+            const state = event.state || {};
+            if (state.ailogModal) return;         // a dialog entry: modals.js owns those
+            if (!state.ailog) return;
+            const target = state.ailog;
+            // history.state is already the target here, so the *screen* is the
+            // source of truth for what has to close.
+            const open = navOpenLayers();
+            navApplying = true;
+            try {
+                open.forEach((name) => {
+                    if (target.layers.includes(name)) return;
+                    if (name === 'ssh') contractSshTerminal();
+                    else if (name === 'sheet') closeMobileHostSheet();
+                });
+                if (target.view && target.view !== navViewId()) navApplyView(target.view);
+            } finally {
+                navApplying = false;
+            }
+        });
+
         const showDashboard = () => {
             if (typeof contractSshTerminal === 'function') contractSshTerminal();
             closeMobileHostSheet();
@@ -477,6 +573,7 @@ export function init() {
             if (logsView) logsView.classList.add('hidden');
             mobileHostsView?.classList.add('hidden');
             mobileLogsView?.classList.add('hidden');
+            navSetView('dashboard');
         };
 
         // --------------------------------------------------------- phone grid
@@ -497,6 +594,7 @@ export function init() {
             mobileHostsView?.classList.remove('hidden');
             mobileHostsView?.scrollTo?.({ top: 0 });
             syncHostStatuses();
+            navSetView('hosts');
         };
 
         // ------------------------------------------------- phone soft keyboard
@@ -551,6 +649,7 @@ export function init() {
             if (logsView) logsView.classList.remove('hidden');
             mobileHostsView?.classList.add('hidden');
             mobileLogsView?.classList.add('hidden');
+            navSetView('logs');
         };
 
 
@@ -1367,6 +1466,7 @@ export function init() {
             sshOverlay.classList.remove('hidden');
             document.body.classList.add('ssh-maximized');
             setSshExpandedUi(true);
+            navOpenLayer('ssh');
             setTimeout(() => {
                 resizeSshTerminal();
                 try { sshTerm?.focus(); } catch (_) {}
@@ -1380,6 +1480,7 @@ export function init() {
             document.body.classList.remove('ssh-maximized');
             if (sshTerminalContainer && sshTerminalBody) sshTerminalContainer.appendChild(sshTerminalBody);
             setSshExpandedUi(false);
+            navCloseLayer('ssh');
             setTimeout(() => {
                 resizeSshTerminal();
                 try { sshTerm?.focus(); } catch (_) {}
@@ -1972,6 +2073,7 @@ export function init() {
             sheetHostId = null;
             mobileHostSheet?.classList.add('hidden');
             document.body.classList.remove('mh-sheet-open');
+            navCloseLayer('sheet');
         }
 
         const openMobileHostSheet = (hostId) => {
@@ -2025,6 +2127,7 @@ export function init() {
 
             mobileHostSheet.classList.remove('hidden');
             document.body.classList.add('mh-sheet-open');
+            navOpenLayer('sheet');
             mhSheetClose?.focus({ preventScroll: true });
         };
 
@@ -2143,6 +2246,7 @@ export function init() {
             mobileHostsView?.classList.add('hidden');
             mobileLogsView.classList.remove('hidden');
             mobileLogsView.scrollTo?.({ top: 0 });
+            navSetView('logs');
             if (mobileLogsHost) mobileLogsHost.textContent = mobileLogsName();
 
             const changed = mobileLogsHostId !== selectedHostId;
@@ -2175,7 +2279,7 @@ export function init() {
             if (mlogStatus) { mlogStatus.hidden = true; mlogStatus.textContent = ''; }
             if (mlogAnalyse) mlogAnalyse.disabled = true;
             if (mlogShare) mlogShare.disabled = true;
-            openModal(mobileLogModal);
+            openModal(mobileLogModal);       // modals.js gives it its own history entry
 
             try {
                 const response = await fetch(logSourceUrl(source, selectedHostId));

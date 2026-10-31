@@ -1,0 +1,54 @@
+{
+  "name": "Homelab Manager",
+  "short_name": "Homelab",
+  "description": "Logs, SSH, metrics and AI analysis across every host in the homelab.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0b0f14",
+  "theme_color": "#0f1520",
+  "categories": ["utilities", "productivity", "developer"],
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Hosts",
+      "short_name": "Hosts",
+      "url": "/#hosts",
+      "description": "The host grid, with SSH one tap away"
+    },
+    {
+      "name": "Monitoring",
+      "short_name": "Monitor",
+      "url": "/metrics",
+      "description": "CPU, memory and disk for every host"
+    },
+    {
+      "name": "Reports",
+      "short_name": "Reports",
+      "url": "/reports",
+      "description": "Server reports from previous analyses"
+    }
+  ]
+}
