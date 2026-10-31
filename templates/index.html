@@ -225,7 +225,7 @@
             </div>
             <div class="flex items-center space-x-2">
                 <label class="flex items-center text-sm termix-muted">
-                    <input type="checkbox" id="case-sensitive-checkbox" class="mr-2">
+                    <input type="checkbox" id="case-sensitive-checkbox" class="mr-2" title="Case sensitive">
                     Case sensitive
                 </label>
                 <select id="search-scope" class="rounded-lg px-3 py-2 text-sm">
@@ -371,6 +371,34 @@
                 </button>
             </header>
             <div id="mobile-host-cards" class="mh-grid"></div>
+        </section>
+
+        <!-- Phone: one host's log sources as cards. Pull and "analyse host"
+             live in the header; a card opens the log in a full-screen dialog
+             with AI analyse and share in its header. -->
+        <section id="mobile-logs-view" class="mobile-logs hidden" aria-label="Logs">
+            <header class="mlv-head">
+                <div class="mlv-head-row">
+                    <button id="mobile-logs-back" class="mlv-icon-btn" type="button" aria-label="Back to hosts" title="Back to hosts">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                    </button>
+                    <div class="min-w-0">
+                        <h2 class="mh-title truncate" id="mobile-logs-host">Logs</h2>
+                        <p class="mh-sub" id="mobile-logs-sub">Choose a host first</p>
+                    </div>
+                </div>
+                <div class="mlv-actions">
+                    <button id="mobile-logs-pull" class="mlv-btn mlv-btn-primary" type="button">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8 8 0 104.582 9m0 0H9"/></svg>
+                        <span>Pull logs</span>
+                    </button>
+                    <button id="mobile-logs-analyse" class="mlv-btn" type="button">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+                        <span>AI analyse host</span>
+                    </button>
+                </div>
+            </header>
+            <div id="mobile-log-cards" class="ml-grid" role="list"></div>
         </section>
 
         <div id="logs-view" class="hidden flex-1 flex flex-col gap-4 termix-view" style="height: 100%;">
@@ -663,31 +691,7 @@
     {% include "partials/ssh-terminal.html" %}
 
 
-    <!-- Slim host detail sheet (phone grid). Filled by app-core with textContent. -->
-    <div id="mobile-host-sheet" class="mh-sheet hidden" role="dialog" aria-modal="true"
-         aria-labelledby="mh-sheet-title">
-        <div class="mh-sheet-panel">
-            <div class="mh-sheet-head">
-                <div class="min-w-0">
-                    <h2 id="mh-sheet-title" class="mh-sheet-title">Host</h2>
-                    <p id="mh-sheet-sub" class="mh-sheet-sub"></p>
-                </div>
-                <button id="mh-sheet-close" type="button" class="mh-sheet-close" aria-label="Close host details">&times;</button>
-            </div>
-            <p id="mh-sheet-status" class="mh-sheet-status"></p>
-            <dl id="mh-sheet-facts" class="mh-sheet-facts"></dl>
-            <div class="mh-sheet-actions">
-                <button id="mh-sheet-ssh" type="button" class="mh-action mh-action-primary">
-                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z"/></svg>
-                    <span>SSH terminal</span>
-                </button>
-                <button id="mh-sheet-logs" type="button" class="mh-action">
-                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h12M4 18h8"/></svg>
-                    <span>Logs &amp; info</span>
-                </button>
-            </div>
-        </div>
-    </div>
+    {% include "partials/mobile-sheets.html" %}
 
     <nav id="mobile-tabbar" class="mobile-tabbar" aria-label="Primary">
         <button type="button" data-tab="overview" aria-current="page">

@@ -1,0 +1,55 @@
+<!-- Phone dialogs: one log source in a full-screen reader, and the slim host sheet. -->
+    <!-- Phone: one log source, full screen, with AI analyse + share in the header. -->
+    <div id="mobile-log-modal" class="app-modal hidden">
+        <div class="app-modal-panel app-modal-xl ml-panel">
+            <div class="app-modal-head ml-head">
+                <div class="app-modal-title min-w-0">
+                    <span class="ml-head-text">
+                        <span id="mlog-name" class="mlog-name">Log</span>
+                        <span id="mlog-sub" class="mlog-sub"></span>
+                    </span>
+                </div>
+                <div class="ml-head-actions">
+                    <button id="mlog-analyse" type="button" class="ml-head-btn ml-head-btn-accent">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+                        <span>AI analyse</span>
+                    </button>
+                    <button id="mlog-share" type="button" class="ml-head-btn" aria-label="Share this log" title="Share this log">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342a3 3 0 100-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316M18 8a3 3 0 100-6 3 3 0 000 6zm0 14a3 3 0 100-6 3 3 0 000 6z"/></svg>
+                        <span>Share</span>
+                    </button>
+                    <button class="app-modal-close" type="button" data-modal-close>Close</button>
+                </div>
+            </div>
+            <p id="mlog-status" class="mlog-status" hidden></p>
+            <div id="mlog-body" class="app-modal-body app-modal-body-flush ml-body">
+                <pre id="mlog-pre" class="ml-pre">Loading…</pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Slim host detail sheet (phone grid). Filled by app-core with textContent. -->
+    <div id="mobile-host-sheet" class="mh-sheet hidden" role="dialog" aria-modal="true"
+         aria-labelledby="mh-sheet-title">
+        <div class="mh-sheet-panel">
+            <div class="mh-sheet-head">
+                <div class="min-w-0">
+                    <h2 id="mh-sheet-title" class="mh-sheet-title">Host</h2>
+                    <p id="mh-sheet-sub" class="mh-sheet-sub"></p>
+                </div>
+                <button id="mh-sheet-close" type="button" class="mh-sheet-close" aria-label="Close host details">&times;</button>
+            </div>
+            <p id="mh-sheet-status" class="mh-sheet-status"></p>
+            <dl id="mh-sheet-facts" class="mh-sheet-facts"></dl>
+            <div class="mh-sheet-actions">
+                <button id="mh-sheet-ssh" type="button" class="mh-action mh-action-primary">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z"/></svg>
+                    <span>SSH terminal</span>
+                </button>
+                <button id="mh-sheet-logs" type="button" class="mh-action">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h12M4 18h8"/></svg>
+                    <span>Logs &amp; analyse</span>
+                </button>
+            </div>
+        </div>
+    </div>

@@ -186,6 +186,23 @@ export function init() {
         const mhSheetSsh = document.getElementById('mh-sheet-ssh');
         const mhSheetLogs = document.getElementById('mh-sheet-logs');
         const mhSheetClose = document.getElementById('mh-sheet-close');
+        // Phone log screen: sources as cards, one log in a full-screen dialog.
+        const mobileLogsView = document.getElementById('mobile-logs-view');
+        const mobileLogsHost = document.getElementById('mobile-logs-host');
+        const mobileLogsSub = document.getElementById('mobile-logs-sub');
+        const mobileLogsBack = document.getElementById('mobile-logs-back');
+        const mobileLogsPull = document.getElementById('mobile-logs-pull');
+        const mobileLogsAnalyse = document.getElementById('mobile-logs-analyse');
+        const mobileLogCards = document.getElementById('mobile-log-cards');
+        const mobileLogModal = document.getElementById('mobile-log-modal');
+        const mlogName = document.getElementById('mlog-name');
+        const mlogSub = document.getElementById('mlog-sub');
+        const mlogStatus = document.getElementById('mlog-status');
+        const mlogBody = document.getElementById('mlog-body');
+        const mlogPre = document.getElementById('mlog-pre');
+        const mlogAnalyse = document.getElementById('mlog-analyse');
+        const mlogShare = document.getElementById('mlog-share');
+        const aiAnalysisShare = document.getElementById('ai-analysis-share');
         const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
         const logsSelectedHostTitle = document.getElementById('logs-selected-host-title');
         const logsActionPull = document.getElementById('logs-action-pull');
@@ -459,6 +476,7 @@ export function init() {
             if (dashboardView) dashboardView.classList.remove('hidden');
             if (logsView) logsView.classList.add('hidden');
             mobileHostsView?.classList.add('hidden');
+            mobileLogsView?.classList.add('hidden');
         };
 
         // --------------------------------------------------------- phone grid
@@ -475,6 +493,7 @@ export function init() {
             closeMobileHostSheet();
             dashboardView?.classList.add('hidden');
             logsView?.classList.add('hidden');
+            mobileLogsView?.classList.add('hidden');
             mobileHostsView?.classList.remove('hidden');
             mobileHostsView?.scrollTo?.({ top: 0 });
             syncHostStatuses();
@@ -483,9 +502,10 @@ export function init() {
         const onLayoutChange = () => {
             const onDashboard = dashboardView && !dashboardView.classList.contains('hidden');
             const onGrid = mobileHostsView && !mobileHostsView.classList.contains('hidden');
+            const onPhoneLogs = mobileLogsView && !mobileLogsView.classList.contains('hidden');
             if (isMobileLayout()) {
                 if (onDashboard) showMobileHosts();
-            } else if (onGrid) {
+            } else if (onGrid || onPhoneLogs) {
                 showDashboard();
             }
         };
@@ -494,9 +514,15 @@ export function init() {
 
         const showLogs = () => {
             closeMobileHostSheet();
+            // On a touch device the logs are a card list, not two split panes.
+            if (isMobileLayout()) {
+                showMobileLogs();
+                return;
+            }
             if (dashboardView) dashboardView.classList.add('hidden');
             if (logsView) logsView.classList.remove('hidden');
             mobileHostsView?.classList.add('hidden');
+            mobileLogsView?.classList.add('hidden');
         };
 
 
@@ -1982,6 +2008,188 @@ export function init() {
             if (isMobileLayout()) window.ailogSsh?.expand();
         };
 
+        // ------------------------------------------------- phone log screen
+        // The phone does not get the desktop's split panes: a host's sources are
+        // cards in one scrolling list, and a tapped source opens full screen.
+        let mobileLogsHostId = null;
+        let mobileLogSource = null;
+        let mobileLogText = '';
+        let mobileLogsPulling = false;
+
+        const MOBILE_TYPE_LABEL = { file: 'file', journal: 'journal', docker: 'docker' };
+
+        const mobileLogIcon = (type) => (type === 'docker'
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V7a2 2 0 00-2-2h-3V3H9v2H6a2 2 0 00-2 2v6m16 0l-2 6H6l-2-6m16 0H4"/></svg>'
+            : (type === 'journal'
+                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>'
+                : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>'));
+
+        const mobileLogsName = () => (selectedHostId === 'local'
+            ? 'Localhost'
+            : (hosts?.[selectedHostId]?.friendly_name || selectedHostId || 'Host'));
+
+        const setMobileLogsSub = (text) => {
+            if (mobileLogsSub) mobileLogsSub.textContent = text;
+        };
+
+        function updateMobileLogsCount() {
+            if (!mobileLogCards) return;
+            const n = mobileLogCards.querySelectorAll('.ml-card').length;
+            if (!n) return;
+            // While the stream is still running the global progress strip carries
+            // the work; the count is a tally, not a finished list.
+            setMobileLogsSub(mobileLogsPulling
+                ? `${n} source${n === 1 ? '' : 's'} so far…`
+                : `${n} source${n === 1 ? '' : 's'} · tap one to read it`);
+        }
+
+        function createMobileLogCard(source) {
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'ml-card';
+            card.setAttribute('role', 'listitem');
+            card.dataset.name = source.name;
+            card.dataset.type = source.type || '';
+            const type = source.type || 'file';
+            const meta = [
+                source.size_formatted,
+                source.modified_formatted,
+            ].filter(Boolean).join(' · ');
+            card.innerHTML = `
+                <span class="ml-glyph" aria-hidden="true">${mobileLogIcon(type)}</span>
+                <span class="ml-main">
+                    <span class="ml-name">${escapeHtml(source.name)}</span>
+                    <span class="ml-meta">${escapeHtml(meta)}</span>
+                </span>
+                <span class="ml-tag" data-type="${escapeHtml(type)}">${escapeHtml(MOBILE_TYPE_LABEL[type] || type)}</span>
+                <svg class="ml-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            `;
+            card.addEventListener('click', () => openMobileLogModal(source));
+            return card;
+        }
+
+        function startMobilePull() {
+            if (!selectedHostId) return;
+            logsMainMode = 'pull';
+            const viewToken = ++logsMainViewToken;
+            mobileLogsPulling = true;
+            mobileLogsHostId = selectedHostId;
+            if (mobileLogCards) mobileLogCards.innerHTML = '';
+            setMobileLogsSub('Pulling log sources…');
+            if (mobileLogsPull) mobileLogsPull.disabled = true;
+            // The desktop list is a second mount of the same stream; keep it
+            // from showing the previous host's sources.
+            const desktopList = document.getElementById('log-table-container');
+            if (desktopList) desktopList.innerHTML = '';
+            fetchSourcesForHost(viewToken);
+        }
+
+        function finishMobilePull(emptyMessage) {
+            if (!mobileLogsPulling) return;
+            mobileLogsPulling = false;
+            if (mobileLogsPull) mobileLogsPull.disabled = false;
+            if (!mobileLogCards) return;
+            if (!mobileLogCards.querySelector('.ml-card')) {
+                const empty = document.createElement('p');
+                empty.className = 'ml-empty';
+                empty.textContent = emptyMessage || 'No log sources found on this host.';
+                mobileLogCards.appendChild(empty);
+                setMobileLogsSub('No sources · try pulling again');
+            } else {
+                updateMobileLogsCount();
+            }
+        }
+
+        function showMobileLogs() {
+            if (!mobileLogsView) return;
+            if (typeof contractSshTerminal === 'function') contractSshTerminal();
+            closeMobileHostSheet();
+
+            if (!selectedHostId) {
+                showMobileHosts();
+                return;
+            }
+
+            dashboardView?.classList.add('hidden');
+            logsView?.classList.add('hidden');
+            mobileHostsView?.classList.add('hidden');
+            mobileLogsView.classList.remove('hidden');
+            mobileLogsView.scrollTo?.({ top: 0 });
+            if (mobileLogsHost) mobileLogsHost.textContent = mobileLogsName();
+
+            const changed = mobileLogsHostId !== selectedHostId;
+            // A pull already in flight for this host wins: selectHost() calls
+            // showLogs() and then its own default action, and we do not want a
+            // second stream for the same host.
+            if (changed) startMobilePull();
+            else if (!mobileLogsPulling && !mobileLogCards?.querySelector('.ml-card')) startMobilePull();
+            else updateMobileLogsCount();
+        }
+
+        const logSourceUrl = (source, hostId) => {
+            const hostParam = hostId === 'local' ? '' : `?host=${encodeURIComponent(hostId)}`;
+            if (source.type === 'file') return `/log/${encodeURIComponent(source.name)}${hostParam}`;
+            if (source.type === 'docker') return `/api/docker/log/${encodeURIComponent(source.name)}${hostParam}`;
+            return `/journal/${encodeURIComponent(source.name)}${hostParam}`;
+        };
+
+        const openMobileLogModal = async (source) => {
+            if (!mobileLogModal) return;
+            mobileLogSource = source;
+            mobileLogText = '';
+            const hostName = mobileLogsName();
+            if (mlogName) mlogName.textContent = source.name;
+            if (mlogSub) {
+                mlogSub.textContent = [hostName, MOBILE_TYPE_LABEL[source.type] || source.type]
+                    .filter(Boolean).join(' · ');
+            }
+            if (mlogPre) mlogPre.textContent = 'Loading…';
+            if (mlogStatus) { mlogStatus.hidden = true; mlogStatus.textContent = ''; }
+            if (mlogAnalyse) mlogAnalyse.disabled = true;
+            if (mlogShare) mlogShare.disabled = true;
+            openModal(mobileLogModal);
+
+            try {
+                const response = await fetch(logSourceUrl(source, selectedHostId));
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || `Could not load ${source.name}`);
+                if (mobileLogSource !== source) return;      // another card won
+                mobileLogText = data.content || '';
+                // Log lines are untrusted host output: textContent, never innerHTML.
+                if (mlogPre) mlogPre.textContent = mobileLogText || 'This log source is empty.';
+                if (mlogStatus && data.will_be_truncated) {
+                    mlogStatus.hidden = false;
+                    mlogStatus.textContent = 'Long log — it will be truncated for AI analysis.';
+                }
+                if (mlogAnalyse) mlogAnalyse.disabled = !mobileLogText;
+                if (mlogShare) mlogShare.disabled = !mobileLogText;
+            } catch (error) {
+                mobileLogText = '';
+                if (mlogPre) mlogPre.textContent = error.message;
+                window.showToast(error.message, 'error');
+            }
+        };
+
+        mobileLogsBack?.addEventListener('click', () => showMobileHosts());
+        mobileLogsPull?.addEventListener('click', () => startMobilePull());
+        mobileLogsAnalyse?.addEventListener('click', () => {
+            if (!selectedHostId) return;
+            openServerReportModal();
+        });
+        mlogAnalyse?.addEventListener('click', () => runAiAnalysis({
+            logName: mobileLogSource?.name || 'log',
+            content: mobileLogText,
+            button: mlogAnalyse,
+        }));
+        mlogShare?.addEventListener('click', () => shareText(
+            mobileLogText,
+            `${mobileLogSource?.name || 'Log'} — ${mobileLogsName()}`,
+        ));
+        aiAnalysisShare?.addEventListener('click', () => shareText(
+            lastAnalysisText,
+            lastAnalysisLogName ? `AI analysis — ${lastAnalysisLogName}` : 'AI analysis',
+        ));
+
         mhSheetClose?.addEventListener('click', closeMobileHostSheet);
         mobileHostSheet?.addEventListener('click', (event) => {
             if (event.target === mobileHostSheet) closeMobileHostSheet();
@@ -2411,8 +2619,10 @@ export function init() {
             // avoids a temporal-dead-zone hit if this runs before the block below).
             if (window.refreshAnalyseAllLogsButton) window.refreshAnalyseAllLogsButton(hostId);
 
-            // Default view: show host info in the main panel
-            showHostInfoMain();
+            // Default view: host info in the main panel on a desktop. A phone
+            // gets the log cards instead (its facts live in the host sheet).
+            if (isMobileLayout()) showMobileLogs();
+            else showHostInfoMain();
         };
 
 
@@ -2785,6 +2995,9 @@ const showHostInfoMain = async () => {
                     case 'progress':
                         if (topProgressBar) topProgressBar.style.width = `${data.progress}%`;
                         noteSourcesProgress(data.message);
+                        if (mobileLogsPulling && !mobileLogCards?.querySelector('.ml-card')) {
+                            setMobileLogsSub('Looking for logs…');
+                        }
                         break;
                     case 'source':
                         sourceCount += 1;
@@ -2809,6 +3022,7 @@ const showHostInfoMain = async () => {
                         } else {
                             logTableTitle.textContent = `All logs pulled from ${hostName}. Select a log to view.`;
                         }
+                        finishMobilePull();
                         
                         setTimeout(() => topProgressContainer.classList.add('hidden'), 1500);
                         currentEventSource.close();
@@ -2819,6 +3033,7 @@ const showHostInfoMain = async () => {
                         topProgressContainer.classList.add('hidden');
                         if (journalLoadingIndicator) journalLoadingIndicator.classList.add('hidden');
                         sourceListContainer.innerHTML = `<li class="p-4 text-red-400">${escapeHtml(data.message)}</li>`;
+                        finishMobilePull(data.message || 'Could not pull logs from this host.');
                         currentEventSource.close();
                         break;
                 }
@@ -2867,6 +3082,12 @@ const showHostInfoMain = async () => {
 
             sourceListContainer.appendChild(li);
             applySourceFilters();
+
+            // Second mount for the phone: the same source as a card.
+            if (mobileLogCards && mobileLogsPulling) {
+                mobileLogCards.appendChild(createMobileLogCard(source));
+                updateMobileLogsCount();
+            }
         };
         
         // Show/hide pulled sources based on the "0-byte" and "Docker only" toggles.
@@ -4269,8 +4490,57 @@ const showHostInfoMain = async () => {
     if (modal && closeBtn) closeBtn.addEventListener('click', () => closeModal(modal));
 })();
 
-aiAnalyseBtn.addEventListener('click', async () => {
-            if (!currentLogContent) {
+// --------------------------------------------------------------- sharing
+// A phone wants less "download a file" and more "hand it to something":
+// navigator.share opens the Android share sheet (mail, chat, Keep, Drive...);
+// on a desktop, or when the user cancels nothing happens, and the clipboard is
+// the fallback.
+let lastAnalysisText = '';
+let lastAnalysisLogName = '';
+
+const copyTextFallback = (text) => {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    area.remove();
+    return ok;
+};
+
+const shareText = async (text, title = 'Log analysis') => {
+    const body = String(text || '').trim();
+    if (!body) {
+        window.showToast('Nothing to share yet.', 'error');
+        return;
+    }
+    if (navigator.share) {
+        try {
+            await navigator.share({ title, text: body });
+            return;
+        } catch (err) {
+            if (err && err.name === 'AbortError') return;   // user cancelled
+            // fall through to the clipboard
+        }
+    }
+    try {
+        await navigator.clipboard.writeText(body);
+        window.showToast('Copied to the clipboard.', 'success');
+    } catch (_) {
+        const ok = copyTextFallback(body);
+        window.showToast(ok ? 'Copied to the clipboard.' : 'Could not share this.', ok ? 'success' : 'error');
+    }
+};
+
+// One analysis pipeline for both surfaces: the desktop AI Analyse button and
+// the phone's full-screen log dialog. `button` is optional and only used for
+// the Analysing... label.
+const runAiAnalysis = async ({ logName, content, button = null } = {}) => {
+            if (!content) {
                 window.showToast('No log content to analyse.', 'error');
                 return;
             }
@@ -4289,8 +4559,13 @@ aiAnalyseBtn.addEventListener('click', async () => {
                 return;
             }
 
-            aiAnalyseBtn.textContent = 'Analysing...';
-            aiAnalyseBtn.disabled = true;
+            const label = button ? button.querySelector('span') : null;
+            if (button) {
+                button.disabled = true;
+                button.dataset.busy = '1';
+            }
+            if (label) label.textContent = 'Analysing...';
+            else if (button) button.textContent = 'Analysing...';
             
             // Show staged progress in the modal
             const aiAnalysisModal = document.getElementById('ai-analysis-modal');
@@ -4303,8 +4578,8 @@ aiAnalyseBtn.addEventListener('click', async () => {
 
             try {
                 const requestBody = {
-                    log_content: currentLogContent,
-                    log_name: currentLogName,
+                    log_content: content,
+                    log_name: logName || 'log',
                     webhook_url: localStorage.getItem('discord_webhook_url'),
                     provider: provider
                 };
@@ -4343,13 +4618,26 @@ aiAnalyseBtn.addEventListener('click', async () => {
                         `<div class="text-[11px] termix-muted mb-3">Analysed with ${escapeHtml(metaBits.join(' \u00b7 '))}</div>`);
                 }
                 window.showToast(`Analysis complete using ${(result.provider || provider).toUpperCase()}`);
+                lastAnalysisText = result.analysis || '';
+                lastAnalysisLogName = logName || '';
             } catch (error) {
+                lastAnalysisText = '';
                 aiAnalysisContent.innerHTML = `<p class="text-red-400"><strong>Analysis Failed:</strong><br>${escapeHtml(error.message)}</p>`;
             } finally {
-                aiAnalyseBtn.textContent = 'AI Analyse';
-                aiAnalyseBtn.disabled = false;
+                if (button) {
+                    button.disabled = false;
+                    delete button.dataset.busy;
+                }
+                if (label) label.textContent = 'AI analyse';
+                else if (button) button.textContent = 'AI Analyse';
             }
-        });
+        };
+
+aiAnalyseBtn.addEventListener('click', () => runAiAnalysis({
+            logName: currentLogName,
+            content: currentLogContent,
+            button: aiAnalyseBtn,
+        }));
         
         // --- Multi-schedule UI (DB-backed schedules) ---
         let schedules = [];
@@ -5396,6 +5684,7 @@ aiAnalyseBtn.addEventListener('click', async () => {
         window.showDashboard = showDashboard;
         window.showLogs = showLogs;
         window.showMobileHosts = showMobileHosts;
+        window.showMobileLogs = showMobileLogs;
         window.isMobileLayout = isMobileLayout;
 
         // The brand is the way home: the same view switch as the tab bar, so a
