@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-31 | v3.13.5 | **The inline SSH prompt is no longer cut in half.** v3.13.4 fixed the expanded panel, but the pane you get straight from a host card still carried `p-3`, and xterm's fit addon measures its parent's *border-box* — so 12px of padding was spent on a row, pushing the prompt's bottom half past the pane's clip. The padding now lives on a wrapper (and `#ssh-terminal-body` is pinned to `padding: 0 !important`), so the prompt and cursor sit fully inside the pane at 1280×720, 1440×900 and 1536×864. The inline terminal also moved into `partials/ssh-terminal-inline.html` to keep `index.html` a shell. | ✅ Complete |
 | 2026-10-31 | v3.13.4 | **Docker marks are back on every Docker host, and the SSH prompt stays in view.** Netdata only reports Docker where its plugin runs, so most cards had lost the mark; presence now comes from a small SSH probe (`command -v docker` + `docker ps -a`) run in the background, remembered per host and persisted in `AppSetting`, so a deploy no longer blanks the badges. Threaded SSH calls now get a Flask app context (without it every key materialisation failed with *Working outside of application context* → *Permission denied publickey*). The laptop SSH panel no longer clips its last row: xterm's fit addon measures the parent's border-box, so the padding moved off the terminal's own parent, plus a ResizeObserver and a scroll-to-bottom after fit. Narrow phones: header buttons and the Hosts *Refresh* button can no longer be pushed off-screen. | ✅ Complete |
 | 2026-10-31 | v3.13.3 | **Host cards redesigned.** The server name sits top-centre and one row of equal square icons (22px desktop, 24px phone) runs along the bottom: a solid green/red reachability square, then the OS mark — Numix-square-inspired, flat and monochrome, drawn from the detected distro (Ubuntu, Debian, Alpine, Arch, Fedora, RHEL family, SUSE, macOS, Windows, BSD, generic Linux) — then Docker, with the `>_` SSH button on the far right. The SSH square keeps a thumb-sized invisible hit pad. Netdata-matched hosts now report their OS as `{family, id, name}` like the SSH collector, so the mark is no longer a generic monitor, and Docker presence comes from Netdata's `docker.containers.running` context. | ✅ Complete |
 | 2026-10-31 | v3.13.2 | **Dashboard no longer stalls behind SSH.** `servers_payload` held one lock for the whole collection round, so a phone and a laptop polling together queued behind each other — and `/api/overview` waits on the same function, which is why the whole app felt slow and timed out. It now serves a fresh snapshot as-is and the previous one (stale-while-revalidate) while a round is in flight; only a cold start waits. Also fixed `_idea_pass` raising `AttributeError: module 'app' has no attribute 'app_context'` (it had the module, not the Flask instance) so the remediation ideas pass actually runs. | ✅ Complete |
@@ -772,9 +773,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.13.4`
+**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.13.5`
 (`:latest` points at the same manifest), digest
-`sha256:4e9dae053cdb5f374bd44fd6271501cb00001c62aae76f5cff28cd2bcd576682`, running as
+`sha256:b63f4fbef409d464fecfb17706f1915427bf764b02d8696ce42c8ca2317d997a`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -783,7 +784,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.13.4 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.13.5 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
