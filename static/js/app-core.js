@@ -1444,7 +1444,16 @@ export function init() {
 
         const resizeSshTerminal = () => {
             if (!sshTerm || !sshFit) return;
+            // Re-fitting changes the row count. If the view was already at the
+            // bottom (a fresh session always is), follow it down afterwards --
+            // otherwise the prompt ends up one row below the visible area, which
+            // is exactly what "the prompt falls outside the window" looked like.
+            const buffer = sshTerm.buffer?.active;
+            const wasAtBottom = !buffer || buffer.viewportY >= buffer.baseY;
             sshFit.fit();
+            if (wasAtBottom) {
+                try { sshTerm.scrollToBottom(); } catch (_) {}
+            }
             if (sshSocket && sshSocket.readyState === WebSocket.OPEN) {
                 sshSocket.send(JSON.stringify({
                     type: 'resize',
@@ -1452,6 +1461,19 @@ export function init() {
                 }));
             }
         };
+
+        // On a laptop the window can be resized (or the pane settle) without a
+        // visualViewport event, which left xterm at its old row count with the
+        // prompt below the visible box. Watch the terminal's own box instead.
+        if (window.ResizeObserver && sshTerminalBody) {
+            let sshResizeRaf = 0;
+            const sshResizeObserver = new ResizeObserver(() => {
+                if (!sshTerm || !sshFit) return;
+                cancelAnimationFrame(sshResizeRaf);
+                sshResizeRaf = requestAnimationFrame(() => resizeSshTerminal());
+            });
+            sshResizeObserver.observe(sshTerminalBody);
+        }
 
         // ---- expand / contract the SSH terminal -------------------------
         // The xterm instance is never re-created: its mount node is moved between
@@ -1482,6 +1504,7 @@ export function init() {
             navOpenLayer('ssh');
             setTimeout(() => {
                 resizeSshTerminal();
+                try { sshTerm?.scrollToBottom(); } catch (_) {}
                 try { sshTerm?.focus(); } catch (_) {}
             }, 60);
         };

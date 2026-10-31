@@ -12,13 +12,14 @@ which means no server-side storage and no per-view memory growth.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 from . import collect
 
@@ -48,6 +49,21 @@ _cache: Dict[str, Any] = {'ts': 0.0, 'payload': None}
 _seen_lock = threading.Lock()
 _seen_written: Dict[str, float] = {}
 
+# Docker presence over SSH, remembered per host.
+#
+# Netdata answers "is Docker here?" only where its Docker plugin is enabled, so
+# on this fleet most nodes came back with docker_installed=False and lost the
+# badge. The old SSH sample knew the answer, but running the whole sample again
+# just for a badge would undo the Netdata win. Instead: probe presence alone
+# (two tiny commands), keep it for a few minutes, and serve the last answer
+# instantly. Presence changes when someone installs Docker, not every 2s.
+DOCKER_PROBE_INTERVAL = 300.0   # seconds between probes of one host
+DOCKER_PROBE_START_GAP = 20.0   # don't start rounds more often than this
+_docker_lock = threading.Lock()
+_docker_known: Dict[str, Dict[str, Any]] = {}
+_docker_probing = False
+_docker_round_started = 0.0
+
 
 def _host_list() -> List[Dict[str, Any]]:
     from dockermon import endpoints as ep
@@ -59,20 +75,177 @@ def _host_list() -> List[Dict[str, Any]]:
     return out
 
 
+def _app_object() -> Any:
+    """The live Flask app, or None when called outside a request.
+
+    Worker threads do not inherit a Flask app context (it is thread-local), and
+    SSH key materialisation needs one -- without this every threaded SSH call
+    failed with "could not materialize key ... Working outside of application
+    context" and then "Permission denied (publickey)".
+    """
+    try:
+        return current_app._get_current_object()
+    except Exception:
+        return None
+
+
+# The probe result outlives the process: without this every deploy blanked the
+# Docker marks for the minute it takes to SSH every host again.
+DOCKER_STATE_KEY = 'metrics.docker_presence'
+_docker_loaded = False
+
+
+def _load_docker_state() -> None:
+    global _docker_loaded
+    with _docker_lock:
+        if _docker_loaded:
+            return
+        _docker_loaded = True
+    try:
+        from database import AppSetting
+        row = AppSetting.query.get(DOCKER_STATE_KEY)
+        state = json.loads(row.value_json) if row and row.value_json else {}
+        if isinstance(state, dict):
+            with _docker_lock:
+                for key, rec in state.items():
+                    if isinstance(rec, dict) and key not in _docker_known:
+                        _docker_known[key] = rec
+    except Exception:
+        logger.debug('metrics: could not load docker presence', exc_info=True)
+
+
+def _save_docker_state() -> None:
+    try:
+        from database import AppSetting, db
+        with _docker_lock:
+            state = dict(_docker_known)
+        row = AppSetting.query.get(DOCKER_STATE_KEY)
+        payload = json.dumps(state)
+        if row is None:
+            db.session.add(AppSetting(key=DOCKER_STATE_KEY, value_json=payload))
+        elif row.value_json != payload:
+            row.value_json = payload
+        else:
+            return
+        db.session.commit()
+    except Exception:
+        logger.debug('metrics: could not save docker presence', exc_info=True)
+        try:
+            from database import db
+            db.session.rollback()
+        except Exception:
+            pass
+
+
+def _remember_docker(host_key: str, facts: Dict[str, Any]) -> None:
+    if not host_key or not facts:
+        return
+    record = dict(facts)
+    record['ts'] = time.time()
+    with _docker_lock:
+        previous = _docker_known.get(host_key) or {}
+        _docker_known[host_key] = record
+    if (previous.get('installed'), previous.get('running')) != (record['installed'], record['running']):
+        _save_docker_state()
+
+
+def _known_docker(host_key: str) -> Optional[Dict[str, Any]]:
+    _load_docker_state()
+    with _docker_lock:
+        return _docker_known.get(host_key)
+
+
+def _probe_one(app_obj: Any, host: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if app_obj is None:
+        return collect.docker_facts(host)
+    with app_obj.app_context():
+        return collect.docker_facts(host)
+
+
+def _docker_probe_round(hosts: List[Dict[str, Any]], app_obj: Any = None) -> None:
+    """SSH-probe Docker presence for hosts whose answer is stale.
+
+    Runs in a daemon thread: a slow or unreachable box costs a background
+    thread, never a request. Failures leave the previous answer in place.
+    """
+    global _docker_probing, _docker_round_started
+    now = time.time()
+    with _docker_lock:
+        if _docker_probing or (now - _docker_round_started) < DOCKER_PROBE_START_GAP:
+            return
+        _docker_probing = True
+        _docker_round_started = now
+    try:
+        due = []
+        for host in hosts:
+            key = str(host.get('key') or '')
+            if not key or key.startswith('nd:'):
+                continue
+            rec = _known_docker(key)
+            if rec and (now - rec.get('ts', 0)) < DOCKER_PROBE_INTERVAL:
+                continue
+            due.append(host)
+        if not due:
+            return
+        def collect_due():
+            with ThreadPoolExecutor(max_workers=min(SNAPSHOT_WORKERS, len(due))) as pool:
+                for host, facts in zip(due, pool.map(lambda h: _probe_one(app_obj, h), due)):
+                    if facts:
+                        # remembering also persists, and that needs the app context
+                        # on *this* thread, not just inside the workers
+                        _remember_docker(str(host.get('key') or ''), facts)
+
+        if app_obj is None:
+            collect_due()
+        else:
+            with app_obj.app_context():
+                collect_due()
+    except Exception:
+        logger.debug('metrics: docker probe round failed', exc_info=True)
+    finally:
+        with _docker_lock:
+            _docker_probing = False
+
+
+def _maybe_probe_docker(hosts: List[Dict[str, Any]]) -> None:
+    """Kick a probe round without blocking the caller."""
+    now = time.time()
+    with _docker_lock:
+        if _docker_probing or (now - _docker_round_started) < DOCKER_PROBE_START_GAP:
+            return
+        fresh = all(
+            (_docker_known.get(str(h.get('key') or ''), {}).get('ts', 0) or 0) > now - DOCKER_PROBE_INTERVAL
+            for h in hosts
+            if h.get('key') and not str(h.get('key')).startswith('nd:')
+        )
+    if fresh:
+        return
+    threading.Thread(target=_docker_probe_round, args=(list(hosts), _app_object()),
+                     daemon=True).start()
+
+
 def _docker_block(snap: Dict[str, Any]) -> Dict[str, Any]:
     """Docker presence for the card badge, plus container counts.
 
-    All three facts come from the same SSH round trip as the system stats, so
-    the badge cannot disagree with the expansion (and does not depend on a
-    Docker discovery pass having run recently).
+    A snapshot that sampled Docker itself (SSH) wins; otherwise the remembered
+    SSH probe answers, so a Netdata-only node still shows its Docker mark.
     """
     installed = bool(snap.get('docker_installed'))
     reachable = bool(snap.get('docker_reachable')) and installed
+    running = int(snap.get('docker_running') or 0)
+    total = int(snap.get('docker_total') or 0)
+    if not installed:
+        known = _known_docker(str(snap.get('host_key') or ''))
+        if known:
+            installed = bool(known.get('installed'))
+            reachable = bool(known.get('reachable')) and installed
+            running = int(known.get('running') or 0)
+            total = int(known.get('total') or 0)
     return {
         'installed': installed,
         'reachable': reachable,
-        'containers_running': int(snap.get('docker_running') or 0) if reachable else 0,
-        'containers_total': int(snap.get('docker_total') or 0) if reachable else 0,
+        'containers_running': running if reachable else 0,
+        'containers_total': total if reachable else 0,
         'engine_version': None,
     }
 
@@ -179,15 +352,37 @@ def collect_servers() -> Dict[str, Any]:
     """One round: Netdata for the fleet, SSH only for what it cannot see."""
     hosts = _host_list()
     results: List[Dict[str, Any]] = []
+    # Prime the remembered answers (and the persisted copy) before the pool
+    # threads start, so a restart keeps its Docker marks.
+    _load_docker_state()
+    # Keep Docker presence warm in the background; never waits for SSH.
+    _maybe_probe_docker(hosts)
     matched, extra, netdata_meta = _netdata_round(hosts)
 
+    flask_app = _app_object()
+
     def one(host):
+        # The pool threads have no app context of their own; SSH needs one.
+        if flask_app is None:
+            return one_inner(host)
+        with flask_app.app_context():
+            return one_inner(host)
+
+    def one_inner(host):
         key = host.get('key')
         if key in matched:
             snap = matched[key]
             snap['docker'] = _docker_block(snap)
             return snap
         snap = collect.system_snapshot(host)
+        # This sample asked the host about Docker directly, so it is the best
+        # answer we have: remember it and save the next probe a round trip.
+        _remember_docker(str(key or ''), {
+            'installed': bool(snap.get('docker_installed')),
+            'reachable': bool(snap.get('docker_reachable')),
+            'running': int(snap.get('docker_running') or 0),
+            'total': int(snap.get('docker_total') or 0),
+        })
         snap['docker'] = _docker_block(snap)
         return snap
 
