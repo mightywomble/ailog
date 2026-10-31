@@ -192,3 +192,25 @@ def test_the_logs_tab_knows_the_phone_screen():
     shell = _read('static', 'js', 'shell.js')
     assert "'mobile-logs-view'" in shell
     assert "view === 'mobile-logs-view'" in shell
+
+
+# ------------------------------------------------------- the soft keyboard
+
+def test_the_ssh_dialog_uses_the_visual_viewport():
+    """A fixed dialog is sized to the layout viewport, which the keyboard does
+    not shrink: the prompt ended up behind it."""
+    js = _js()
+    assert 'const syncVisualViewport = () => {' in js
+    assert "window.visualViewport.addEventListener('resize'" in js
+    assert "window.visualViewport.addEventListener('scroll'" in js
+    assert "root.style.setProperty('--vv-h'" in js
+    assert "root.style.setProperty('--vv-top'" in js
+    # xterm has to re-measure after the box changes height
+    assert 'if (!sshMaximized) return;' in js
+    assert 'sshTerm?.scrollToBottom();' in js
+
+    css = _css()
+    phone = css[css.index('#ssh-terminal-overlay {\n    top: var(--vv-top, 0);'):]
+    assert 'height: var(--vv-h, 100dvh)' in phone[:400]
+    assert 'height: calc(var(--vv-h, 100dvh) - 6px)' in phone[:800]
+    assert 'env(safe-area-inset-bottom' in phone[:1200]

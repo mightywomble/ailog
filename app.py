@@ -38,7 +38,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.8.1'
+APP_VERSION = '3.8.3'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -293,6 +293,12 @@ def _ensure_schedule_worker():
 
 # --- CONFIGURATION ---
 LOG_DIRECTORY = '/var/log'
+# One `source` event becomes one row in the browser: a host with a pathological
+# listing must not be able to hand the UI 46k nodes. Caps are per type and the
+# stream says when it truncated.
+JOURNAL_UNIT_LIMIT = int(os.environ.get('AILOG_JOURNAL_UNIT_LIMIT', '400'))
+DOCKER_SOURCE_LIMIT = int(os.environ.get('AILOG_DOCKER_SOURCE_LIMIT', '300'))
+FILE_SOURCE_LIMIT = int(os.environ.get('AILOG_FILE_SOURCE_LIMIT', '1000'))
 MAX_CHAR_COUNT = 40000 
 DISCORD_ALERT_KEYWORDS = ['error', 'issue', 'failed', 'warning', 'critical', 'exception', 'denied', 'unable']
 
@@ -649,11 +655,14 @@ def _docker_log_sources(hostname):
     exposed as ``type='docker'`` sources so the browser can offer them in the
     pulled-log list.
     """
+    # No --size: that makes the daemon measure every writable layer (a `du`
+    # per container) and is what stalled the pull on busy hosts. State + image
+    # is what the list actually shows for a container anyway.
     fmt = '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Size}}'
     command = (
         'if sudo -n docker version >/dev/null 2>&1; then D="sudo -n docker"; '
         'else D="docker"; fi; '
-        f"$D ps -a --no-trunc --size --format '{fmt}' 2>/dev/null"
+        f"$D ps -a --no-trunc --format '{fmt}' 2>/dev/null"
     )
     try:
         res = execute_command(hostname, command, timeout=15)
@@ -668,6 +677,8 @@ def _docker_log_sources(hostname):
 
     sources = []
     for line in (res.stdout or '').splitlines():
+        if len(sources) >= DOCKER_SOURCE_LIMIT:
+            break
         if not line.strip():
             continue
         row = parse_ps_line(line)
@@ -703,6 +714,8 @@ def get_log_sources_from_host_stream(hostname='local'):
         cmd_ls = f"sudo ls -p {shlex.quote(LOG_DIRECTORY)}"
         res_ls = execute_command(hostname, cmd_ls)
         filenames = [entry for entry in res_ls.stdout.strip().split('\n') if not entry.endswith('/') and entry]
+        if len(filenames) > FILE_SOURCE_LIMIT:
+            filenames = filenames[:FILE_SOURCE_LIMIT]
         total_files = len(filenames)
         yield generate_event({'status': 'progress', 'message': f'Found {total_files} potential log files.', 'progress': 10})
         for i, filename in enumerate(filenames):
@@ -719,9 +732,27 @@ def get_log_sources_from_host_stream(hostname='local'):
                 continue
         yield generate_event({'status': 'progress', 'message': 'Fetching journald services...', 'progress': 95})
         try:
-            cmd_journal = "sudo journalctl --field _SYSTEMD_UNIT | sort | uniq"
+            # `.scope` units are *transient*: every container/systemd-run
+            # invocation leaves one behind, so a busy host answers with tens of
+            # thousands of them (46,533 on the matrix server) and none of them
+            # is a service you would read logs for. Services only, capped.
+            cmd_journal = (
+                "sudo journalctl --field _SYSTEMD_UNIT 2>/dev/null "
+                "| grep -v '\\.scope$' | sort -u "
+                f"| head -n {JOURNAL_UNIT_LIMIT}"
+            )
             res_journal = execute_command(hostname, cmd_journal)
             journal_units = [unit for unit in res_journal.stdout.strip().split('\n') if unit]
+            # Belt and braces: the host already trims with `head`, but a daemon
+            # that ignores the pipe must not be able to flood the browser.
+            truncated = len(journal_units) >= JOURNAL_UNIT_LIMIT
+            journal_units = journal_units[:JOURNAL_UNIT_LIMIT]
+            if truncated:
+                yield generate_event({
+                    'status': 'progress',
+                    'message': f'Showing the first {JOURNAL_UNIT_LIMIT} journal units',
+                    'progress': 96,
+                })
             for unit in journal_units:
                 source_data = {'type': 'journal', 'name': unit, 'size_bytes': 0, 'size_formatted': 'N/A','modified_epoch': 0, 'modified_formatted': 'Journald Service'}
                 yield generate_event({'status': 'source', 'data': source_data})

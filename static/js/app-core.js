@@ -499,6 +499,34 @@ export function init() {
             syncHostStatuses();
         };
 
+        // ------------------------------------------------- phone soft keyboard
+        // A `position: fixed` dialog is sized to the layout viewport, which does
+        // NOT shrink when the on-screen keyboard opens: the terminal grew behind
+        // the keyboard and the prompt (and the cursor) disappeared off the
+        // bottom. The visual viewport does shrink, so publish it as CSS vars and
+        // let the SSH dialog sit inside it.
+        const syncVisualViewport = () => {
+            const vv = window.visualViewport;
+            if (!vv) return;
+            const root = document.documentElement;
+            root.style.setProperty('--vv-h', `${Math.round(vv.height)}px`);
+            root.style.setProperty('--vv-top', `${Math.round(vv.offsetTop)}px`);
+        };
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                syncVisualViewport();
+                // xterm needs to re-measure after the box changes height.
+                setTimeout(() => {
+                    if (!sshMaximized) return;
+                    resizeSshTerminal();
+                    // the cursor is the thing you came for: keep it in view
+                    try { sshTerm?.scrollToBottom(); } catch (_) {}
+                }, 80);
+            });
+            window.visualViewport.addEventListener('scroll', syncVisualViewport);
+        }
+        syncVisualViewport();
+
         const onLayoutChange = () => {
             const onDashboard = dashboardView && !dashboardView.classList.contains('hidden');
             const onGrid = mobileHostsView && !mobileHostsView.classList.contains('hidden');

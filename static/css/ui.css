@@ -633,6 +633,24 @@ a.ov-row-main:hover { text-decoration: underline; }
      half-height inline pane (and the button that expands to it) is dead weight. */
   #ssh-terminal-expand-btn,
   #ssh-terminal-contract-btn { display: none; }
+
+  /* Sit inside the *visual* viewport so the prompt stays above the keyboard.
+     `--vv-h`/`--vv-top` are published by app-core from visualViewport. */
+  #ssh-terminal-overlay {
+    top: var(--vv-top, 0);
+    bottom: auto;
+    height: var(--vv-h, 100dvh);
+    align-items: flex-start;
+  }
+  #ssh-terminal-overlay .ssh-modal-panel {
+    width: 100vw;
+    height: calc(var(--vv-h, 100dvh) - 6px);
+    max-height: calc(var(--vv-h, 100dvh) - 6px);
+    border-radius: 0 0 var(--radius) var(--radius);
+  }
+  #ssh-terminal-overlay .ssh-modal-body {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
 
 /* ------------------------------------------- phone / Fold card-first hosts

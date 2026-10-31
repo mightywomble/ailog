@@ -6,6 +6,8 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-10-31 | v3.8.3 | After the keyboard resize, the SSH terminal re-fits **and scrolls to the cursor**, so the prompt is always the last visible line rather than clipped at the panel edge. | ✅ Complete |
+| 2026-10-31 | v3.8.2 | **Fixed: the pull locked up on hosts with transient units.** `journalctl --field _SYSTEMD_UNIT` lists transient `.scope` units too — 46,533 of them on the matrix server — and every one became a `source` event, so the UI drowned. Scopes are now excluded on the host and the list is capped (400 units, 300 containers, 1,000 files, all env-tunable); `docker ps --size` (a `du` per container) is gone. Also: the phone's SSH dialog now sits inside the **visual** viewport, so the prompt stays above the soft keyboard. | ✅ Complete |
 | 2026-10-31 | v3.8.1 | Small polish on the new phone log cards: while a pull is streaming the subtitle counts what it has found (`41 sources so far…`) instead of repeating the global progress strip, and settles to `N sources · tap one to read it` when the stream completes. | ✅ Complete |
 | 2026-10-31 | v3.8.0 | **The phone is card-first all the way down.** A host's log sources are now cards in one scrolling list, with *Pull logs* and *AI analyse host* in the header. Tapping a card opens the log full screen in a dialog whose header carries **AI analyse** and **Share** (Android share sheet, clipboard fallback); the finished analysis has the same share button. The SSH expand/contract toggles are gone on a phone (the terminal is opened full screen and closed with its ✕), and the search strip is one compact row instead of three. | ✅ Complete |
 | 2026-10-30 | v3.7.1 | **Fixed: the phone grid would not scroll.** The new hosts view was mounted inside the fixed-height shell but was not part of the shell's view rules, so the shell clipped it: hosts past the fold were unreachable. It now joins `#dashboard-view`/`#logs-view` as a scroll container (`overflow: auto`, `min-height: 0`) and owns the single phone grid column (the sidebar is a fixed overlay there). | ✅ Complete |
@@ -761,9 +763,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.8.1`
+**Current production image** (as of 2026-10-31): `zot.safehomelan.com/ailog:v3.8.3`
 (`:latest` points at the same manifest), digest
-`sha256:88a5472589e558976bdde2f9f6818fccf815d33e4cb10bab9ec7cb88e1502cc8`, running as
+`sha256:0b08653f6ff500afe85d073d02821fbf1ec64f5a263a8580d05e2c46bb523df4`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -772,7 +774,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.8.1 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.8.3 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
