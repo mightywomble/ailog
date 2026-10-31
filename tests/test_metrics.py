@@ -394,3 +394,72 @@ def test_a_fresh_snapshot_does_not_collect(monkeypatch):
     metrics_routes._cache.update({'ts': _time.time(), 'payload': fresh})
     monkeypatch.setattr(metrics_routes, 'collect_servers', must_not_run)
     assert metrics_routes.servers_payload() is fresh
+
+
+def test_docker_facts_parses_presence_states_and_a_failed_engine(monkeypatch):
+    """The SSH probe that keeps the Docker badge on Netdata-only hosts."""
+    M = collect.MARK
+    monkeypatch.setattr(collect, '_run', lambda host, cmd, timeout=None: (
+        True,
+        f"{M}:presence\nyes\n{M}:dstate\nrunning\nrunning\nexited\nAILOG_DOCKER_OK",
+    ))
+    facts = collect.docker_facts({'key': 'db-1'})
+    assert facts == {'installed': True, 'reachable': True, 'running': 2, 'total': 3}
+
+    # docker installed but the daemon refuses the current user
+    monkeypatch.setattr(collect, '_run', lambda host, cmd, timeout=None: (
+        True, f"{M}:presence\nyes\n{M}:dstate\n",
+    ))
+    facts = collect.docker_facts({'key': 'db-1'})
+    assert facts['installed'] is True and facts['reachable'] is False
+
+    # host answered but has no docker at all
+    monkeypatch.setattr(collect, '_run', lambda host, cmd, timeout=None: (
+        True, f"{M}:presence\nno\n{M}:dstate\n",
+    ))
+    assert collect.docker_facts({'key': 'db-1'}) == {
+        'installed': False, 'reachable': False, 'running': 0, 'total': 0}
+
+    # SSH itself failed: say nothing rather than "no docker"
+    monkeypatch.setattr(collect, '_run', lambda host, cmd, timeout=None: (False, 'timeout'))
+    assert collect.docker_facts({'key': 'db-1'}) is None
+
+
+def test_a_netdata_snapshot_borrows_the_remembered_ssh_docker_answer():
+    """Netdata cannot always answer "is Docker here?"; the old SSH answer can."""
+    metrics_routes._docker_known.clear()
+    metrics_routes._remember_docker('db-9', {
+        'installed': True, 'reachable': True, 'running': 4, 'total': 7})
+
+    snap = {'host_key': 'db-9', 'docker_installed': False, 'docker_reachable': False,
+            'docker_running': 0, 'docker_total': 0, 'metrics_source': 'netdata'}
+    block = metrics_routes._docker_block(snap)
+    assert block['installed'] is True and block['reachable'] is True
+    assert block['containers_running'] == 4
+
+    # a host nobody has probed stays honestly blank
+    assert metrics_routes._docker_block({'host_key': 'db-99'})['installed'] is False
+
+    # and a direct SSH sample always wins over the cache
+    direct = {'host_key': 'db-9', 'docker_installed': True,
+              'docker_reachable': True, 'docker_running': 1, 'docker_total': 2}
+    assert metrics_routes._docker_block(direct)['containers_running'] == 1
+    metrics_routes._docker_known.clear()
+
+
+def test_docker_presence_survives_a_restart(flask_app):
+    """A deploy must not blank the Docker badge until SSH has run again."""
+    with flask_app.app_context():
+        metrics_routes._docker_known.clear()
+        metrics_routes._docker_loaded = True
+        metrics_routes._remember_docker('db-7', {
+            'installed': True, 'reachable': True, 'running': 2, 'total': 5})
+
+        # pretend the process restarted: memory gone, cache flag reset
+        metrics_routes._docker_known.clear()
+        metrics_routes._docker_loaded = False
+
+        known = metrics_routes._known_docker('db-7')
+        assert known['installed'] is True and known['running'] == 2
+        metrics_routes._docker_known.clear()
+        metrics_routes._docker_loaded = False

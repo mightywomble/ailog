@@ -620,8 +620,12 @@ a.ov-row-main:hover { text-decoration: underline; }
 
 .ssh-modal-panel {
   width: min(1240px, 94vw);
-  height: 92vh;
-  max-height: 92vh;
+  /* dvh tracks the real window (and a collapsing browser toolbar); the 92vh
+     fallback keeps older engines sane. `overflow: hidden` means a miscalculated
+     row can never paint over the edge of the panel. */
+  height: 92dvh;
+  max-height: 92dvh;
+  overflow: hidden;
 }
 .ssh-modal-host {
   margin-left: 8px;
@@ -630,16 +634,27 @@ a.ov-row-main:hover { text-decoration: underline; }
   color: var(--muted);
 }
 .ssh-modal-body {
-  padding: 0 !important;
+  /* The breathing room lives here, not on the terminal's own parent: xterm's
+     fit addon measures that parent's border-box, so padding there was counted
+     as usable rows and pushed the prompt one row below the panel. */
+  padding: 8px 10px 10px !important;
   background: var(--term-bg, var(--bg));
   min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 .ssh-modal-body > #ssh-terminal-body {
   flex: 1 1 auto;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   min-height: 0;
-  padding: 10px 12px 12px !important;
+  overflow: hidden;
+  padding: 0 !important;    /* see .ssh-modal-body above */
+}
+.ssh-modal-body > #ssh-terminal-body .xterm,
+.ssh-modal-body > #ssh-terminal-body .xterm-viewport {
+  height: 100%;
 }
 .ssh-contract-btn { display: inline-flex; align-items: center; gap: 6px; }
 .ssh-contract-btn svg { width: 15px; height: 15px; }
@@ -692,7 +707,11 @@ a.ov-row-main:hover { text-decoration: underline; }
     justify-content: space-between;
     gap: 12px;
     padding: 2px 2px 0;
+    flex-wrap: wrap;          /* a long subtitle wraps instead of pushing Refresh off-screen */
   }
+  /* basis 0, not auto: the subtitle's max-content width must not claim the
+     whole row and push Refresh onto a line of its own */
+  .mh-head > div { min-width: 0; flex: 1 1 0; }
   .mh-title {
     margin: 0;
     font-size: 1.05rem;
@@ -705,6 +724,7 @@ a.ov-row-main:hover { text-decoration: underline; }
     color: var(--muted);
   }
   .mh-refresh {
+    flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     gap: 6px;

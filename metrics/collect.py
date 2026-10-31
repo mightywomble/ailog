@@ -95,6 +95,44 @@ def _run(host: Dict[str, Any], command: str, timeout: int = SSH_TIMEOUT):
     return run_host(host, command, timeout=timeout)
 
 
+# Docker presence is cheap but needs the box itself, and Netdata only answers
+# it where its Docker plugin is enabled. This is the old SSH answer, kept
+# deliberately small: two commands, no /proc, so a probe every few minutes is
+# nothing like the full sample it used to be.
+DOCKER_FACTS_COMMAND = (
+    f"echo '{MARK}:presence'; command -v docker >/dev/null 2>&1 && echo yes || echo no; "
+    f"echo '{MARK}:dstate'; "
+    "{ (sudo -n docker ps -a --format '{{.State}}' 2>/dev/null "
+    "|| docker ps -a --format '{{.State}}' 2>/dev/null) && echo AILOG_DOCKER_OK; }; "
+    'true'
+)
+
+
+def docker_facts(host: Dict[str, Any], timeout: int = SSH_TIMEOUT) -> Optional[Dict[str, Any]]:
+    """`{installed, reachable, running, total}` for one host over SSH.
+
+    Returns ``None`` when the probe itself failed (unreachable host), so the
+    caller can keep whatever it knew before instead of recording "no Docker".
+    """
+    try:
+        ok, out = _run(host, DOCKER_FACTS_COMMAND, timeout=timeout)
+    except Exception:
+        return None
+    if not ok:
+        return None
+    blocks = _split(out)
+    installed = (blocks.get('presence') or '').strip().lower().startswith('yes')
+    states = [ln.strip().lower() for ln in (blocks.get('dstate') or '').splitlines()]
+    reachable = 'ailog_docker_ok' in states
+    states = [st for st in states if st and st != 'ailog_docker_ok']
+    return {
+        'installed': installed,
+        'reachable': reachable and installed,
+        'running': sum(1 for st in states if st.startswith('running')),
+        'total': len(states),
+    }
+
+
 def _number(value, default=0) -> float:
     """Coerce a counter to a number.
 
