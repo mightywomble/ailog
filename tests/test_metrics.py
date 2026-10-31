@@ -357,3 +357,40 @@ def test_container_snapshot_survives_a_tuple_net_counter(monkeypatch):
     assert row['net_rx'] == 1000 and row['net_tx'] == 0
     assert row['cpu_percent'] == 7.5
     assert row['mem_used'] == 1024 and row['mem_limit'] == 4096
+
+
+def test_a_stale_snapshot_is_served_while_a_round_is_in_flight(monkeypatch):
+    """The collection lock must never make a request wait on SSH.
+
+    ``/api/overview`` calls ``servers_payload`` too, so when one tab started a
+    round every other page (and the healthcheck) queued behind it. With two
+    devices open the queue outlived the browser's patience -- the reported
+    "slow and not connecting". A request that arrives during a round must get
+    the previous snapshot immediately instead.
+    """
+    stale = {'success': True, 'servers': [], 'ts': 1.0}
+    metrics_routes._cache.update({'ts': 0.0, 'payload': stale})
+
+    def must_not_run():
+        raise AssertionError('collection ran while another round held the lock')
+
+    monkeypatch.setattr(metrics_routes, 'collect_servers', must_not_run)
+
+    # Another thread is mid-round.
+    assert metrics_routes._refresh_lock.acquire(blocking=False)
+    try:
+        assert metrics_routes.servers_payload() is stale
+    finally:
+        metrics_routes._refresh_lock.release()
+
+
+def test_a_fresh_snapshot_does_not_collect(monkeypatch):
+    import time as _time
+    fresh = {'success': True, 'servers': [], 'ts': _time.time()}
+
+    def must_not_run():
+        raise AssertionError('collection ran inside the TTL')
+
+    metrics_routes._cache.update({'ts': _time.time(), 'payload': fresh})
+    monkeypatch.setattr(metrics_routes, 'collect_servers', must_not_run)
+    assert metrics_routes.servers_payload() is fresh

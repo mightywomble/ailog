@@ -561,18 +561,32 @@ def run_pipeline(host_key, host_label, window_minutes, provider, model, data,
         from remediation import policy as _remediation_policy
         _matcher.match_report(report, _models, db, with_ideas=False)
         if _remediation_policy.idea_channel_enabled():
-            app_obj = app_module
+            # ``app_module`` is the imported *module* (``app``), not the Flask
+            # instance it holds: ``app_module.app_context()`` raised
+            # AttributeError on every report and killed the thread before the
+            # ideas pass ran.  Prefer the live request's app; fall back to the
+            # module attribute.
+            try:
+                worker_app = current_app._get_current_object()
+            except Exception:
+                worker_app = getattr(app_module, 'app', None)
             report_id = report.id
 
             def _idea_pass():
-                with app_obj.app_context():
+                if worker_app is None:  # no usable app object: skip, never crash
+                    return
+                with worker_app.app_context():
+                    _db = db
                     try:
-                        from database import db as _db
                         row = _models.LogReport.query.get(report_id)
                         if row:
                             _matcher.match_report(row, _models, _db, with_ideas=True)
                     except Exception:
-                        _db.session.rollback()
+                        log.warning('remediation idea pass failed', exc_info=True)
+                        try:
+                            _db.session.rollback()
+                        except Exception:
+                            pass
 
             threading.Thread(target=_idea_pass, daemon=True).start()
     except Exception:
