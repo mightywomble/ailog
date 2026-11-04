@@ -271,8 +271,8 @@ services:
   service: server
   image: zot.safehomelan.com/patchmon-server:2.1.6
   repo: patchmon-server
-  version: 2.1.6
-  source: ghcr.io/patchmon/patchmon-server:latest
+  version: 2.1.7
+  source: ghcr.io/patchmon/patchmon-server:2.1.7
   ports:
   - host: 3000
     container: 3000

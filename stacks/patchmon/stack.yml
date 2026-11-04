@@ -17,7 +17,7 @@
 #   https://patchmon.safehomelan.com (tailscale) / https://patchlan.safehomelan.com (lan)
 services:
   server:
-    image: zot.safehomelan.com/patchmon-server:2.1.6
+    image: zot.safehomelan.com/patchmon-server:2.1.7
     environment:
       CORS_ORIGIN: "https://patchmon.safehomelan.com,https://patchlan.safehomelan.com"
       JWT_SECRET: "fd7b358b022b7431167a1b514227cc439ca842d1a0a8923c6cf56664714240173d16413936a30cd20d179a4a78f3c9566a92b6bf2af0801b6f2d8d21bc0b43c1"
