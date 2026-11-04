@@ -586,3 +586,41 @@ def test_a_variant_tag_is_not_mistaken_for_a_version():
     assert tags.is_version_tag('7.1.4-php8.5-fpm-alpine') is True
     assert tags.is_version_tag('v11.4.0') is True
     assert tags.newest_tag.__doc__ is not None
+
+
+def test_packaging_numbers_do_not_count_as_version_numbers(monkeypatch):
+    """wordpress:7.1.4 was the right answer; 7.1.4-php8.5-fpm only looks newer."""
+    from estate import tags
+
+    listed = {'host': 'docker.io', 'repo': 'library/wordpress', 'current': '7.1.3',
+              'count': 6, 'tags': ['7.1.4-php8.5-fpm-alpine', '7.1.4-php8.5-fpm',
+                                   '7.1.4-php8.5', '7.1.4', '7.1.3', 'php8.5-fpm']}
+    monkeypatch.setattr(tags, 'list_tags', lambda image, limit=100: listed)
+    newest = tags.newest_tag('docker.io/library/wordpress:7.1.3')
+    assert newest['best'] == '7.1.4'
+    assert newest['up_to_date'] is False
+    assert tags._ver('7.1.4-php8.5-fpm') == (7, 1, 4) == tags._ver('7.1.4')
+
+
+def test_the_hub_listing_walks_more_than_one_page(monkeypatch):
+    from estate import tags
+
+    pages = {1: ['7.1.4-alpine'] * 100, 2: ['7.1.4'] + ['7.1.3'] * 99}
+    asked = []
+
+    class Resp:
+        def __init__(self, names):
+            self.status_code = 200
+            self._names = names
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {'results': [{'name': n} for n in self._names]}
+
+    def fake_get(url, params=None, timeout=None):
+        asked.append(params['page'])
+        return Resp(pages.get(params['page'], []))
+
+    monkeypatch.setattr(tags.requests, 'get', fake_get)
+    got = tags._hub_tags('library/wordpress', 80, 20)
+    assert '7.1.4' in got and asked[:2] == [1, 2]
