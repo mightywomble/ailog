@@ -244,8 +244,10 @@ def pipeline_run(body: PipelineBody):
     def work(job):
         out = {}
         job.step("sync repo", "running")
-        core.ensure(core.load())
-        job.step("sync repo", "ok")
+        # sync_if_stale refuses to reset a dirty worktree, which is exactly the
+        # state the user is in: they just saved a service and pressed run
+        synced = core.sync_if_stale(core.load(), min_interval=0)
+        job.step("sync repo", "ok", "refreshed" if synced else "kept local changes")
         out["build"] = pipeline.build(job, body.message)
         if body.deploy:
             out["ship"] = pipeline.ship(job, body.message)
