@@ -5,10 +5,20 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 const STAGES = [["source", "source"], ["compose", "compose"], ["stack", "stack file"],
-  ["ports", "ports"], ["details", "details"], ["url", "url"], ["review", "review"],
-  ["run", "build"], ["test", "test"]];
+  ["ports", "ports"], ["details", "details"], ["creds", "credentials"], ["url", "url"],
+  ["review", "review"], ["run", "build"], ["test", "test"]];
 
-const S = { settings: {}, services: [], ports: null, current: null, entry: {}, stage: "source", es: null };
+const S = { settings: {}, services: [], ports: null, current: null, entry: {}, stage: "source",
+  es: null, mode: "new", parts: ["source"], newest: null };
+
+/* Adding a service and bumping one are different journeys. A new service needs
+   every stage; an existing one only needs the stages you ticked, then review. */
+function stages() {
+  if (S.mode === "new") return STAGES;
+  return STAGES.filter(([id]) => id === "source" || id === "review" || id === "run"
+    || id === "test" || S.parts.includes(id));
+}
+function isExisting() { return !!S.current && S.services.some((s) => s.name === S.current); }
 
 /* ------------------------------------------------------------------ plumbing */
 async function api(path, opts = {}) {
@@ -44,11 +54,15 @@ const progress = (() => {
 
 /* ------------------------------------------------------------------ stages */
 function renderStepper() {
-  const idx = STAGES.findIndex(([x]) => x === S.stage);
-  $("#stepper").innerHTML = STAGES.map(([id, label], i) => `<button class="step ${S.stage === id ? "active" : ""} ${i < idx ? "done" : ""}" data-go="${id}">
-    <b>${i < idx ? "✓" : i + 1}</b>${label}</button>`).join("");
+  const list = stages();
+  const idx = list.findIndex(([x]) => x === S.stage);
+  $("#stepper").innerHTML = list.map(([id, label], i) => `<button class="step ${S.stage === id ? "active" : ""} ${i < idx ? "done" : ""}" data-go="${id}">
+    <b>${i < idx ? "✓" : i + 1}</b>${label}</button>`).join("")
+    + `<span class="chip mode">${S.mode === "new" ? "new service" : "updating " + esc(S.current || "")}</span>`;
 }
 function go(stage) {
+  const list = stages().map(([id]) => id);
+  if (!list.includes(stage)) stage = "review";
   S.stage = stage;
   try { window.history.replaceState(null, "", "#" + stage); } catch (e) {}
   $$(".stage").forEach((el) => el.classList.toggle("active", el.dataset.stage === stage));
@@ -56,8 +70,18 @@ function go(stage) {
   if (stage === "ports") loadPorts();
   if (stage === "review") renderReview();
   if (stage === "test") prefillTest();
+  if (stage === "creds") renderCredNote();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
+
+function nextStage() {
+  if (S.stage === "source" && isExisting()) return openUpdateModal();
+  const list = stages().map(([id]) => id);
+  const i = list.indexOf(S.stage);
+  go(list[Math.min(i + 1, list.length - 1)]);
+}
+$$("[data-next]").forEach((b) => (b.onclick = nextStage));
+$("#btnNextSource").onclick = nextStage;
 
 /* ------------------------------------------------------------------ state */
 async function boot() {
@@ -94,7 +118,9 @@ async function refreshServices() {
 }
 
 async function loadService(name) {
-  S.current = name; renderList();
+  S.current = name; S.mode = "update";
+  S.parts = ["source"];            // ticks are chosen in the modal after source
+  renderList();
   const d = await api(`/api/services/${encodeURIComponent(name)}`);
   const e = d.entry || {}; S.entry = e;
   $("#f_name").value = e.name || "";
@@ -112,8 +138,39 @@ async function loadService(name) {
   $("#f_env").value = Object.entries(e.env || {}).map(([k, v]) => `${k}=${v}`).join("\n");
   $("#f_health").value = typeof e.healthcheck === "string" ? e.healthcheck : (e.healthcheck?.test?.[1] || "");
   $("#f_subdomain").value = (e.url || "").replace(/\..*$/, "");
+  $("#f_creduser").value = e.env?.[$("#f_creduserkey").value] || "";
+  $("#f_credpass").value = e.env?.[$("#f_credpwkey").value] || "";
   $("#imagePreview").textContent = imageRef();
-  renderReview();
+  renderReview(); renderPath(); previewNewest();
+}
+
+/* Update and Next are both offered here because they are different intents:
+   one rolls the image forward, the other edits something specific. */
+function renderPath() {
+  const existing = isExisting();
+  $("#btnUpdate").hidden = !existing || !$("#f_source").value.trim();
+  $("#newestNote").textContent = existing ? "this service is already in wizard.yaml" : "";
+  $("#f_name").readOnly = existing;
+}
+
+async function previewNewest() {
+  const src = $("#f_source").value.trim();
+  if (!isExisting() || !src) return;
+  $("#newestNote").textContent = "checking upstream…";
+  try {
+    const d = await api("/api/newest?image=" + encodeURIComponent(src));
+    S.newest = d;
+    $("#newestNote").textContent = d.up_to_date
+      ? `upstream ${d.host}/${d.repo}: ${d.tag} — already newest`
+      : `upstream ${d.host}/${d.repo}: ${d.current || "?"} → ${d.best}`;
+    $("#btnUpdate").textContent = d.up_to_date ? "already newest" : `update to ${d.best}`;
+    $("#btnUpdate").disabled = !!d.up_to_date;
+  } catch (err) {
+    S.newest = null;
+    $("#newestNote").textContent = "cannot read upstream tags: " + (err.message || err);
+    $("#btnUpdate").textContent = "update to newest";
+    $("#btnUpdate").disabled = true;
+  }
 }
 
 function imageRef() {
@@ -134,6 +191,12 @@ function entryFromForm() {
     const i = l.indexOf("="); if (i > 0) env[l.slice(0, i)] = l.slice(i + 1);
   });
   const sub = $("#f_subdomain").value.trim();
+  // credentials are just two env keys; clearing the fields removes them
+  const cu = $("#f_creduser").value.trim(), cp = $("#f_credpass").value.trim();
+  const cuk = $("#f_creduserkey").value.trim() || "ADMIN_USER";
+  const cpk = $("#f_credpwkey").value.trim() || "ADMIN_PASSWORD";
+  if (cu) env[cuk] = cu; else delete env[cuk];
+  if (cp) env[cpk] = cp; else delete env[cpk];
   return {
     name: $("#f_name").value.trim(), kind: $("#f_kind").value,
     source: $("#f_source").value.trim(), version: $("#f_version").value.trim(),
@@ -155,10 +218,15 @@ function renderReview() {
     ["ports", e.ports.map((p) => `${p.host} → ${p.container} (${p.mode})`).join(", ") || "none"],
     ["replicas", e.replicas], ["url", e.url || "—"],
     ["volumes", e.volumes.map((v) => v.host).join(", ") || "—"],
-    ["env keys", Object.keys(e.env).join(", ") || "—"]];
+    ["env keys", Object.keys(e.env).join(", ") || "—"],
+    ["credentials", (e.env[($("#f_creduserkey").value || "ADMIN_USER").trim()]
+      ? `user via ${$("#f_creduserkey").value.trim()}` : "no username")
+      + (e.env[($("#f_credpwkey").value || "ADMIN_PASSWORD").trim()] ? " · password set" : "")]];
   $("#reviewOut").innerHTML = rows.map(([k, v]) => `<div class="kv"><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join("")
     + `<div class="note">writes <code>wizard.yaml</code> + <code>stacks/${esc(e.name)}/stack.yml</code>`
-    + (e.kind === "mirror" ? " + the <code>mirror-images.json</code> entry" : "") + `</div>`;
+    + (e.kind === "mirror" ? " + the <code>mirror-images.json</code> entry" : "") + `</div>`
+    + (S.mode === "update"
+      ? `<div class="note">updating only: <b>${esc(S.parts.join(", ") || "nothing ticked")}</b></div>` : "");
 }
 
 async function saveDraft() {
@@ -192,6 +260,8 @@ function openJob(id, title) {
       es.close(); S.es = null;
       setRun(e.status === "ok" ? 100 : 0, e.status === "ok" ? "done" : "failed");
       if (e.error) appendLog("ERROR " + e.error, true);
+      $("#btnRunNext").hidden = false;
+      $("#btnRunNext").textContent = e.status === "ok" ? "next: test" : "next: test anyway";
       if (e.result?.checks) renderTest(e.result);
       if (e.result?.tests) renderTest(e.result.tests);
       if (e.result?.expose) $("#exposeOut").textContent = `host ${e.result.expose.id}\n${e.result.expose.url}`;
@@ -240,6 +310,65 @@ function jobRoute(path, body, title) {
 }
 
 /* ------------------------------------------------------------------ actions */
+/* ---------------------------------------------------------- update path */
+function openUpdateModal() {
+  $("#updateWho").innerHTML = `<b>${esc(S.current)}</b> — tick what this change touches. Stages you
+    leave unticked keep their current values.`;
+  $("#updateModal").hidden = false;
+}
+function chosenParts() {
+  return $$("#updateModal [data-part]").filter((c) => c.checked).map((c) => c.dataset.part);
+}
+$("#btnPartsGo").onclick = () => {
+  const parts = chosenParts();
+  S.parts = ["source", ...parts.filter((p) => p !== "source")];
+  // "stack file" is edited after details, so keep that order
+  S.parts = STAGES.map(([id]) => id).filter((id) => S.parts.includes(id));
+  $("#updateModal").hidden = true;
+  const after = stages().filter(([id]) => id !== "source");
+  go(after.length ? after[0][0] : "review");
+};
+$("#btnPartsReview").onclick = () => {
+  S.parts = ["source", ...chosenParts()];
+  $("#updateModal").hidden = true;
+  go("review");
+};
+
+$("#btnUpdate").onclick = async () => {
+  if (!S.current) return;
+  // one click: newest upstream tag -> wizard.yaml -> mirror/build -> ship -> deploy -> test
+  jobRoute("/api/update", { name: S.current, test: true }, `update ${S.current}`);
+};
+
+/* ------------------------------------------------------------ credentials */
+function makePassword(len = 90) {
+  const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@%^*-_=+";
+  const buf = new Uint32Array(len);
+  crypto.getRandomValues(buf);
+  return [...buf].map((n) => alphabet[n % alphabet.length]).join("");
+}
+$("#btnGenPass").onclick = () => {
+  $("#f_credpass").value = makePassword();
+  $("#credNote").textContent = "generated — save it somewhere before you leave this stage";
+  renderReview();
+};
+$("#btnUseCreds").onclick = () => {
+  $("#f_testuser").value = $("#f_creduser").value.trim();
+  $("#f_testpass").value = $("#f_credpass").value.trim();
+  $("#credNote").textContent = "copied to the test form";
+};
+function renderCredNote() {
+  const u = $("#f_creduser").value.trim(), p = $("#f_credpass").value.trim();
+  $("#credNote").textContent = u || p
+    ? `${$("#f_creduserkey").value || "ADMIN_USER"}=${u || "(empty)"} · ${$("#f_credpwkey").value || "ADMIN_PASSWORD"}=${p ? p.slice(0, 3) + "…" : "(empty)"}`
+    : "no credentials set on this service";
+}
+["f_creduser", "f_credpass", "f_creduserkey", "f_credpwkey"].forEach((id) => {
+  $("#" + id).oninput = () => { renderCredNote(); renderReview(); };
+});
+
+$("#btnRunNext").onclick = () => go("test");
+
 $("#btnPull").onclick = () => {
   const img = imageRef().replace(/\$\{IMAGE_TAG:-([^}]*)\}/, "$1");
   jobRoute("/api/pull", { image: img }, "docker pull " + img);
@@ -274,6 +403,10 @@ $("#btnValidate").onclick = async () => {
             : res.problems.map((p) => `<div class="note bad">${esc(p)}</div>`).join(""))
     + (res.warnings || []).map((w) => `<div class="note">${esc(w)}</div>`).join("");
 };
+
+const toggleTip = () => ($("#saveTip").hidden = !$("#saveTip").hidden);
+$("#saveHelp").onclick = toggleTip;
+$("#saveHelp").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleTip(); } };
 
 $("#btnRender").onclick = () => { renderReview(); $("#btnSaveDraft").click(); };
 
@@ -391,6 +524,8 @@ $("#btnExpose").onclick = async () => {
 
 /* ------------------------------------------------------------------ test */
 function prefillTest() {
+  if (!$("#f_testuser").value) $("#f_testuser").value = $("#f_creduser").value.trim();
+  if (!$("#f_testpass").value) $("#f_testpass").value = $("#f_credpass").value.trim();
   const e = entryFromForm();
   if (!$("#f_testurl").value) $("#f_testurl").value = e.url || "";
   if (!$("#f_testport").value) $("#f_testport").value = (e.ports[0] || {}).host || "";
@@ -465,7 +600,9 @@ $("#stepper").onclick = (e) => { const b = e.target.closest("[data-go]"); if (b)
 $("#serviceList").onclick = (e) => { const li = e.target.closest("[data-name]"); if (li) { loadService(li.dataset.name); go("source"); } };
 $("#filter").oninput = renderList;
 $("#btnNew").onclick = () => {
-  S.current = null; S.entry = {};
+  S.current = null; S.entry = {}; S.mode = "new"; S.parts = []; S.newest = null;
+  $("#f_name").readOnly = false; $("#btnUpdate").hidden = true;
+  $("#f_creduser").value = ""; $("#f_credpass").value = ""; $("#newestNote").textContent = "";
   ["f_name", "f_source", "f_version", "f_repo", "f_port", "f_container_port", "f_health", "f_subdomain", "f_compose"]
     .forEach((id) => { $("#" + id).value = ""; });
   $("#f_replicas").value = 1; $("#f_volumes").value = ""; $("#f_env").value = "";
@@ -473,7 +610,8 @@ $("#btnNew").onclick = () => {
   renderList(); go("source"); $("#f_name").focus();
 };
 ["f_port", "f_container_port", "f_subdomain", "f_version", "f_repo", "f_kind", "f_name"]
-  .forEach((id) => { $("#" + id).oninput = () => { $("#imagePreview").textContent = imageRef(); }; });
+  .forEach((id) => { $("#" + id).oninput = () => { $("#imagePreview").textContent = imageRef(); renderPath(); }; });
+$("#f_source").onchange = () => { $("#imagePreview").textContent = imageRef(); renderPath(); previewNewest(); };
 
 $("#btnTheme").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";

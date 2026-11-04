@@ -164,3 +164,82 @@ def _num(part):
     if part.isdigit():
         return (1, int(part), "")
     return (0, 0, part)
+
+
+# Tags that are channels or CI artefacts rather than versions. "update me to the
+# latest version" must never pick pr-5576-alpine or main.
+_CHANNEL = {"latest", "main", "master", "edge", "nightly", "dev", "develop",
+            "test", "unstable", "beta", "alpha", "rc", "snapshot"}
+_NOISE = re.compile(r"(^pr-|^sha256-|^ci-|^build-|^dind|test|nightly|SNAPSHOT)", re.I)
+
+
+def is_version_tag(tag):
+    t = (tag or "").strip()
+    if not t or t.lower() in _CHANNEL or _NOISE.search(t):
+        return False
+    if re.search(r"(rc|beta|alpha|pre|nightly)", t, re.I):
+        return False          # a stable service should not be offered an rc
+    return bool(re.search(r"\d", t))
+
+
+def _version_key(tag):
+    """Sort key that puts 1.10 above 1.9 instead of below it."""
+    out = []
+    for part in re.split(r"(\d+)", tag.lower()):
+        if not part:
+            continue
+        out.append((1, int(part), "") if part.isdigit() else (0, 0, part))
+    return out
+
+
+def _major(tag):
+    m = re.search(r"\d+", tag or "")
+    return m.group(0) if m else ""
+
+
+def _variant(tag):
+    """What follows the last number: 'v11.4.0-alpine' -> '-alpine'.
+
+    Prefer the packaging the service already runs: someone on '11.4.0' wants
+    '11.5.0', not '11.5.0-alpine'.
+    """
+    m = re.match(r"^(?:[^\d]*\d[\w.]*?)((?:[-_.][\w.]+)*)$", tag)
+    return (m.group(1) if m else "").lower()
+
+
+def newest_tag(image, limit=100):
+    """The version to move an existing service to.
+
+    Registries hand back tags in their own order (Docker Hub by last_updated,
+    everyone else alphabetically), so neither order answers "what is newest".
+    Channel and CI tags are dropped, then the version-shaped ones are compared
+    numerically.
+    """
+    listed = list_tags(image, limit=limit)
+    current = listed.get("current") or ""
+    tagged = [t for t in listed["tags"] if is_version_tag(t)]
+    if not tagged:
+        raise RuntimeError(f"no version-like tags for {listed['repo']} in {listed['host']} "
+                           f"({len(listed['tags'])} tags seen: {', '.join(listed['tags'][:5])})")
+
+    # Same major only: "update postgres" must not silently jump 16 -> 18.
+    major, majors = _major(current), [t for t in tagged if _major(t) == _major(current)]
+    pool = majors if (current and is_version_tag(current) and majors) else tagged
+
+    def rank(t):
+        # highest *version* wins; on a tie prefer the packaging already in use,
+        # then the plainest tag ("1.31.8" over "1.31.8-trixie-perl").
+        # Only the leading version counts: "1.31.8-alpine3.24" is 1.31.8, not
+        # 1.31.8.3.24, or alpine would always outrank the plain tag.
+        m = re.match(r"^[^\d]*(\d+(?:[._]\d+)*)", t)
+        ver = tuple(int(n) for n in re.split(r"[._]", m.group(1))) if m else ()
+        return (ver, 1 if _variant(t) == _variant(current) else 0, -len(t))
+
+    pool.sort(key=rank, reverse=True)
+    candidates = pool
+    best = candidates[0]
+    up_to_date = bool(current) and is_version_tag(current) and _version_key(current) >= _version_key(best)
+    return {"tag": current if up_to_date else best,
+            "best": best, "current": current, "up_to_date": up_to_date,
+            "host": listed["host"], "repo": listed["repo"],
+            "candidates": candidates[:10]}
