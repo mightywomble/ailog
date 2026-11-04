@@ -84,6 +84,8 @@ def _commit(message, files):
 def state():
     settings = core.load()
     try:
+        if not os.path.isdir(os.path.join(settings["repo_dir"], ".git")) and settings.get("gitea_token"):
+            core.ensure(settings)          # first call after a fresh container
         repo = {"ok": True, "branch": settings.get("work_branch"), "commit": core.head()}
     except Exception as exc:
         repo = {"ok": False, "error": str(exc)[:200]}
