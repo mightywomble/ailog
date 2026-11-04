@@ -54,7 +54,7 @@ services:
       update_config:
         delay: 30s
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 30s
 networks:
   dozzle:
