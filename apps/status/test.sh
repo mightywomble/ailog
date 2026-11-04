@@ -40,8 +40,13 @@ echo -n "history: "; HIST=$(curl -sf -m 10 "http://localhost:$PORT/api/history?h
 case "$HIST" in *'"episodes"'*) echo ok;; *) echo "FAIL: no episodes key"; exit 1;; esac
 
 echo -n "dashboard: "; HTML=$(curl -sf -m 10 "http://localhost:$PORT/") || { echo FAIL; exit 1; }
-for want in "Last 12 hours" "Virtual machines" "Swarm services" "Applications" "static/app.js" "static/style.css"; do
+# the lane labels live in the client bundle, the chrome in the template
+JS=$(curl -sf -m 10 "http://localhost:$PORT/static/app.js") || { echo FAIL: app.js; exit 1; }
+for want in "Last 12 hours" "static/app.js" "static/style.css"; do
   case "$HTML" in *"$want"*) ;; *) echo "FAIL: dashboard missing '$want'"; exit 1;; esac
+done
+for want in "Virtual machines" "Swarm services" "Applications"; do
+  case "$JS" in *"$want"*) ;; *) echo "FAIL: bundle missing '$want'"; exit 1;; esac
 done
 echo "renders OK"
 
