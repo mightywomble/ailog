@@ -50,7 +50,7 @@ services:
         constraints:
           - node.hostname == swarm-worker4
       restart_policy:
-        condition: on-failure
+        condition: any
 
   # MCP server for agents (Goose via MetaMCP): hosts, log sources, log
   # interrogation, host facts, AI reports. Same image as the app - the
@@ -91,5 +91,5 @@ services:
         constraints:
           - node.hostname == swarm-worker4
       restart_policy:
-        condition: on-failure
+        condition: any
 
