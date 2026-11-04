@@ -16,8 +16,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 
 from . import settings
+
+# When the read endpoints last fetched, so polling the UI does not spawn a git
+# fetch per request.
+_last_sync = [0.0]
 
 
 class GitError(RuntimeError):
@@ -89,6 +94,22 @@ class Repo:
     def head(self) -> str:
         ok, out = self.git('rev-parse', 'HEAD')
         return out.strip() if ok else ''
+
+    def fresh(self, max_age: int = 60) -> str:
+        """The branch tip, fetching at most once per ``max_age`` seconds.
+
+        Reads use this so the estate view cannot show a tree from before the last
+        release.  A failed fetch is not a failed read: the checkout is still a
+        true, if older, answer, and monitoring must keep working offline.
+        """
+        now = time.time()
+        if now - _last_sync[0] >= max_age:
+            try:
+                self.sync()
+            except GitError:
+                pass
+            _last_sync[0] = now
+        return self.head()
 
     # ---------------------------------------------------------------- files --
     def path(self, relpath: str) -> str:

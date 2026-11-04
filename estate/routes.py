@@ -43,7 +43,7 @@ def api_status():
     }
     if repo.exists():
         try:
-            out['head'] = repo.head()
+            out['head'] = repo.fresh()
         except GitError as exc:
             out['error'] = str(exc)
     return jsonify(out)
@@ -57,8 +57,9 @@ def api_services():
                         'error': 'no estate checkout yet (the first update clones it)',
                         'services': []}), 200
     try:
+        repo.fresh()                     # the view must not lag the last release
         text = repo.read('wizard.yaml')
-    except OSError as exc:
+    except (OSError, GitError) as exc:
         return _fail(exc)
     doc = render.load_intent(text)
     rows = []
@@ -87,6 +88,7 @@ def api_service(name):
         repo = Repo()
         if not repo.exists():
             return _fail('no estate checkout yet', 404)
+        repo.fresh()
         entry = render.find_service(render.load_intent(repo.read('wizard.yaml')), name)
         if entry is None:
             return _fail(f'{name} is not in wizard.yaml', 404)

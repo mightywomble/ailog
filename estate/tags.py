@@ -169,6 +169,10 @@ def is_version_tag(tag: str) -> bool:
         return False
     if re.search(r'(rc|beta|alpha|pre|nightly)', t, re.I):
         return False        # a stable service should not be offered an rc
+    # A version starts the tag.  Without this, wordpress' `php8.5-fpm` reads as
+    # 8.5 and outranks `7.1.4-php8.5-fpm-alpine` - a variant, not a version.
+    if not re.match(r'^v?\d', t):
+        return False
     return bool(re.search(r'\d', t))
 
 

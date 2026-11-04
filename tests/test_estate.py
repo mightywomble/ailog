@@ -550,3 +550,39 @@ def test_the_estate_job_endpoint_reports_progress(client):
     body = client.get('/api/estate/jobs/e1').get_json()['job']
     assert body['progress'] == 30.0 and body['kind'] == 'estate'
     estate_update.clear()
+
+
+def test_the_read_routes_refresh_the_checkout_before_reading_it(client, monkeypatch, tmp_path):
+    """A view that lags the last release is a lie: reads fetch first, then report."""
+    from estate import routes as estroutes
+
+    calls = []
+
+    class FakeRepo:
+        dir = str(tmp_path)
+        def exists(self):
+            return True
+        def fresh(self, max_age=60):
+            calls.append('fresh')
+            return 'a' * 40
+        def head(self):
+            return 'a' * 40
+        def read(self, relpath, default=''):
+            if relpath == 'wizard.yaml':
+                return 'services:\n- name: dozzle\n  kind: mirror\n  version: v11.4.0\n'
+            return ''
+
+    monkeypatch.setattr(estroutes, 'Repo', FakeRepo)
+    body = client.get('/api/estate/services').get_json()
+    assert body['head'] == 'a' * 40
+    assert body['services'][0]['name'] == 'dozzle'
+    assert calls == ['fresh']
+
+
+def test_a_variant_tag_is_not_mistaken_for_a_version():
+    """wordpress publishes `php8.5-fpm`; read as 8.5 it beats every real release."""
+    from estate import tags
+    assert tags.is_version_tag('php8.5-fpm') is False
+    assert tags.is_version_tag('7.1.4-php8.5-fpm-alpine') is True
+    assert tags.is_version_tag('v11.4.0') is True
+    assert tags.newest_tag.__doc__ is not None
