@@ -151,7 +151,10 @@ def _wait_run(job, gh, workflow, sha=None, after=0, timeout=180):
 
 def build(job, message=None):
     settings = core.load()
-    core.ensure(settings)
+    # only clone when there is no worktree: ensure() hard-resets, which would
+    # throw away the edit that this very call is supposed to commit
+    if not os.path.isdir(os.path.join(settings["repo_dir"], ".git")):
+        core.ensure(settings)
     gh = forge.Gitea(settings)
     job.step("commit", "running")
     res = core.commit_and_push(message or "wizard: update services")

@@ -142,6 +142,11 @@ def sync_if_stale(settings=None, min_interval=60):
     settings = settings or load()
     if time.time() - _last_sync[0] < min_interval:
         return False
+    try:
+        if changed_files():        # never reset away an unsaved edit
+            return False
+    except Exception:
+        pass
     _last_sync[0] = time.time()
     try:
         ensure(settings)
