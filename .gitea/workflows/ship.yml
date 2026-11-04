@@ -36,10 +36,10 @@ jobs:
             APPS=$(ls apps 2>/dev/null || true)
             STACKS=$(ls stacks 2>/dev/null || true)
           fi
-          {
-            echo "apps<<EOF"; echo "$APPS"; echo "EOF"
-            echo "stacks<<EOF"; echo "$STACKS"; echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          # single line, space separated: this runner does not parse the
+          # GitHub-style multi-line "name<<EOF" output syntax
+          echo "apps=$(echo $APPS | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          echo "stacks=$(echo $STACKS | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
           echo "apps: $APPS"; echo "stacks: $STACKS"
 
       - name: Tag

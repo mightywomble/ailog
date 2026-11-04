@@ -18,7 +18,7 @@ import pipeline
 import swarmio
 from jobs import hub
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))  # web/ is served from the image
 app = FastAPI(title="homelab-wizard", docs_url="/api/docs")
 
 
