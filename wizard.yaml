@@ -308,7 +308,7 @@ services:
   service: termix
   image: zot.safehomelan.com/termix:26.10.3
   repo: termix
-  version: 26.10.3
+  version: 26.11.0
   source: ghcr.io/termix-ssh/termix:26.10.3
   ports:
   - host: 8080
