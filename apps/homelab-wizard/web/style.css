@@ -200,3 +200,4 @@ select.input { appearance: none; }
   .stepper { top: 0; padding: 10px 14px; }
   .head { padding: 14px; }
 }
+.mini { margin: 18px 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
