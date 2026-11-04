@@ -47,11 +47,11 @@ jobs:
         run: echo "tag=build-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to zot
-        if: steps.changed.outputs.apps != ''
         run: echo "${{ secrets.ZOT_PASSWORD }}" | docker login "${{ secrets.ZOT_URL }}" -u "${{ secrets.ZOT_USER }}" --password-stdin
 
       - name: Build, test and push changed apps
-        if: steps.changed.outputs.apps != ''
+        # no if: guard - the runner skipped the step even with a non-empty
+        # output, and an empty APPS loop is a no-op anyway
         env:
           ZOT_URL: ${{ secrets.ZOT_URL }}
           BUILD_TAG: ${{ steps.meta.outputs.tag }}
