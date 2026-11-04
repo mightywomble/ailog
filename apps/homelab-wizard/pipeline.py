@@ -63,6 +63,57 @@ def _render_service(entry):
     return files
 
 
+def _write_wizard(wiz):
+    header = ""
+    path = os.path.join(core.repo_dir(), "wizard.yaml")
+    if os.path.exists(path):
+        header = open(path).read().split("\nversion:", 1)[0] + "\n"
+    core.write_yaml("wizard.yaml", wiz, header)
+
+
+def apply_version(name, tag):
+    """Move one service's tag in the three places it lives - surgically.
+
+    wizard.yaml, the stack's image: line and the mirror entry. No full re-render:
+    that reformats and deletes the hand-written comments in the stack file.
+    """
+    wiz = load_wizard()
+    services = wiz.get("services") or []
+    entry = next((s for s in services if s.get("name") == name), None)
+    if entry is None:
+        raise RuntimeError(f"{name} is not in wizard.yaml")
+    entry["version"] = tag
+    if entry.get("kind") == "mirror":
+        entry["source"] = core.with_tag(entry.get("source"), tag)
+    _write_wizard(wiz)
+    files = ["wizard.yaml"]
+
+    registry = (wiz.get("defaults") or {}).get("registry", "zot.safehomelan.com")
+    path = f"stacks/{name}/stack.yml"
+    full = os.path.join(core.repo_dir(), path)
+    if os.path.exists(full):
+        text = open(full).read()
+        new_text, changed = core.bump_image(text, entry.get("service") or name,
+                                            core.image_ref(entry, registry))
+        if changed:
+            core.write_text(path, new_text)
+            files.append(path)
+
+    mirror = core.mirror_entry(entry)
+    if mirror:
+        mirrors = core.read_yaml("mirror-images.json") or {"mirrors": []}
+        rows = mirrors.setdefault("mirrors", [])
+        for i, m in enumerate(rows):
+            if m.get("name") == mirror["name"]:
+                rows[i] = mirror
+                break
+        else:
+            rows.append(mirror)
+        core.write_text("mirror-images.json", json.dumps(mirrors, indent=2) + "\n")
+        files.append("mirror-images.json")
+    return entry, files
+
+
 def save_service(entry):
     problems = core.validate(entry)
     if problems:
@@ -78,11 +129,7 @@ def save_service(entry):
     else:
         services.append(entry)
 
-    header = ""
-    yaml_path = os.path.join(core.repo_dir(), "wizard.yaml")
-    if os.path.exists(yaml_path):
-        header = open(yaml_path).read().split("\nversion:", 1)[0] + "\n"
-    core.write_yaml("wizard.yaml", wiz, header)
+    _write_wizard(wiz)
     return {"ok": True, "problems": [], "files": sorted(set(["wizard.yaml"] + _render_service(entry))),
             "entry": entry}
 
@@ -168,16 +215,59 @@ def build(job, message=None):
         core.ensure(settings)
     gh = forge.Gitea(settings)
     job.step("commit", "running")
-    res = core.commit_and_push(message or "wizard: update services")
+    res = publish(job, message or "wizard: update services")
     if not res.get("committed"):
         job.log("no local changes - building the branch head")
         res["sha"] = core._git(core.repo_dir(), "rev-parse", "HEAD").strip()
-    job.step("commit", "ok", (res.get("sha") or "")[:8])
     run = _wait_run(job, gh, BUILD_WF, sha=res["sha"])
     job.step(BUILD_WF, "running")
     _tail_run(job, gh, run["id"], "build: ")
     job.step(BUILD_WF, "ok")
     return {"run": run["id"], "sha": res["sha"], "branch": res.get("branch")}
+
+
+def publish(job, message):
+    """commit -> rebase onto main -> push. The rebase is why a PR opens clean."""
+    res = core.commit_only(message)
+    job.step("commit", "ok", (res.get("sha") or "")[:8] if res.get("committed") else "no local changes")
+    if not res.get("committed"):
+        res["sha"] = core._git(core.repo_dir(), "rev-parse", "HEAD").strip()
+    job.step("rebase on main", "running")
+    rebase_onto_main(job)
+    job.step("rebase on main", "ok")
+    res.update(core.push(res.get("branch")))
+    return res
+
+
+def rebase_onto_main(job=None):
+    """Replay the work branch on top of main before opening a PR.
+
+    Dev drifts behind main (every merge adds a commit dev never sees), and the
+    files the wizard owns - stacks/*/stack.yml, wizard.yaml - are exactly the
+    ones a second change touches. Rebasing here turns a hidden merge conflict
+    into a named, immediate error.
+    """
+    path = core.repo_dir()
+    branch = core.load().get("work_branch", "dev")
+    try:
+        core._git(path, "fetch", "--quiet", "origin")
+        core._git(path, "rebase", "--quiet", "origin/main")
+    except core.GitError as exc:
+        try:
+            files = core._git(path, "diff", "--name-only", "--diff-filter=U").split()
+        except Exception:
+            files = []
+        try:
+            core._git(path, "rebase", "--abort")
+        except Exception:
+            pass
+        message = ("work branch conflicts with main"
+                   + (": " + ", ".join(files) if files else "")
+                   + " - resolve it on " + branch + " and run again")
+        if job:
+            job.log("FAILED: " + message)
+        raise RuntimeError(message) from exc
+    return {"branch": branch, "rebased": True}
 
 
 def ship(job, title=None):
@@ -226,22 +316,17 @@ def pin_versions(tags):
     if not tags:
         return []
     wiz = load_wizard()
-    bumped, files = [], set()
+    bumped = []
     for svc in wiz.get("services") or []:
         if svc.get("kind") != "build":
             continue
         tag = tags.get(svc.get("repo") or svc.get("name"))
         if tag and str(svc.get("version")) != tag:
-            svc["version"] = tag
             bumped.append({"name": svc["name"], "version": tag})
     if not bumped:
         return []
-    core.write_yaml("wizard.yaml", wiz)
-    files.add("wizard.yaml")
     for b in bumped:
-        svc = find_service(b["name"])
-        if svc:
-            files.update(_render_service(svc))
+        apply_version(b["name"], b["version"])     # image line only, comments kept
     res = core.commit_and_push(f"wizard: pin {', '.join(b['name'] + ' at ' + b['version'] for b in bumped)}")
     for b in bumped:
         b["committed"] = bool(res.get("committed"))
@@ -286,9 +371,7 @@ def update(job, name, run_tests=True):
         job.step("upstream", "ok", "built from source in apps/" + (svc.get("repo") or name))
         out = {"name": name, "kind": kind, "tag": None}
         job.step("commit", "running")
-        commit = core.commit_and_push(f"wizard: rebuild {name}")
-        sha = commit.get("sha") or core._git(core.repo_dir(), "rev-parse", "HEAD").strip()
-        job.step("commit", "ok", sha[:8])
+        sha = publish(job, f"wizard: rebuild {name}").get("sha")
         run = _wait_run(job, gh, BUILD_WF, sha=sha)
         job.step(BUILD_WF, "running")
         _tail_run(job, gh, run["id"], BUILD_WF + " ")
@@ -315,19 +398,12 @@ def update(job, name, run_tests=True):
     job.step("upstream", "ok", f"{pick['current'] or '?'} -> {tag}")
 
     job.step("wizard.yaml", "running")
-    old = svc.get("version")
-    svc["version"] = tag
-    res = save_service(svc)
-    if not res.get("ok"):
-        svc["version"] = old      # never leave a half-written entry behind
-        raise RuntimeError("wizard.yaml rejected the bump: " + ", ".join(res.get("problems") or []))
+    _entry, changed_files = apply_version(name, tag)
     job.step("wizard.yaml", "ok", f"{name} {tag}")
-    job.log("changed: " + ", ".join(res.get("files") or []))
+    job.log("changed: " + ", ".join(changed_files))
 
     job.step("commit", "running")
-    commit = core.commit_and_push(f"wizard: {name} {pick['current'] or ''} -> {tag}".replace("  ", " "))
-    sha = commit.get("sha") or core._git(core.repo_dir(), "rev-parse", "HEAD").strip()
-    job.step("commit", "ok", sha[:8])
+    sha = publish(job, f"wizard: {name} {pick['current'] or ''} -> {tag}".replace("  ", " ")).get("sha")
 
     # the image has to exist in zot before the swarm is asked to run it
     wf = MIRROR_WF if kind == "mirror" else BUILD_WF

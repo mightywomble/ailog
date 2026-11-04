@@ -187,7 +187,13 @@ def changed_files():
     return [line[3:] for line in out.splitlines() if line.strip()]
 
 
-def commit_and_push(message, files=None):
+def commit_only(message, files=None):
+    """Commit the worktree, do not push.
+
+    Committing and pushing separately is what lets the branch be rebased onto
+    main first: a rebase rewrites history, and pushing that is only fast-forward
+    if nothing else has moved the branch in between.
+    """
     path = repo_dir()
     branch = load().get("work_branch", "dev")
     files = files if files is not None else changed_files()
@@ -197,9 +203,22 @@ def commit_and_push(message, files=None):
         _git(path, "add", "-A", "--", f)
     _git(path, "-c", "user.email=wizard@safehomelan.com", "-c", "user.name=homelab wizard",
          "commit", "--quiet", "-m", message)
-    _git(path, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
     return {"committed": True, "branch": branch, "sha": _git(path, "rev-parse", "HEAD").strip(),
             "files": files, "message": message}
+
+
+def push(branch=None):
+    branch = branch or load().get("work_branch", "dev")
+    _git(repo_dir(), "push", "--quiet", "--force-with-lease", "origin",
+         f"HEAD:refs/heads/{branch}")
+    return {"branch": branch, "sha": _git(repo_dir(), "rev-parse", "HEAD").strip()}
+
+
+def commit_and_push(message, files=None):
+    res = commit_only(message, files)
+    if res.get("committed"):
+        res.update(push(res["branch"]))
+    return res
 
 
 # ------------------------------------------------------------------ render
@@ -274,6 +293,34 @@ def with_tag(source, version):
     if ":" in last:
         last = last.split(":", 1)[0]
     return f"{head}{sep}{last}:{version}"
+
+
+def bump_image(text, service, image):
+    """Rewrite one service's `image:` line and nothing else.
+
+    A full re-render goes through yaml.safe_dump, which silently deletes every
+    comment in the file - and those comments are the swarm reasoning (why guacd
+    joins the overlay, why env_file is inline) that took real work to establish.
+    A version bump only needs one line to move.
+    """
+    lines = text.splitlines(keepends=True)
+    head = None
+    indent = 0
+    for i, line in enumerate(lines):
+        m = re.match(r"^(\s*)([A-Za-z0-9._-]+):\s*(#.*)?$", line)
+        if m and m.group(2) == service and (head is None or len(m.group(1)) <= indent):
+            head, indent = i, len(m.group(1))
+            continue
+        if head is not None:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and (len(line) - len(line.lstrip())) <= indent:
+                break
+            m2 = re.match(r"^(\s*)image:\s*(.+?)\s*$", line)
+            if m2:
+                quote = '"' if m2.group(2)[:1] == '"' else ""
+                lines[i] = f"{m2.group(1)}image: {quote}{image}{quote}\n"
+                return "".join(lines), True
+    return text, False
 
 
 def mirror_entry(entry):
