@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>homelab ingest → AnythingLLM</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a; --fg:#e6e9ef;
+          --dim:#9aa4b2; --accent:#5b9dff; --ok:#3ecf8e; --warn:#f5b544; --err:#ef5b5b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,sans-serif; }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex;
+           align-items:baseline; gap:14px; flex-wrap:wrap; }
+  h1 { font-size:17px; margin:0; font-weight:600; }
+  .sub { color:var(--dim); font-size:12.5px; }
+  main { padding:20px 24px 60px; max-width:1400px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:22px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card .k { color:var(--dim); font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; }
+  .card .v { font-size:22px; font-weight:600; margin-top:6px; }
+  .card .s { color:var(--dim); font-size:12px; margin-top:4px; }
+  h2 { font-size:14px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim);
+       margin:26px 0 10px; font-weight:600; }
+  table { width:100%; border-collapse:collapse; background:var(--panel);
+          border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:var(--panel2); font-size:11.5px; text-transform:uppercase; letter-spacing:.05em;
+       color:var(--dim); font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .tag { display:inline-block; padding:1px 7px; border-radius:99px; font-size:11.5px;
+         border:1px solid var(--line); background:var(--panel2); color:var(--fg); }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .err { color:var(--err); }
+  .dim { color:var(--dim); }
+  button { background:var(--panel2); color:var(--fg); border:1px solid var(--line);
+           border-radius:7px; padding:5px 10px; font-size:12.5px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  pre#log { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+            padding:12px; max-height:240px; overflow:auto; font-size:12px; color:var(--dim);
+            white-space:pre-wrap; margin:0; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; }
+  a { color:var(--accent); text-decoration:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>homelab ingest <span class="dim">→</span> AnythingLLM</h1>
+  <span class="sub">workspace <b>{{ status.anythingllm.workspace }}</b> · {{ status.anythingllm.url }}</span>
+  <span class="sub">last render {{ status.ts }}</span>
+</header>
+<main>
+
+  <div class="cards">
+    <div class="card">
+      <div class="k">Documents in manifest</div>
+      <div class="v">{{ status.totals.docs or 0 }}</div>
+      <div class="s">{{ status.totals.words or 0 }} words tracked</div>
+    </div>
+    <div class="card">
+      <div class="k">Vectors in AnythingLLM</div>
+      <div class="v">{{ status.anythingllm.vectors if status.anythingllm.vectors is not none else '—' }}</div>
+      <div class="s">{{ status.anythingllm.workspace_docs }} docs in workspace</div>
+    </div>
+    <div class="card">
+      <div class="k">AnythingLLM API</div>
+      <div class="v {{ 'ok' if status.anythingllm.health.ok else 'err' }}">{{ 'reachable' if status.anythingllm.health.ok else 'error' }}</div>
+      <div class="s">chat mode: {{ status.anythingllm.chat_mode or 'n/a' }}</div>
+    </div>
+    <div class="card">
+      <div class="k">Sources configured</div>
+      <div class="v">{{ status.per_source|length }}</div>
+      <div class="s">WordPress auth: {{ 'yes' if status.config.wordpress_auth else 'public only' }} · MetaMCP: {{ 'yes' if status.config.metamcp else 'no' }}</div>
+    </div>
+  </div>
+
+  <h2>Sources</h2>
+  <table>
+    <thead><tr>
+      <th>Source</th><th>What</th><th class="num">Docs</th><th class="num">Words</th>
+      <th>Last synced</th><th class="num">Errors</th><th>Actions</th>
+    </tr></thead>
+    <tbody>
+    {% for key, label in labels.items() %}
+      {% set row = (status.per_source | selectattr('source','equalto',key) | list | first) or {} %}
+      <tr>
+        <td><span class="tag">{{ key }}</span></td>
+        <td>{{ label }}<div class="dim mono">{{ folders[key] }}/</div></td>
+        <td class="num">{{ row.docs or 0 }}</td>
+        <td class="num">{{ row.words or 0 }}</td>
+        <td class="dim">{{ row.last_synced or 'never' }}</td>
+        <td class="num {{ 'err' if row.errors else 'dim' }}">{{ row.errors or 0 }}</td>
+        <td>
+          <div class="row">
+            <button onclick="run('{{ key }}', 1, this)">Dry run</button>
+            <button class="primary" onclick="run('{{ key }}', 0, this)">Sync now</button>
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Activity</h2>
+  <pre id="log">idle — press “Dry run” to preview or “Sync now” to write into AnythingLLM.</pre>
+
+  <h2>Documents ({{ docs|length }} shown)</h2>
+  <table>
+    <thead><tr>
+      <th>Title</th><th>Source</th><th>Folder</th><th class="num">Words</th>
+      <th>Source updated</th><th>Synced</th><th>Status</th>
+    </tr></thead>
+    <tbody>
+    {% for d in docs %}
+      <tr>
+        <td class="mono">{{ d.title }}</td>
+        <td><span class="tag">{{ d.source }}</span></td>
+        <td class="dim mono">{{ d.folder }}/</td>
+        <td class="num">{{ d.words or 0 }}</td>
+        <td class="dim">{{ d.source_updated or '' }}</td>
+        <td class="dim">{{ d.synced_at or '' }}</td>
+        <td class="{{ 'ok' if d.status=='synced' else ('err' if d.status=='error' else 'warn') }}">
+          {{ d.status }}{% if d.last_error %}<div class="dim mono">{{ d.last_error[:120] }}</div>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Recent runs</h2>
+  <table>
+    <thead><tr>
+      <th class="num">#</th><th>Source</th><th>Mode</th><th>Started</th><th>Finished</th>
+      <th class="num">Added</th><th class="num">Updated</th><th class="num">Skipped</th><th class="num">Errors</th>
+    </tr></thead>
+    <tbody>
+    {% for r in status.recent_runs %}
+      <tr>
+        <td class="num">{{ r.id }}</td>
+        <td><span class="tag">{{ r.source }}</span></td>
+        <td class="{{ 'warn' if r.dry_run else 'ok' }}">{{ 'dry run' if r.dry_run else 'write' }}</td>
+        <td class="dim">{{ r.started_at }}</td>
+        <td class="dim">{{ r.finished_at or 'running' }}</td>
+        <td class="num">{{ r.added }}</td>
+        <td class="num">{{ r.updated }}</td>
+        <td class="num">{{ r.skipped }}</td>
+        <td class="num {{ 'err' if r.errors else 'dim' }}">{{ r.errors }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</main>
+
+<script>
+async function run(source, dryRun, btn) {
+  const log = document.getElementById('log');
+  const buttons = [...document.querySelectorAll('button')];
+  buttons.forEach(b => b.disabled = true);
+  const label = btn.textContent;
+  btn.textContent = 'working…';
+  log.textContent = `[${new Date().toISOString()}] ${dryRun ? 'dry run' : 'sync'} ${source} …\n`;
+  try {
+    const body = new URLSearchParams({ dry_run: dryRun ? '1' : '0' });
+    const res = await fetch(`/run/${source}`, { method: 'POST', body });
+    const data = await res.json();
+    log.textContent += JSON.stringify(data, null, 2) + '\n';
+    if (!dryRun) setTimeout(() => location.reload(), 1200);
+  } catch (e) {
+    log.textContent += 'error: ' + e + '\n';
+  } finally {
+    buttons.forEach(b => b.disabled = false);
+    btn.textContent = label;
+  }
+}
+</script>
+</body>
+</html>

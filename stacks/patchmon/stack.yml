@@ -1,0 +1,88 @@
+# PatchMon (patch-management server) on the swarm, all images mirrored into
+# zot by repo1's "Mirror upstream images to zot" workflow.
+# Upstream guide: https://patchmon.net/docs/patchmon-operator-guide/installing-patchmon-server-on-docker
+# Swarm adaptations (docker stack deploy vs docker compose):
+#  - env_file is ignored by stack deploy, so all env vars are inline below
+#  - depends_on conditions are ignored; healthchecks + on-failure restarts
+#    cover the startup ordering instead
+#  - guacd's `network_mode: service:server` (shared netns) is not supported
+#    by swarm, so guacd joins the overlay network and the server points at
+#    it via GUACD_ADDRESS. Caveat: in-browser RDP may not work, because the
+#    server opens per-session RDP listeners on 127.0.0.1 which guacd cannot
+#    reach from its own netns. Everything else (agents, patching, UI) works.
+# Data: postgres + redis live on the shared NFS (/opt/docker/data/patchmon/)
+# so the services can reschedule to any node.
+# Access: http://<any swarm node LAN IP>:3000 or http://<any node Tailscale
+# IP>:3000 (routing mesh). CORS origins are the NPM-fronted domains:
+#   https://patchmon.safehomelan.com (tailscale) / https://patchlan.safehomelan.com (lan)
+services:
+  server:
+    image: zot.safehomelan.com/patchmon-server:2.1.6
+    environment:
+      CORS_ORIGIN: "https://patchmon.safehomelan.com,https://patchlan.safehomelan.com"
+      JWT_SECRET: "fd7b358b022b7431167a1b514227cc439ca842d1a0a8923c6cf56664714240173d16413936a30cd20d179a4a78f3c9566a92b6bf2af0801b6f2d8d21bc0b43c1"
+      SESSION_SECRET: "964e1204cd6fd35ee59852f34a9777ac81c285790867763dedaefcb523b51b85b415317f1000d0b7fdc49573c42b00e1cd3636809719b5f2bd3858a7c576c28a"
+      AI_ENCRYPTION_KEY: "073645c47fd25a4758dcf8f665e15c5d43b3bed7a8964b9e45a9ac3bcbdf37b2e94346bcc165ad9eb81a4b8c1647620f2de5a082aba062720f1f4710d7beae36"
+      POSTGRES_HOST: "database"
+      POSTGRES_USER: "patchmon_user"
+      POSTGRES_PASSWORD: "<redacted>"
+      POSTGRES_DB: "patchmon_db"
+      DATABASE_URL: "postgresql://patchmon_user:<redacted>@database:5432/patchmon_db"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: "<redacted>"
+      REDIS_DB: "0"
+      GUACD_ADDRESS: "guacd:4822"
+      TRUST_PROXY: "true"
+      TZ: "Europe/London"
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  database:
+    image: zot.safehomelan.com/postgres:17-alpine
+    environment:
+      POSTGRES_USER: "patchmon_user"
+      POSTGRES_PASSWORD: "<redacted>"
+      POSTGRES_DB: "patchmon_db"
+    volumes:
+      - type: bind
+        source: /opt/docker/data/patchmon/postgres
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patchmon_user -d patchmon_db"]
+      interval: 3s
+      timeout: 5s
+      retries: 7
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  redis:
+    image: zot.safehomelan.com/redis:7-alpine
+    command: ["redis-server", "--requirepass", "<redacted>"]
+    volumes:
+      - type: bind
+        source: /opt/docker/data/patchmon/redis
+        target: /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "<redacted>", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 7
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  guacd:
+    image: zot.safehomelan.com/guacd:1.6.0
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure

@@ -1,0 +1,124 @@
+name: Release and deploy
+# One repo, one chain. A PR merge into main lands as a push to main; this
+# workflow builds every changed app, pushes it to zot, then deploys every
+# changed stack - with the tag that was just built, in the same run.
+#
+# Why the "bump the tag in the other repo" step is gone: stack files carry
+#   image: zot.safehomelan.com/<app>:${IMAGE_TAG:-<pinned tag>}
+# and the deploy job exports IMAGE_TAG, so `docker stack deploy` interpolates
+# the tag from this run. Mirrored/upstream images keep literal tags and ignore
+# the variable.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      apps: ${{ steps.changed.outputs.apps }}
+      stacks: ${{ steps.changed.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: What changed
+        id: changed
+        run: |
+          set -e
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            APPS=$(git diff --name-only HEAD~1 HEAD | grep '^apps/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
+            STACKS=$(git diff --name-only HEAD~1 HEAD | grep '^stacks/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
+          else
+            APPS=$(ls apps 2>/dev/null || true)
+            STACKS=$(ls stacks 2>/dev/null || true)
+          fi
+          {
+            echo "apps<<EOF"; echo "$APPS"; echo "EOF"
+            echo "stacks<<EOF"; echo "$STACKS"; echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "apps: $APPS"; echo "stacks: $STACKS"
+
+      - name: Tag
+        id: meta
+        run: echo "tag=build-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to zot
+        if: steps.changed.outputs.apps != ''
+        run: echo "${{ secrets.ZOT_PASSWORD }}" | docker login "${{ secrets.ZOT_URL }}" -u "${{ secrets.ZOT_USER }}" --password-stdin
+
+      - name: Build, test and push changed apps
+        if: steps.changed.outputs.apps != ''
+        env:
+          ZOT_URL: ${{ secrets.ZOT_URL }}
+          BUILD_TAG: ${{ steps.meta.outputs.tag }}
+          APPS: ${{ steps.changed.outputs.apps }}
+        run: |
+          set -e
+          REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
+          cfg() { python3 -c "import json;print(json.load(open('apps/$1/build.json')).get('$2',''))"; }
+
+          for APP in $APPS; do
+            if [ -f "apps/$APP/build.json" ]; then
+              SRC=$(cfg "$APP" source); REF=$(cfg "$APP" ref)
+              DF=$(cfg "$APP" dockerfile); CTX=$(cfg "$APP" context); CTX=${CTX:-.}
+              WORK="/tmp/homelab-build/$APP"
+              rm -rf "$WORK"
+              echo "=== cloning $SRC ($REF) for $APP ==="
+              git clone --depth 1 --branch "$REF" "$SRC" "$WORK"
+              [ -f "apps/$APP/patch.sh" ] && bash "apps/$APP/patch.sh" "$WORK"
+              echo "=== building $APP as $REGISTRY/$APP:$BUILD_TAG ==="
+              docker build -f "$WORK/$DF" -t "$REGISTRY/$APP:$BUILD_TAG" -t "$REGISTRY/$APP:latest" "$WORK/$CTX"
+              rm -rf "$WORK"
+            elif [ -f "apps/$APP/Dockerfile" ]; then
+              echo "=== building apps/$APP as $REGISTRY/$APP:$BUILD_TAG ==="
+              docker build -t "$REGISTRY/$APP:$BUILD_TAG" -t "$REGISTRY/$APP:latest" "apps/$APP"
+            else
+              echo "apps/$APP has no Dockerfile or build.json - skipping"
+              continue
+            fi
+            if [ -f "apps/$APP/test.sh" ]; then
+              echo "=== smoke testing $APP ==="
+              bash "apps/$APP/test.sh" "$REGISTRY/$APP:$BUILD_TAG"
+            fi
+            docker push "$REGISTRY/$APP:$BUILD_TAG"
+            docker push "$REGISTRY/$APP:latest"
+            docker rmi "$REGISTRY/$APP:$BUILD_TAG" "$REGISTRY/$APP:latest" >/dev/null 2>&1 || true
+            echo "released $REGISTRY/$APP:$BUILD_TAG"
+          done
+          docker image prune -f >/dev/null 2>&1 || true
+
+  deploy:
+    needs: release
+    runs-on: deploy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to zot
+        run: echo "${{ secrets.ZOT_PASSWORD }}" | docker login "${{ secrets.ZOT_URL }}" -u "${{ secrets.ZOT_USER }}" --password-stdin
+
+      - name: Deploy changed stacks
+        env:
+          ZOT_URL: ${{ secrets.ZOT_URL }}
+          IMAGE_TAG: ${{ needs.release.outputs.tag }}
+          STACKS: ${{ needs.release.outputs.stacks }}
+        run: |
+          set -e
+          if [ -z "$STACKS" ]; then
+            # apps changed but no stack file touched: redeploy every stack that
+            # consumes IMAGE_TAG so a rebuild actually reaches the swarm
+            STACKS=$(grep -l 'IMAGE_TAG' stacks/*/stack.yml | cut -d/ -f2 | sort -u || true)
+          fi
+          echo "deploying with IMAGE_TAG=$IMAGE_TAG: $STACKS"
+          for APP in $STACKS; do
+            [ -f "stacks/$APP/stack.yml" ] || continue
+            echo "=== deploying $APP ==="
+            docker stack deploy -c "stacks/$APP/stack.yml" "$APP" --with-registry-auth
+          done
+          for APP in $STACKS; do
+            [ -f "stacks/$APP/stack.yml" ] || continue
+            echo "--- $APP"; docker stack ps "$APP" --no-trunc | head -8
+          done

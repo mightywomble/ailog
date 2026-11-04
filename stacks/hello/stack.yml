@@ -1,0 +1,12 @@
+# Example stack: two replicas of the hello app from the homelab_docker_build
+# pipeline, published on port 8080 via the swarm routing mesh (reachable
+# through ANY swarm node's Tailscale IP).
+services:
+  hello:
+    image: zot.safehomelan.com/hello:${IMAGE_TAG:-build-7}
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+    ports:
+      - "8080:8080"
