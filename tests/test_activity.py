@@ -60,14 +60,22 @@ def test_the_collection_round_wraps_every_host():
     assert '_progress_end()' in round_block
 
 
-def test_the_docker_scan_reports_progress_and_bounds_itself():
-    from dockermon import updates as dupdates
+def test_the_docker_scan_reports_progress_and_bounds_itself(monkeypatch):
+    import types
+    import dockermon.updates as dupdates
 
+    # The coordinator must not actually run: this asserts the state it reports
+    # while the round is in flight, and a real thread would finish first.
+    monkeypatch.setattr(dupdates, 'stale', lambda key, max_age=0: True)
+    monkeypatch.setattr(dupdates.threading, 'Thread',
+                        lambda *a, **k: types.SimpleNamespace(start=lambda: None))
     dupdates.clear()
-    single = dupdates.scan_async(None, ['db-1'])          # no thread: fakes below
-    assert single == ['db-1']
+    queued = dupdates.scan_async(None, ['db-1', 'db-2', 'db-3', 'db-4'])
+    assert queued == ['db-1', 'db-2', 'db-3', 'db-4']
+    assert dupdates.SCAN_THREADS == 3          # three at a time, not one per host
     row = dupdates.activity()
-    assert row['active'] is True and row['total'] == 1
+    assert row['active'] is True
+    assert row['total'] == 4
     assert row['host'] == 'db-1'
     dupdates.clear()
     assert dupdates.activity() is None
