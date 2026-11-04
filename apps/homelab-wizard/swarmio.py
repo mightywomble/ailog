@@ -23,6 +23,8 @@ def _ssh(host):
 
 
 def run(host, command, timeout=120):
+    if not os.path.exists(KEY):
+        raise SwarmError(f"no ssh key at {KEY} - mount it under /data/ssh")
     proc = subprocess.run(_ssh(host) + [command], capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
         raise SwarmError(f"{host}: {(proc.stderr or proc.stdout).strip()[:300]}")
