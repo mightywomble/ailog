@@ -185,6 +185,7 @@ export function init() {
         const mhSheetFacts = document.getElementById('mh-sheet-facts');
         const mhSheetSsh = document.getElementById('mh-sheet-ssh');
         const mhSheetLogs = document.getElementById('mh-sheet-logs');
+        const mhSheetDocker = document.getElementById('mh-sheet-docker');
         const mhSheetClose = document.getElementById('mh-sheet-close');
         // Phone log screen: sources as cards, one log in a full-screen dialog.
         const mobileLogsView = document.getElementById('mobile-logs-view');
@@ -445,7 +446,7 @@ export function init() {
         let currentHostId = null;
 
         // Main-panel mode guard: prevents async Host Info loads from overwriting Pull Logs / SSH views.
-        let logsMainMode = 'info'; // 'info' | 'pull' | 'ssh'
+        let logsMainMode = 'info'; // 'info' | 'pull' | 'ssh' | 'docker'
         let logsMainViewToken = 0;
 
         // Search elements
@@ -725,16 +726,19 @@ export function init() {
 
         if (logsActionDocker) logsActionDocker.addEventListener('click', () => {
             if (!selectedHostId) return;
-            // A modal, not a navigation: the Docker page is chart-heavy and
-            // users flip back and forth between it and the logs. The label
-            // comes from the endpoint scan so the title reads "Docker — swarm1".
+            // Same view the Docker square on the host card opens: updates, the
+            // fleet's share of the host, and a live container log. The chart-
+            // heavy monitoring page (/docker/<host>) is still one link away.
+            if (typeof window.showDockerInfoMain === 'function') {
+                window.showDockerInfoMain();
+                return;
+            }
             const label = dockerHostLabels[String(selectedHostId)]
                 || document.getElementById('logs-selected-host-title')?.textContent?.trim()
                 || '';
             if (typeof window.openDockerModal === 'function') {
                 window.openDockerModal(selectedHostId, label);
             } else {
-                // Fallback if the module failed to load: keep the old behaviour.
                 window.location.href = '/docker/' + encodeURIComponent(selectedHostId);
             }
         });
@@ -2055,6 +2059,8 @@ export function init() {
 
         // Expose a refresh hook for the Add Devices wizard to update the sidebar without a full page reload
         window.refreshHostsSidebar = populateHostCards;
+        // (the Docker badge is painted by refreshDockerBadges from
+        // syncHostStatuses, which runs right after the cards are rebuilt)
 
         // --- host card status: reachability, OS, Docker -------------------
         // The sidebar used to paint every host with a hard-coded green dot.
@@ -2213,6 +2219,12 @@ export function init() {
 
             // There is no SSH session to open on the app's own machine.
             if (mhSheetSsh) mhSheetSsh.classList.toggle('hidden', hostId === 'local');
+            // Docker information only exists where Docker does. Unknown stays
+            // hidden rather than opening a panel that cannot load.
+            if (mhSheetDocker) {
+                const row = dockerOverview.get(hostId);
+                mhSheetDocker.classList.toggle('hidden', !(row && row.docker));
+            }
 
             mobileHostSheet.classList.remove('hidden');
             document.body.classList.add('mh-sheet-open');
@@ -2430,6 +2442,97 @@ export function init() {
             closeMobileHostSheet();
             if (hostId) selectHost(hostId);
         });
+        mhSheetDocker?.addEventListener('click', () => {
+            const hostId = sheetHostId;
+            closeMobileHostSheet();
+            if (!hostId) return;
+            selectHost(hostId);
+            if (typeof window.showDockerInfoMain === 'function') window.showDockerInfoMain();
+        });
+
+        // ------------------------------------------------------ docker badge --
+        // The Docker square answers one question: does anything on this host
+        // need doing? Green = nothing, red = an image the registry has moved on
+        // from or a container that is not healthy, grey = not checked yet.
+        // The answer comes from a background scan (/api/docker/overview) and is
+        // cached for a minute: a live SSH snapshot per card per poll would put
+        // `docker stats` on every host every 20 seconds.
+        const DOCKER_BADGE_POLL_MS = 60000;
+        let dockerOverview = new Map();
+        let dockerOverviewAt = 0;
+        let dockerOverviewInFlight = null;
+        let dockerOverviewRetry = null;
+
+        const applyDockerBadge = (card) => {
+            const button = card.querySelector('[data-hc-docker]');
+            if (!button) return;
+            const row = dockerOverview.get(card.dataset.hostId);
+            if (!row) return;              // never scanned: leave the metrics answer alone
+            if (!row.docker) {
+                button.hidden = true;
+                return;
+            }
+            button.hidden = false;
+            button.dataset.state = row.status || 'unknown';
+            const label = row.friendly_name || card.dataset.hostId;
+            const bits = [];
+            if (row.updates) bits.push(`${row.updates} image update${row.updates === 1 ? '' : 's'}`);
+            if (row.attention) bits.push(`${row.attention} needing attention`);
+            if (!bits.length) {
+                bits.push(row.containers
+                    ? `${row.containers} containers, all current`
+                    : 'nothing needs doing');
+            }
+            if (row.error) bits.push(`check failed: ${row.error}`);
+            button.title = `Docker on ${label}: ${bits.join(' · ')} — open Docker information`;
+            button.setAttribute('aria-label', button.title);
+        };
+
+        const applyDockerBadges = () => {
+            [hostListContainer, mobileHostCards].forEach((container) => {
+                container?.querySelectorAll('.host-card').forEach((card) => applyDockerBadge(card));
+            });
+        };
+
+        const refreshDockerBadges = (force = false) => {
+            if (dockerOverviewInFlight) return dockerOverviewInFlight;
+            const fresh = (Date.now() - dockerOverviewAt) < DOCKER_BADGE_POLL_MS;
+            if (fresh && !force) {
+                applyDockerBadges();
+                return Promise.resolve();
+            }
+            dockerOverviewInFlight = (async () => {
+                try {
+                    const res = await fetch('/api/docker/overview', { headers: { Accept: 'application/json' } });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    const next = new Map();
+                    Object.entries(data.hosts || {}).forEach(([key, row]) => next.set(key, row));
+                    dockerOverview = next;
+                    dockerOverviewAt = Date.now();
+                    applyDockerBadges();
+                    // A first scan is queued server-side; look again once it has
+                    // had time to finish rather than waiting a whole minute.
+                    if (dockerOverviewRetry) { clearTimeout(dockerOverviewRetry); dockerOverviewRetry = null; }
+                    if ((data.pending || []).length) {
+                        dockerOverviewRetry = setTimeout(() => {
+                            dockerOverviewRetry = null;
+                            refreshDockerBadges(true);
+                        }, 12000);
+                    }
+                } catch (_) {
+                    // offline: keep the last answer rather than flashing grey
+                } finally {
+                    dockerOverviewInFlight = null;
+                }
+            })();
+            return dockerOverviewInFlight;
+        };
+
+        setInterval(() => refreshDockerBadges(), DOCKER_BADGE_POLL_MS);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) refreshDockerBadges();
+        });
 
         const applyHostStatus = (card, snapshot) => {
             const dot = card.querySelector('.hc-dot');
@@ -2486,6 +2589,8 @@ export function init() {
                     applyHostStatus(card, byKey.get(card.dataset.hostId));
                 });
             });
+
+            refreshDockerBadges();
 
             const all = payload?.servers || [];
             const up = all.filter((s) => s.online !== false).length;
@@ -2545,12 +2650,16 @@ export function init() {
                 <div class="hc-foot">
                     <span class="hc-dot" data-state="unknown" title="Checking reachability…" aria-hidden="true"></span>
                     <span class="hc-os" data-host-os="unknown" title="Operating system unknown" aria-hidden="true">${squareGlyph('unknown')}</span>
-                    <span class="hc-docker" title="Docker host" aria-hidden="true" hidden>${DOCKER_GLYPH}</span>
-                    ${hostId === 'local' ? '' : `
-                        <button type="button" class="hc-ssh" data-hc-ssh
-                                title="Open an SSH terminal on ${escapeHtml(hostName)}"
-                                aria-label="Open an SSH terminal on ${escapeHtml(hostName)}">&gt;_</button>
-                    `}
+                    <div class="hc-actions">
+                        <button type="button" class="hc-docker" data-hc-docker data-state="unknown" hidden
+                                title="Docker on ${escapeHtml(hostName)}"
+                                aria-label="Docker information for ${escapeHtml(hostName)}">${DOCKER_GLYPH}</button>
+                        ${hostId === 'local' ? '' : `
+                            <button type="button" class="hc-ssh" data-hc-ssh
+                                    title="Open an SSH terminal on ${escapeHtml(hostName)}"
+                                    aria-label="Open an SSH terminal on ${escapeHtml(hostName)}">&gt;_</button>
+                        `}
+                    </div>
                 </div>
             `;
 
@@ -2561,6 +2670,16 @@ export function init() {
                 if (card.dataset.dragging === '1') return;
                 if (isMobileCard) openMobileHostSheet(hostId);
                 else selectHost(hostId);
+            });
+
+            // The Docker square opens "Docker Information: <host>" instead of
+            // the host information pane. Same host selection, different view.
+            card.querySelector('[data-hc-docker]')?.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (card.dataset.dragging === '1') return;
+                if (isMobileCard) closeMobileHostSheet();
+                selectHost(hostId);
+                if (typeof window.showDockerInfoMain === 'function') window.showDockerInfoMain();
             });
 
             // ">_" opens the SSH window that already exists, for this host.
@@ -2859,6 +2978,7 @@ const showHostInfoMain = async () => {
 
             const viewToken = ++logsMainViewToken;
             logsMainMode = 'info';
+            stopDockerView();
             const topPane = document.getElementById('logs-top-pane');
             const bottomPane = document.getElementById('logs-bottom-pane');
             const logsContentPanel = document.getElementById('logs-content-panel');
@@ -3061,11 +3181,501 @@ const showHostInfoMain = async () => {
             }
         };
 
+
+        // --------------------------------------------------------- Docker view
+        // Clicking the Docker square on a host card shows "Docker Information:
+        // <host>" instead of the host information pane. Everything on it is
+        // scoped to that one host: what the docker fleet is using as a share of
+        // the host itself, which containers have a newer image upstream, and a
+        // live log tail per container. Anything that *changes* the estate --
+        // updating an image, adding a container -- is handed off to the homelab
+        // wizard, which owns wizard.yaml, the build pipeline and the deploy.
+        const WIZARD_URL = window.AILOG_WIZARD_URL || 'https://wizard.safehomelan.com/';
+
+        let dockerFleetTimer = null;
+        let dockerLogTimer = null;
+        let dockerViewHostId = null;
+        let dockerLogSource = null;
+        let dockerLogText = '';
+
+        const stopDockerView = () => {
+            if (dockerFleetTimer) { clearInterval(dockerFleetTimer); dockerFleetTimer = null; }
+            if (dockerLogTimer) { clearInterval(dockerLogTimer); dockerLogTimer = null; }
+            dockerViewHostId = null;
+            dockerLogSource = null;
+        };
+
+        const fmtBytes = (value) => {
+            const n = Number(value);
+            if (!Number.isFinite(n) || n < 0) return '—';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let v = n;
+            let i = 0;
+            while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+            return `${(v >= 100 || i === 0) ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+        };
+        const fmtRate = (value) => `${fmtBytes(value)}/s`;
+
+        // Anything that changes the estate is the wizard's job. Deep links carry
+        // the service and image so its Source stage opens on the right row.
+        const wizardLink = (mode, params) => {
+            const url = new URL(WIZARD_URL);
+            url.searchParams.set('mode', mode);
+            url.searchParams.set('from', 'ailog');
+            Object.entries(params || {}).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== '') {
+                    url.searchParams.set(key, value);
+                }
+            });
+            return url.toString();
+        };
+
+        const pctColour = (pct) => {
+            if (pct === null || pct === undefined) return 'bg-slate-600';
+            if (pct >= 85) return 'bg-red-500';
+            if (pct >= 60) return 'bg-amber-400';
+            return 'bg-emerald-500';
+        };
+
+        const fleetCard = (label, pct, detail, title) => {
+            const shown = (pct === null || pct === undefined) ? '—' : `${pct}%`;
+            const width = (pct === null || pct === undefined) ? 0 : Math.max(0, Math.min(100, pct));
+            return `
+                <div class="p-3 rounded-lg bg-white/5 border border-white/10" title="${escapeHtml(title || '')}">
+                    <div class="flex items-center justify-between">
+                        <div class="text-xs font-semibold termix-muted">${escapeHtml(label)}</div>
+                        <div class="text-sm font-semibold termix-text tabular-nums">${shown}</div>
+                    </div>
+                    <div class="w-full bg-white/10 rounded-full h-2 mt-2">
+                        <div class="${pctColour(pct)} h-2 rounded-full" style="width: ${width}%"></div>
+                    </div>
+                    <div class="text-xs termix-muted mt-2 truncate" title="${escapeHtml(detail || '')}">${escapeHtml(detail || '')}</div>
+                </div>
+            `;
+        };
+
+        const renderFleet = (data) => {
+            const box = document.getElementById('docker-fleet');
+            if (!box || !data || !data.success) return;
+            const host = data.host || {};
+            const docker = data.docker || {};
+            const pct = data.pct || {};
+            const hostNet = (Number(host.net_rx_bps) || 0) + (Number(host.net_tx_bps) || 0);
+            box.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <div class="text-xs font-semibold termix-muted">Docker fleet vs host</div>
+                    <div class="text-xs termix-muted">${docker.running || 0}/${docker.containers || 0} running</div>
+                </div>
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    ${fleetCard('CPU', pct.cpu,
+                        `${docker.cpu_percent ?? 0}% of ${host.cpu_cores || '?'} cores`,
+                        'Sum of container CPU as a share of every core on the host')}
+                    ${fleetCard('RAM', pct.ram,
+                        `${fmtBytes(docker.mem_used)} of ${fmtBytes(host.mem_total)}`,
+                        'Container memory as a share of host RAM')}
+                    ${fleetCard('NET', pct.net,
+                        `↓${fmtRate(docker.net_rx_bps)} ↑${fmtRate(docker.net_tx_bps)} of ${fmtRate(hostNet)}`,
+                        'Container traffic as a share of what the host NIC is carrying')}
+                    ${fleetCard('STORAGE', pct.storage,
+                        `${fmtBytes(docker.disk_used)} of ${fmtBytes(host.disk_total)}`,
+                        'docker system df (images + containers + volumes + build cache) as a share of the host disk')}
+                </div>
+            `;
+        };
+
+        const renderDockerUpdates = (data) => {
+            const list = document.getElementById('docker-updates-list');
+            const count = document.getElementById('docker-updates-count');
+            if (!list) return;
+            if (!data || !data.success) {
+                list.innerHTML = '<div class="text-xs text-red-400">Could not check upstream images.</div>';
+                return;
+            }
+            const rows = data.containers || [];
+            const updates = data.updates || [];
+            if (count) {
+                count.textContent = updates.length
+                    ? `${updates.length} update${updates.length === 1 ? '' : 's'} available`
+                    : `${rows.length} container${rows.length === 1 ? '' : 's'}, all images current`;
+            }
+            if (!rows.length) {
+                list.innerHTML = '<div class="text-xs termix-muted">No containers on this host.</div>';
+                return;
+            }
+            // wizard.yaml is keyed on the stack name, so pass that first: a
+            // stack with several services (ailog + ailog-mcp) is one wizard row.
+            const linkFor = (row) => wizardLink('update', {
+                service: row.stack || row.service || row.name,
+                image: row.image,
+            });
+            list.innerHTML = rows.map((row) => {
+                const badge = row.update_available
+                    ? '<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-400/20 text-amber-200 border border-amber-400/30">update</span>'
+                    : (row.reasons && row.reasons.length
+                        ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-500/20 text-red-200 border border-red-500/30" title="${escapeHtml(row.reasons.join(', '))}">attention</span>`
+                        : '<span class="px-2 py-0.5 rounded-full text-[11px] termix-muted border border-white/10">current</span>');
+                const digest = (row.update_available && row.local_digest && row.remote_digest)
+                    ? `<span class="font-mono text-[11px] termix-muted">${escapeHtml(row.local_digest)} → ${escapeHtml(row.remote_digest)}</span>`
+                    : (row.error
+                        ? `<span class="text-[11px] text-amber-300" title="${escapeHtml(row.error)}">registry: ${escapeHtml(String(row.error).slice(0, 60))}</span>`
+                        : '');
+                const action = row.update_available
+                    ? `<a class="text-xs px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium" href="${escapeHtml(linkFor(row))}" target="_blank" rel="noopener" title="Open the homelab wizard on this service">update</a>`
+                    : '';
+                return `
+                    <div class="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm termix-text truncate">${escapeHtml(row.name || '(unnamed)')}${row.containers > 1 ? ` <span class="termix-muted">×${row.containers}</span>` : ''}</div>
+                            <div class="text-[11px] termix-muted font-mono truncate" title="${escapeHtml(row.image || '')}">${escapeHtml(row.image || '')}</div>
+                        </div>
+                        <div class="hidden md:block text-right">${digest}</div>
+                        ${badge}
+                        ${action}
+                    </div>
+                `;
+            }).join('');
+        };
+
+        const renderDockerLog = () => {
+            const out = document.getElementById('docker-log-output');
+            if (!out) return;
+            const filter = (document.getElementById('docker-log-filter')?.value || '').trim().toLowerCase();
+            const text = filter
+                ? dockerLogText.split('\n').filter((line) => line.toLowerCase().includes(filter)).join('\n')
+                : dockerLogText;
+            out.textContent = text || '(no log lines)';
+            out.scrollTop = out.scrollHeight;   // tail: newest line stays visible
+        };
+
+        const tailDockerLog = async () => {
+            const token = logsMainViewToken;
+            const hostId = dockerViewHostId;
+            if (!hostId || !dockerLogSource) return;
+            const out = document.getElementById('docker-log-output');
+            if (out && !dockerLogText) out.textContent = 'Loading…';
+            try {
+                const url = `/api/docker/log/${encodeURIComponent(dockerLogSource)}?host=${encodeURIComponent(hostId)}`;
+                const res = await fetch(url, { headers: { Accept: 'application/json' } });
+                const data = await res.json();
+                if (token !== logsMainViewToken || logsMainMode !== 'docker' || dockerViewHostId !== hostId) return;
+                if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+                dockerLogText = data.content || '';
+                renderDockerLog();
+            } catch (err) {
+                if (out) out.textContent = `Could not read logs: ${err.message}`;
+            }
+        };
+
+        const selectDockerLogContainer = (name, follow) => {
+            dockerLogSource = name;
+            dockerLogText = '';
+            if (dockerLogTimer) { clearInterval(dockerLogTimer); dockerLogTimer = null; }
+            const out = document.getElementById('docker-log-output');
+            if (out) {
+                out.textContent = name ? `Tailing ${name}…` : 'Pick a container to tail its log.';
+            }
+            if (!name) return;
+            tailDockerLog();
+            // dockervision watches: the pane keeps itself current while it is
+            // open and stops the moment the view changes.
+            if (follow) {
+                dockerLogTimer = setInterval(() => {
+                    if (logsMainMode !== 'docker' || document.hidden) return;
+                    tailDockerLog();
+                }, 5000);
+            }
+        };
+
+        const renderDockerLogPicker = (rows) => {
+            const select = document.getElementById('docker-log-select');
+            if (!select) return;
+            const previous = dockerLogSource;
+            select.innerHTML = '<option value="">— pick a container —</option>' + (rows || []).map((row) => (
+                `<option value="${escapeHtml(row.name || '')}">${escapeHtml(row.name || '')}${row.state && row.state !== 'running' ? ' (stopped)' : ''}</option>`
+            )).join('');
+            const stillListed = previous && (rows || []).some((row) => row.name === previous);
+            if (stillListed) {
+                select.value = previous;
+            } else if (rows && rows.length) {
+                // Default to the busiest container: that is the one being asked about.
+                const busiest = [...rows].sort((a, b) => (Number(b.cpu_percent) || 0) - (Number(a.cpu_percent) || 0))[0];
+                select.value = busiest.name || '';
+                selectDockerLogContainer(select.value, document.getElementById('docker-log-follow')?.checked !== false);
+            }
+        };
+
+        const loadDockerView = async (hostId, token) => {
+            // Three independent panels: one slow registry check must not hold up
+            // the fleet numbers, so they load (and render) separately.
+            const fleet = (async () => {
+                try {
+                    const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/fleet`, { headers: { Accept: 'application/json' } });
+                    const data = await res.json();
+                    if (token !== logsMainViewToken || logsMainMode !== 'docker') return;
+                    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+                    renderFleet(data);
+                } catch (err) {
+                    const box = document.getElementById('docker-fleet');
+                    if (box) box.innerHTML = `<div class="text-xs text-red-400">Fleet stats unavailable: ${escapeHtml(err.message)}</div>`;
+                }
+            })();
+
+            const updates = (async () => {
+                try {
+                    const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates`, { headers: { Accept: 'application/json' } });
+                    const data = await res.json();
+                    if (token !== logsMainViewToken || logsMainMode !== 'docker') return;
+                    renderDockerUpdates({ ...data, success: res.ok && data.success !== false });
+                    renderDockerLogPicker(data.containers || []);
+                } catch (err) {
+                    renderDockerUpdates({ success: false, error: err.message });
+                }
+            })();
+
+            const banner = (async () => {
+                try {
+                    const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}`, { headers: { Accept: 'application/json' } });
+                    const data = await res.json();
+                    if (token !== logsMainViewToken || logsMainMode !== 'docker') return;
+                    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+                    const engine = data.engine || {};
+                    const osEl = document.getElementById('docker-banner-os');
+                    const engineEl = document.getElementById('docker-banner-engine');
+                    const nodeEl = document.getElementById('docker-banner-node');
+                    if (osEl) osEl.textContent = engine.os || 'Unknown OS';
+                    if (engineEl) engineEl.textContent = `Docker ${engine.server_version || '?'} · ${engine.containers_running || 0}/${engine.containers || 0} running · ${engine.images || 0} images`;
+                    if (nodeEl) nodeEl.textContent = `${engine.name || '?'} · ${engine.cpus || '?'} cores · ${fmtBytes(engine.memory)}`;
+
+                    // Wizard-onboarded hosts know more about themselves than
+                    // the engine does (distro, package state, last update).
+                    // Config-file hosts simply keep the engine's answer.
+                    if (String(hostId).startsWith('db-')) {
+                        try {
+                            const dbId = parseInt(String(hostId).split('-')[1], 10);
+                            const infoRes = await fetch(`/hosts/db/${dbId}/info`);
+                            const info = await infoRes.json();
+                            if (token !== logsMainViewToken || logsMainMode !== 'docker') return;
+                            const si = info.system_info || {};
+                            if (osEl && si.os_version) osEl.textContent = si.os_version;
+                            const updateEl = document.getElementById('docker-banner-update');
+                            if (updateEl) {
+                                const span = updateEl.querySelector('span');
+                                if (span) span.textContent = si.last_update || 'unknown';
+                                updateEl.classList.remove('hidden');
+                            }
+                        } catch (_) {
+                            // host info is a nicety: the engine's own answers stay
+                        }
+                    }
+                } catch (err) {
+                    const engineEl = document.getElementById('docker-banner-engine');
+                    if (engineEl) engineEl.textContent = `Docker info unavailable: ${err.message}`;
+                }
+            })();
+
+            await Promise.all([fleet, updates, banner]);
+        };
+
+        const showDockerInfoMain = async () => {
+            if (typeof contractSshTerminal === 'function') contractSshTerminal();
+            const hostId = selectedHostId;
+            const hostName = hostId === 'local' ? 'Localhost' : (hosts[hostId]?.friendly_name || hostId);
+
+            const viewToken = ++logsMainViewToken;
+            logsMainMode = 'docker';
+            stopDockerView();
+            dockerViewHostId = hostId;
+
+            const topPane = document.getElementById('logs-top-pane');
+            const bottomPane = document.getElementById('logs-bottom-pane');
+            const topHeader = document.getElementById('logs-top-header');
+            const logTableTitle = document.getElementById('log-table-title');
+            const container = document.getElementById('log-table-container');
+            const logsContentPanel = document.getElementById('logs-content-panel');
+
+            if (topPane) {
+                topPane.classList.remove('hidden');
+                topPane.style.height = '100%';
+            }
+            if (bottomPane) bottomPane.classList.add('hidden');
+            if (topHeader) topHeader.classList.remove('hidden');
+            if (logsContentPanel) logsContentPanel.classList.remove('hidden');
+            if (logTableTitle) logTableTitle.textContent = `Docker information: ${hostName}`;
+            if (sshTerminalContainer) {
+                sshTerminalContainer.classList.add('hidden');
+                sshTerminalContainer.style.position = '';
+                sshTerminalContainer.style.top = '';
+                sshTerminalContainer.style.left = '';
+                sshTerminalContainer.style.right = '';
+                sshTerminalContainer.style.bottom = '';
+                sshTerminalContainer.style.zIndex = '';
+            }
+
+            const hostData = (hostId === 'local')
+                ? { friendly_name: 'Localhost', ip: 'localhost', user: 'local' }
+                : (hosts[hostId] || { ip: hostId, user: 'root' });
+            const groups = (hostData.group_names && hostData.group_names.length)
+                ? hostData.group_names.join(', ') : 'none';
+            const avatarLetter = String(hostName || '?').trim().charAt(0).toUpperCase();
+
+            if (!container) return;
+            container.innerHTML = `
+                <div class="space-y-4">
+                    <!-- Same banner shape as Host Information, but the subject is
+                         the docker engine on this host. -->
+                    <div class="relative overflow-hidden rounded-lg border border-white/10 bg-gradient-to-br from-sky-700/20 via-white/5 to-emerald-600/20 p-4">
+                        <div class="flex items-center gap-4">
+                            <div class="w-12 h-12 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-xl font-bold termix-text">
+                                ${escapeHtml(avatarLetter)}
+                            </div>
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <div class="termix-text font-semibold text-lg truncate">Docker Information: ${escapeHtml(hostName)}</div>
+                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border bg-sky-500/20 text-sky-200 border-sky-500/30" id="docker-banner-os">…</span>
+                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border bg-white/5 text-gray-200 border-white/10">Group: ${escapeHtml(groups)}</span>
+                                </div>
+                                <div class="text-xs termix-muted font-mono mt-2">${escapeHtml(hostData.user || 'root')}@${escapeHtml(hostData.ip || hostId)}</div>
+                                <div class="text-xs termix-muted mt-1" id="docker-banner-engine">reading the engine…</div>
+                                <div class="text-xs termix-muted mt-1">Hostname / resources: <span id="docker-banner-node">…</span></div>
+                                <div class="text-xs termix-muted mt-1 hidden" id="docker-banner-update">Last update: <span>…</span></div>
+                            </div>
+                            <a class="ml-auto text-xs px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 shrink-0 items-center gap-1 hidden sm:inline-flex"
+                               href="/docker/${encodeURIComponent(hostId)}" target="_blank" rel="noopener"
+                               title="Charts, per-app grouping, swarm cluster and per-container detail">full monitor ↗</a>
+                        </div>
+                    </div>
+
+                    <!-- Analyse (docker logs only) beside docker's share of the host -->
+                    <div class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                        <div class="p-3 rounded-lg bg-white/5 border border-white/10 flex flex-col gap-2">
+                            <button id="docker-analyse-btn" type="button"
+                                    class="bg-purple-700 hover:bg-purple-600 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+                                <span>Analyse Docker Logs</span>
+                            </button>
+                            <p class="text-[11px] termix-muted">Container logs on ${escapeHtml(hostName)} only — the host's files and journal are left out of this report.</p>
+                            <button id="docker-add-btn" type="button"
+                                    class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">
+                                Add a container…
+                            </button>
+                            <p class="text-[11px] termix-muted">Updates and new services go through the homelab wizard (wizard.yaml → build → swarm deploy).</p>
+                        </div>
+                        <div class="xl:col-span-2 p-3 rounded-lg bg-white/5 border border-white/10" id="docker-fleet">
+                            <div class="text-xs termix-muted">Loading docker fleet usage…</div>
+                        </div>
+                    </div>
+
+                    <!-- What upstream has moved on from -->
+                    <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                        <div class="flex items-center justify-between mb-1">
+                            <h3 class="text-sm font-semibold termix-text">Container updates</h3>
+                            <div class="flex items-center gap-3">
+                                <span id="docker-updates-count" class="text-xs termix-muted">checking upstream images…</span>
+                                <button id="docker-updates-refresh" type="button" class="text-xs px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20">re-check</button>
+                            </div>
+                        </div>
+                        <div id="docker-updates-list" class="max-h-72 overflow-auto">
+                            <div class="text-xs termix-muted py-2">Comparing local image digests with the registry…</div>
+                        </div>
+                    </div>
+
+                    <!-- Live per-container log, dockervision-style -->
+                    <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                        <div class="flex items-center justify-between gap-3 flex-wrap mb-2">
+                            <h3 class="text-sm font-semibold termix-text">Container logs</h3>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <select id="docker-log-select" class="text-xs bg-black/20 border border-white/10 rounded-lg px-2 py-1 termix-text">
+                                    <option value="">— pick a container —</option>
+                                </select>
+                                <label class="flex items-center text-xs termix-muted">
+                                    <input type="checkbox" id="docker-log-follow" class="mr-1" checked> follow
+                                </label>
+                                <input id="docker-log-filter" type="text" placeholder="filter lines" class="text-xs bg-black/20 border border-white/10 rounded-lg px-2 py-1 termix-text w-36">
+                                <button id="docker-log-refresh" type="button" class="text-xs px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20">tail</button>
+                                <button id="docker-log-analyse" type="button" class="text-xs px-2 py-1 rounded-lg bg-purple-700 hover:bg-purple-600 text-white">AI analyse</button>
+                            </div>
+                        </div>
+                        <pre id="docker-log-output" class="text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words max-h-80 overflow-auto p-3 rounded-lg bg-black/40 border border-white/10 termix-text">Pick a container to tail its log.</pre>
+                    </div>
+                </div>
+            `;
+
+            // ---- wiring -------------------------------------------------------
+            document.getElementById('docker-analyse-btn')?.addEventListener('click', () => {
+                // The server report already correlates docker logs; this entry
+                // point simply forces its scope to container logs only.
+                const files = document.getElementById('server-report-files');
+                const journal = document.getElementById('server-report-journal');
+                const docker = document.getElementById('server-report-docker');
+                const stopped = document.getElementById('server-report-stopped');
+                if (files) files.checked = false;
+                if (journal) journal.checked = false;
+                if (docker) docker.checked = true;
+                if (stopped) stopped.checked = true;
+                openServerReportModal();
+            });
+
+            document.getElementById('docker-add-btn')?.addEventListener('click', () => {
+                window.open(wizardLink('new', { host: hostName }), '_blank', 'noopener');
+            });
+
+            document.getElementById('docker-updates-refresh')?.addEventListener('click', async (event) => {
+                const button = event.currentTarget;
+                button.disabled = true;
+                button.textContent = 'checking…';
+                try {
+                    await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates/refresh`, { method: 'POST' });
+                    const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates?refresh=1`, { headers: { Accept: 'application/json' } });
+                    const data = await res.json();
+                    if (viewToken !== logsMainViewToken || logsMainMode !== 'docker') return;
+                    renderDockerUpdates({ ...data, success: res.ok && data.success !== false });
+                } finally {
+                    button.disabled = false;
+                    button.textContent = 're-check';
+                }
+            });
+
+            document.getElementById('docker-log-select')?.addEventListener('change', (event) => {
+                selectDockerLogContainer(event.target.value, document.getElementById('docker-log-follow')?.checked !== false);
+            });
+            document.getElementById('docker-log-follow')?.addEventListener('change', (event) => {
+                selectDockerLogContainer(dockerLogSource, event.target.checked);
+            });
+            document.getElementById('docker-log-filter')?.addEventListener('input', renderDockerLog);
+            document.getElementById('docker-log-refresh')?.addEventListener('click', tailDockerLog);
+            document.getElementById('docker-log-analyse')?.addEventListener('click', (event) => {
+                runAiAnalysis({
+                    logName: dockerLogSource || 'docker',
+                    content: dockerLogText,
+                    button: event.currentTarget,
+                    host: hostName,
+                    sourceLabel: `Docker logs — ${dockerLogSource || hostName}`,
+                });
+            });
+
+            await loadDockerView(hostId, viewToken);
+
+            // Fleet numbers drift every second; 10s is fast enough to be useful
+            // and slow enough that `docker stats` never piles up on the host.
+            dockerFleetTimer = setInterval(async () => {
+                if (logsMainMode !== 'docker' || document.hidden) return;
+                try {
+                    const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/fleet`, { headers: { Accept: 'application/json' } });
+                    const data = await res.json();
+                    if (viewToken !== logsMainViewToken) return;
+                    if (res.ok && data.success !== false) renderFleet(data);
+                } catch (_) { /* a dead poll must not clear the panel */ }
+            }, 10000);
+        };
+
+        window.showDockerInfoMain = showDockerInfoMain;
+
         const pullLogsForSelectedHost = () => {
             if (!selectedHostId) return;
 
             const viewToken = ++logsMainViewToken;
             logsMainMode = 'pull';
+            stopDockerView();
 
             const topPane = document.getElementById('logs-top-pane');
             const bottomPane = document.getElementById('logs-bottom-pane');

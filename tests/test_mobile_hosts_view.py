@@ -135,7 +135,7 @@ def test_the_desktop_view_is_unchanged_by_the_phone_grid():
     css = _css()
     # the sidebar tiles keep their own, separate rules
     assert '#hosts-sidebar .host-card {' in css
-    assert 'min-height: 92px' in css[css.index('#hosts-sidebar .host-card {'):][:300]
+    assert 'min-height: 104px' in css[css.index('#hosts-sidebar .host-card {'):][:300]
 
 
 def test_the_hosts_tab_opens_the_grid_not_the_drawer():

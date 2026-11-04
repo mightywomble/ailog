@@ -175,6 +175,68 @@ def list_containers(user, ip, ssh_key_id=None, timeout: int = 15) -> list[dict]:
     return parse_container_rows(out)
 
 
+IMAGE_DIGEST_MARK = '===AILOG_IMAGE==='
+
+
+def image_digests(user, ip, images, ssh_key_id=None, timeout: int = 20):
+    """Local repo digest for each image reference, in one SSH round trip."""
+    def run_cmd(command: str):
+        return run(user, ip, ssh_key_id, command, timeout=timeout)
+
+    return image_digests_using(run_cmd, images)
+
+
+def image_digests_using(run_cmd, images):
+    """Same as :func:`image_digests` but with the transport injected.
+
+    `docker ps` prints the reference the container was created with
+    (``nginx:1.27``), which is not the same string as the image's
+    ``RepoDigests`` entry (``nginx@sha256:…``). Comparing the digest of the
+    registry's current manifest for that *tag* against the local one is the
+    only honest "is there a newer image" test that works for pinned tags too.
+
+    Returns ``{image_ref: 'sha256:…'}``; missing images are simply absent.
+    """
+    wanted = [str(i) for i in (images or []) if i]
+    if not wanted:
+        return {}
+
+    parts = []
+    for ref in wanted:
+        quoted = shlex.quote(ref)
+        # `docker inspect` on an image that is no longer present exits non-zero;
+        # `|| true` keeps the rest of the list coming back.
+        parts.append('echo ' + IMAGE_DIGEST_MARK + ' ' + quoted)
+        parts.append(
+            "docker_cmd image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "
+            + quoted + ' || true'
+        )
+    ok, out = run_cmd('; '.join(parts))
+    if not ok:
+        return {}
+
+    digests: dict[str, str] = {}
+    current = None
+    for line in (out or '').splitlines():
+        text = line.strip()
+        if text.startswith(IMAGE_DIGEST_MARK):
+            current = text[len(IMAGE_DIGEST_MARK):].strip()
+            continue
+        if not current or '@' not in text:
+            continue
+        repo, _, digest = text.partition('@')
+        digest = digest.strip()
+        if not digest.startswith('sha256:') or digest == 'sha256:' + '0' * 64:
+            continue
+        name = current.split('@', 1)[0]
+        known = digests.get(current)
+        # Prefer the entry whose repository matches the reference itself;
+        # a retagged image can carry digests for several names.
+        if known is None or repo.endswith(name.rsplit(':', 1)[0].split('/')[-1]):
+            digests[current] = digest
+    return digests
+
+
 def _container_row(parsed: dict, usage: dict) -> dict:
     image = parsed.get('image') or ''
     tag = 'latest'

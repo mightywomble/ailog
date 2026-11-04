@@ -80,7 +80,7 @@ def test_host_cards_are_uniform_tiles_with_a_bottom_icon_row():
     # one fixed shape, not a card that grows with the text
     css = _read('static', 'css', 'ui.css')
     block = css[css.index('#hosts-sidebar .host-card {'):css.index('#hosts-sidebar .host-card .hc-main')]
-    assert 'min-height: 92px' in block
+    assert 'min-height: 104px' in block
     assert 'flex-direction: column' in block
 
 
@@ -205,7 +205,14 @@ def test_every_icon_is_a_square_of_the_same_size():
     assert 'border-radius: 999px' not in card
     # bigger than the 18px glyph it replaced
     assert '--hc-icon: 24px' in css          # phone tiles
-    # the SSH button is the same square and pinned to the far right
+    # Docker and SSH are the two actions, so they stack in the corner: the
+    # column is pinned right, Docker sits above SSH, both are icon-sized.
+    a_start = card.index('#hosts-sidebar .host-card .hc-actions {')
+    actions = card[a_start:card.index('#hosts-sidebar .host-card .hc-docker {', a_start)]
+    assert 'margin-left: auto' in actions
+    assert 'flex-direction: column' in actions
     ssh = card[card.index('#hosts-sidebar .host-card .hc-ssh {'):]
-    assert 'margin-left: auto' in ssh
     assert 'width: var(--hc-icon)' in ssh
+    # the Docker square is filled green/red, like the reachability square
+    assert '.hc-docker[data-state="ok"]' in card
+    assert '.hc-docker[data-state="attention"]' in card

@@ -15,6 +15,10 @@ GET  /api/docker/hosts/<host_key>/nodes      swarm cluster-wide nodes
 GET  /api/docker/hosts/<host_key>/history    rolling in-memory host series
 GET  /api/docker/hosts/<host_key>/history/stream  same, pushed over SSE
 GET  /api/docker/hosts/<host_key>/swarm      cluster view grouped per app
+GET  /api/docker/hosts/<host_key>/fleet      docker usage as a share of the host
+GET  /api/docker/hosts/<host_key>/updates    containers whose image moved
+POST /api/docker/hosts/<host_key>/updates/refresh   queue a fresh scan
+GET  /api/docker/overview                    sidebar badges: ok / attention
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ from . import history as dhistory
 from . import sshstats
 from . import stats as dstats
 from . import swarm as dswarm
+from . import updates as dupdates
 from core.timeutil import utcnow
 
 docker_bp = Blueprint('docker', __name__)
@@ -384,6 +389,305 @@ def api_containers(host_key):
     if node_filter:
         rows = [r for r in rows if r.get('node_id') == node_filter]
     return jsonify({'success': True, 'containers': rows, 'count': len(rows)})
+
+
+# --------------------------------------------------------------------------
+# fleet usage, image updates and the sidebar badge
+#
+# Three questions the Docker Information page asks about one host:
+#   * what is the whole docker fleet using, as a share of the host itself?
+#   * which containers are running an image the registry has moved on from?
+#   * does anything on this host need looking at at all?
+# --------------------------------------------------------------------------
+
+# Container network counters in `docker ps`/`docker stats` are cumulative, so a
+# share of host traffic only exists once there are two samples. Kept per host
+# and only used by /fleet: the container rows keep their own semantics.
+_fleet_rate_lock = threading.Lock()
+_fleet_rate_cache: dict[str, tuple[float, int, int]] = {}
+
+
+def _fleet_payload(host_key: str, snap: dict, docker_df: dict | None = None) -> dict:
+    stats = snap.get('stats') or {}
+    containers = snap.get('containers') or []
+    running = [c for c in containers
+               if (c.get('state') or '').lower() == 'running']
+
+    cores = float(stats.get('cpu_cores') or 1) or 1.0
+    # `docker stats` reports CPU against a single core, so 3 containers at 100%
+    # on an 8 core box is 37.5% of the host, not 300%.
+    cpu_docker = round(sum(float(c.get('cpu_percent') or 0) for c in running) / cores, 2)
+
+    mem_docker = sum(int(c.get('mem_used') or 0) for c in running)
+    mem_total = int(stats.get('mem_total') or 0)
+
+    rx_cum = sum(int(c.get('net_rx') or 0) for c in running)
+    tx_cum = sum(int(c.get('net_tx') or 0) for c in running)
+    now = time.time()
+    with _fleet_rate_lock:
+        prev = _fleet_rate_cache.get(host_key)
+        _fleet_rate_cache[host_key] = (now, rx_cum, tx_cum)
+    if prev and now > prev[0]:
+        elapsed = max(now - prev[0], 0.001)
+        rx_bps = max(0.0, (rx_cum - prev[1])) / elapsed
+        tx_bps = max(0.0, (tx_cum - prev[2])) / elapsed
+    else:
+        rx_bps = tx_bps = 0.0
+
+    # Storage: `docker system df` totals (images + containers + volumes + build
+    # cache). Summing SizeRw per container would ignore images and volumes;
+    # summing SizeRootfs would count every shared layer once per container.
+    docker_df = docker_df if docker_df is not None else (stats.get('docker_df') or {})
+    if docker_df:
+        disk_docker = sum(float((row or {}).get('size') or 0) for row in docker_df.values())
+    else:
+        disk_docker = float(sum(int(c.get('size_rw') or 0) for c in containers))
+    disk_total = float(stats.get('disk_total') or 0)
+
+    host_rx = float(stats.get('net_rx_bps') or 0)
+    host_tx = float(stats.get('net_tx_bps') or 0)
+    net_docker = rx_bps + tx_bps
+    net_host = host_rx + host_tx
+
+    def share(part, whole, cap=100.0):
+        if not whole:
+            return None
+        return round(min(cap, max(0.0, 100.0 * part / whole)), 1)
+
+    return {
+        'host_key': host_key,
+        'host': {
+            'cpu_percent': stats.get('cpu_percent'),
+            'cpu_cores': stats.get('cpu_cores'),
+            'mem_used': stats.get('mem_used'),
+            'mem_total': mem_total,
+            'net_rx_bps': host_rx,
+            'net_tx_bps': host_tx,
+            'disk_used': stats.get('disk_used'),
+            'disk_total': disk_total,
+        },
+        'docker': {
+            'cpu_percent': cpu_docker,
+            'mem_used': mem_docker,
+            'net_rx_bps': round(rx_bps, 1),
+            'net_tx_bps': round(tx_bps, 1),
+            'disk_used': round(disk_docker),
+            'containers': len(containers),
+            'running': len(running),
+            'df': docker_df,
+        },
+        'pct': {
+            'cpu': share(cpu_docker, 100.0),
+            'ram': share(mem_docker, mem_total),
+            'net': share(net_docker, net_host) if net_host else 0.0,
+            'storage': share(disk_docker, disk_total),
+        },
+        'basis': {
+            'cpu': 'share of all host cores',
+            'ram': 'share of host RAM',
+            'net': 'share of host network traffic',
+            'storage': 'share of host disk (docker system df)',
+        },
+        'ts': now,
+    }
+
+
+# `docker system df` walks every image layer, so it is the one command that
+# must not ride along with the 2s stats poll. The fleet pane only needs a
+# minute-accurate number, so it is cached separately.
+DF_TTL = 60
+_df_lock = threading.Lock()
+_df_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _docker_df(host_key: str, info: dict, transport: str, client) -> dict:
+    now = time.time()
+    with _df_lock:
+        hit = _df_cache.get(host_key)
+    if hit and (now - hit[0]) < DF_TTL:
+        return hit[1]
+    try:
+        if transport == 'ssh':
+            df = sshstats.disk_usage(**_ssh_args(info))
+        else:
+            df = dstats._df_totals(client)
+    except Exception:
+        df = {}
+    with _df_lock:
+        _df_cache[host_key] = (now, df)
+        if len(_df_cache) > 64:
+            for key in [k for k, v in _df_cache.items() if now - v[0] > DF_TTL * 4]:
+                _df_cache.pop(key, None)
+    return df
+
+
+def _updates_runner(info: dict):
+    return dupdates.runner_for(info)
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/fleet')
+def api_fleet(host_key):
+    """Docker fleet CPU/RAM/NET/disk as a percentage of the host itself."""
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    try:
+        info, transport, client = _transport_for(host_key)
+        snap = host_snapshot(host_key)
+    except DockerRequestError as exc:
+        return _error(exc)
+    df = _docker_df(host_key, info, transport, client)
+    return jsonify({'success': True, **_fleet_payload(host_key, snap, df)})
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/updates')
+def api_updates(host_key):
+    """Containers whose image the registry has moved on from."""
+    refresh = (request.args.get('refresh') or '').lower() in ('1', 'true', 'yes')
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    try:
+        info, _transport, _client = _transport_for(host_key)
+        snap = host_snapshot(host_key)
+    except DockerRequestError as exc:
+        return _error(exc)
+    try:
+        result = dupdates.updates_for(host_key, snap.get('containers') or [],
+                                      _updates_runner(info), refresh=refresh)
+    except Exception as exc:                    # noqa: BLE001 - report, never 500 the page
+        return _error(exc)
+    dupdates._store(host_key, result)
+    return jsonify({'success': True, **result})
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/updates/refresh', methods=['POST'])
+def api_updates_refresh(host_key):
+    """Queue a fresh scan (the answer comes back from /updates or /overview)."""
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    app = current_app._get_current_object()
+    if not dupdates.stale(host_key, max_age=1):
+        return jsonify({'success': True, 'pending': host_key})
+    threading.Thread(target=dupdates.scan_host, args=(app, host_key),
+                     name=f'docker-scan-{host_key}', daemon=True).start()
+    return jsonify({'success': True, 'started': host_key})
+
+
+def _says_no_docker(message: str) -> bool:
+    """True only when the error means Docker is genuinely absent.
+
+    "permission denied while trying to connect to the Docker daemon socket" is a
+    Docker *presence* with an access problem - the sidebar must not hide the
+    square and pretend the host has no containers.
+    """
+    text = (message or '').lower()
+    if not text:
+        return False
+    return any(marker in text for marker in (
+        'docker_not_installed', 'command not found', 'no such file or directory',
+        'docker: not found', 'is not installed',
+    ))
+
+
+@docker_bp.route('/api/docker/overview')
+def api_overview():
+    """Every host that runs Docker, and whether it needs attention.
+
+    The sidebar badge is polled every ~20s, so this must never do a live SSH
+    snapshot per host. Docker presence comes from the metrics snapshot the rest
+    of the sidebar already reads (cached, stale-while-revalidate); the update
+    verdict comes from the last background scan, and a stale one is queued here
+    rather than answered inline.
+    """
+    known = _known_endpoints()
+    cached = dupdates.all_state()
+    app = current_app._get_current_object()
+
+    # Which hosts run Docker at all. This endpoint is polled from the sidebar,
+    # so it may only read the metrics cache -- calling servers_payload() here
+    # would block the badge behind a cold SSH round for every host. An empty
+    # cache simply means "ask again on the next poll".
+    metrics_hosts = {}
+    try:
+        from metrics.routes import cached_servers_payload
+        payload = cached_servers_payload() or {}
+        for row in payload.get('servers') or []:
+            metrics_hosts[row.get('host_key')] = row
+    except Exception:
+        metrics_hosts = {}
+
+    hosts = {}
+    to_scan = []
+    # Every configured host is considered, so a host that has Docker but has
+    # never been scanned still appears (as "unknown") instead of vanishing.
+    keys = set(ep.all_host_keys()) | set(metrics_hosts) | set(known) | set(cached)
+    for host_key in keys:
+        info = ep.resolve_host(host_key) or {}
+        endpoint = known.get(host_key) or {}
+        metric = metrics_hosts.get(host_key) or {}
+        docker_facts = metric.get('docker') or {}
+        state_row = cached.get(host_key)
+        state_error = (state_row or {}).get('error') or ''
+
+        if state_row is not None:
+            # A scan ran, so the only thing that can say "no docker here" is the
+            # error itself. A permission or timeout error means Docker *is*
+            # installed and we could not read it - that is attention, not absence.
+            has_docker = not _says_no_docker(state_error)
+        else:
+            has_docker = bool(docker_facts.get('installed')
+                              or docker_facts.get('reachable')
+                              or endpoint.get('is_reachable'))
+        if not has_docker:
+            hosts[host_key] = {
+                'host_key': host_key,
+                'friendly_name': info.get('friendly_name') or metric.get('friendly_name') or host_key,
+                'docker': None,
+                'status': 'none',
+                'updates': 0,
+                'attention': 0,
+                'containers': None,
+                'error': state_error or None,
+            }
+            continue
+        if not state_row:
+            to_scan.append(host_key)
+
+        updates_count = len((state_row or {}).get('updates') or [])
+        attention = len((state_row or {}).get('attention_only') or [])
+        containers = (state_row or {}).get('containers_checked')
+
+        if state_row is None:
+            status = 'unknown'
+        elif state_row.get('error'):
+            status = 'unknown'
+        elif updates_count or attention:
+            status = 'attention'
+        else:
+            status = 'ok'
+
+        hosts[host_key] = {
+            'host_key': host_key,
+            'friendly_name': info.get('friendly_name') or metric.get('friendly_name') or host_key,
+            'docker': True,
+            'status': status,
+            'updates': updates_count,
+            'attention': attention,
+            'containers': containers if containers is not None else docker_facts.get('running'),
+            'running': docker_facts.get('running'),
+            'reported_containers': docker_facts.get('total'),
+            'scanned_at': (state_row or {}).get('ts'),
+            'took': (state_row or {}).get('took'),
+            'error': (state_row or {}).get('error'),
+        }
+
+    started = dupdates.scan_async(app, to_scan) if to_scan else []
+    for key in started:
+        if key in hosts:
+            hosts[key]['pending'] = True
+
+    return jsonify({'success': True, 'hosts': hosts,
+                    'scanned': [k for k in hosts if cached.get(k)],
+                    'pending': started})
 
 
 @docker_bp.route('/api/docker/hosts/<path:host_key>/containers/<container_id>')
