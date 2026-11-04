@@ -175,22 +175,6 @@ services:
     container: /data
   env_count: 2
   companions: []
-- name: hello
-  kind: build
-  service: hello
-  image: zot.safehomelan.com/hello:${IMAGE_TAG:-build-7}
-  repo: hello
-  version: build-7
-  source: ''
-  ports:
-  - host: 8080
-    container: 8080
-    mode: ingress
-  url: ''
-  replicas: 2
-  volumes: []
-  env_count: 0
-  companions: []
 - name: huntly
   kind: mirror
   service: huntly
