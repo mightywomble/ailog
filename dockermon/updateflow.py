@@ -518,6 +518,9 @@ def _execute_estate(job_id: str, target: dict) -> bool:
         return False
     if result.get('up_to_date'):
         _job_step(job_id, 'already newest', ok=True, detail=str(result.get('current')))
+        # A distinct note, because "done" here means "nothing to deploy" and the
+        # dialog should not claim the host is being re-read for a change.
+        _job_update(job_id, note='already newest')
         return True
     if result.get('dry_run'):
         return True

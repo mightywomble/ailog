@@ -30,11 +30,19 @@ def service_of(entry: dict) -> str:
 
 
 def image_ref(entry: dict, registry: str = 'zot.safehomelan.com') -> str:
-    """The image line this entry implies - the same rule `ship.yml` assumes."""
+    """The image line this entry implies - the same rule `ship.yml` assumes.
+
+    ``release: manual`` exists for one real case: a build-kind app that is pushed
+    under a human version tag by hand, in a stack that also carries another
+    build app.  `ship.yml` exports one IMAGE_TAG per *stack*, so a stack with two
+    `${IMAGE_TAG:-...}` images can only be deployed when CI built both - it
+    checks every image in the file and refuses the whole stack otherwise.  Such an
+    app keeps a literal pin, and the estate is told not to pretend otherwise.
+    """
     repo = entry.get('repo') or entry['name']
     version = str(entry.get('version') or 'latest')
     ref = f'{registry}/{repo}'
-    if entry.get('kind') == 'build':
+    if entry.get('kind') == 'build' and entry.get('release') != 'manual':
         return ref + ':' + TAG_PLACEHOLDER % version
     return f'{ref}:{version}'
 
