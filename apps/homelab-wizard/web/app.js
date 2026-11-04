@@ -558,6 +558,7 @@ function fillSettings(s) {
 }
 $("#btnSettings").onclick = async () => {
   $("#settingsModal").hidden = false;
+  renderSecrets();
   const d = await api("/api/models");
   $("#s_model").innerHTML = (d.models || []).map((m) =>
     `<option value="${esc(m.id)}" ${m.id === d.current ? "selected" : ""}>${esc(m.name || m.id)}</option>`).join("");
@@ -577,6 +578,22 @@ $("#btnTestKey").onclick = async () => {
     out.className = "hint bad";
   }
 };
+
+async function renderSecrets() {
+  const el = $("#secretsOut");
+  try {
+    const d = await api("/api/secrets");
+    const swarm = (d.swarm || []).map((x) => `<span class="chip">${esc(x.name)}</span>`).join("");
+    const rows = (d.audit || []).map((a) =>
+      `<div class="note bad"><b>${esc(a.stack)}</b> line ${a.line}: <code>${esc(a.key)}</code>
+        still plaintext${a.in_wizard_yaml ? " (also in wizard.yaml)" : ""}</div>`).join("");
+    el.innerHTML = `<div class="chips">${swarm || '<span class="chip">none</span>'}</div>`
+      + `<p class="hint">${(d.mounted || []).length} wizard secret(s) mounted in this container.</p>`
+      + (rows || `<div class="note ok">no plaintext credentials in any stack file</div>`);
+  } catch (err) {
+    el.innerHTML = `<div class="note bad">${esc(err.message || err)}</div>`;
+  }
+}
 
 $("#btnSaveSettings").onclick = async () => {
   const [owner, repo] = ($("#s_gitea_repo").value || "/").split("/");

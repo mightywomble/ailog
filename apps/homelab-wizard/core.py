@@ -50,6 +50,12 @@ def _seed():
 
 
 def load():
+    """Settings, with the mounted Docker secrets applied over the stored ones.
+
+    A secret is never read from settings.json if it is mounted: the file is a
+    fallback for local development, not the source of truth. Overlaying on every
+    call means a rotated secret is picked up without restarting the container.
+    """
     with _lock:
         data = _seed()
         if os.path.exists(SETTINGS_PATH):
@@ -57,17 +63,34 @@ def load():
                 data.update(json.load(open(SETTINGS_PATH)))
             except Exception:
                 pass
+        try:
+            import vault as secrets_mod
+            data = secrets_mod.overlay(data)
+        except Exception:
+            pass
         return data
 
 
 def save(patch):
+    """Persist non-secret settings. Secrets belong in swarm secrets."""
     with _lock:
         data = load()
-        data.update({k: v for k, v in patch.items() if k in DEFAULTS or k in SECRETS})
+        keep = {k: v for k, v in patch.items() if k in DEFAULTS}
+        data.update(keep)
+        on_disk = {}
+        if os.path.exists(SETTINGS_PATH):
+            try:
+                on_disk = json.load(open(SETTINGS_PATH))
+            except Exception:
+                on_disk = {}
+        # drop anything secret-shaped that older versions wrote to disk
+        for key in SECRETS:
+            on_disk.pop(key, None)
+        on_disk.update(keep)
         os.makedirs(os.path.dirname(SETTINGS_PATH) or ".", exist_ok=True)
         tmp = SETTINGS_PATH + ".tmp"
         with open(tmp, "w") as fh:
-            json.dump(data, fh, indent=2)
+            json.dump(on_disk, fh, indent=2)
         os.chmod(tmp, 0o600)
         os.replace(tmp, SETTINGS_PATH)
         return data

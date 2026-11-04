@@ -38,6 +38,11 @@ check /static/app.js 'function stages()' "stage paths"
 check /static/app.js '/api/update' "update route"
 code "/api/newest?image=" 400 20
 
+# secrets: the wizard must report what is mounted and what is still plaintext
+code /api/secrets 200
+check /api/secrets '"audit"' "secrets audit"
+check /static/app.js 'renderSecrets' "secrets panel"
+
 # tag listing is server-side because Docker Hub has no CORS headers. A live tag
 # fetch would make the smoke test depend on the internet, so assert the shape
 # (and the error path) instead: this is the endpoint that used to only be
