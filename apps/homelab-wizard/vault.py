@@ -121,6 +121,10 @@ def audit(wizard, repo_dir):
                     continue
                 if value in ("", '""', "''") or value.startswith(("$", "*")):
                     continue
+                # MYSQL_RANDOM_ROOT_PASSWORD=1 is a flag, not a credential
+                if value.strip('"').strip("'") in ("0", "1", "true", "false",
+                                                   "yes", "no", "on", "off"):
+                    continue
                 findings.append({"stack": name, "line": lineno, "key": key,
                                  "in_wizard_yaml": key in declared,
                                  "preview": value[:6] + "…" if len(value) > 6 else value})
