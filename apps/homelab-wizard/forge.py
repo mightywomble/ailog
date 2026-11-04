@@ -160,12 +160,9 @@ server {{
 
 
 def _cert_nice(settings, cert_id):
-    if not cert_id:
-        return None
-    for cert in certificates(settings):
-        if cert["id"] == int(cert_id):
-            return cert["nice_name"]
-    return None
+    """NPM names the cert directory after the certificate id (certificate 1 ->
+    /etc/letsencrypt/live/npm-1), NOT after nice_name, which is the domain."""
+    return f"npm-{int(cert_id)}" if cert_id else None
 
 
 def create_host(settings, domain, forward_host, forward_port, cert_id=None,
@@ -186,10 +183,12 @@ def create_host(settings, domain, forward_host, forward_port, cert_id=None,
 import json, sqlite3
 con = sqlite3.connect({settings['npm_db']!r})
 cur = con.cursor()
-cur.execute("insert into proxy_host (domain_names, forward_host, forward_port, forward_scheme, "
-            "certificate_id, ssl_forced, http2_support, advanced_config, meta, enabled, is_deleted, "
-            "created_on, modified_on) values (?,?,?,?,?,?,?,?,?,?,?, datetime('now'), datetime('now'))",
-            (json.dumps([{domain!r}]), {forward_host!r}, {int(forward_port)}, 'http',
+owner = con.execute("select id from user order by id limit 1").fetchone()[0]
+cur.execute("insert into proxy_host (owner_user_id, domain_names, forward_host, forward_port, "
+            "forward_scheme, certificate_id, ssl_forced, http2_support, advanced_config, meta, "
+            "enabled, is_deleted, created_on, modified_on) "
+            "values (?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'), datetime('now'))",
+            (owner, json.dumps([{domain!r}]), {forward_host!r}, {int(forward_port)}, 'http',
              {int(cert_id or 0)}, {1 if cert_id else 0}, 0, {advanced!r},
              json.dumps({{"nginx_online": True}}), 1, 0))
 host_id = cur.lastrowid
