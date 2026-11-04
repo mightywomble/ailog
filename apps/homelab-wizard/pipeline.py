@@ -67,6 +67,8 @@ def save_service(entry):
     problems = core.validate(entry)
     if problems:
         return {"ok": False, "problems": problems, "files": []}
+    if entry.get("kind") == "mirror":
+        entry["source"] = core.with_tag(entry.get("source"), entry.get("version"))
     wiz = load_wizard()
     services = wiz.setdefault("services", [])
     for i, svc in enumerate(services):
