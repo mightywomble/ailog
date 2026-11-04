@@ -69,6 +69,16 @@ def test_image_ref_matches_what_ship_yml_assumes():
     assert render.image_ref(build) == 'zot.safehomelan.com/ingest:${IMAGE_TAG:-build-120}'
 
 
+def test_a_manually_released_build_app_keeps_a_literal_pin():
+    """ship.yml exports one IMAGE_TAG per stack, so two build images cannot both
+    use the placeholder unless CI built both - the one that is pushed by hand
+    keeps a literal tag, and render must agree with it or it would report drift."""
+    from estate import render
+    entry = {'name': 'ailog', 'kind': 'build', 'repo': 'ailog', 'version': 'v3.17.0',
+             'release': 'manual'}
+    assert render.image_ref(entry) == 'zot.safehomelan.com/ailog:v3.17.0'
+
+
 def test_a_version_bump_moves_one_line_and_keeps_the_comments():
     from estate import render
     text, changed = render.bump_image(STACK, 'dozzle', 'zot.safehomelan.com/dozzle:v11.5.0')
@@ -169,6 +179,44 @@ def test_image_references_split_the_way_the_registries_do():
     assert tags.split('nginx:1.27') == ('docker.io', 'library/nginx', '1.27')
     assert tags.split('ghcr.io/zhfahim/anchor:0.9.1') == ('ghcr.io', 'zhfahim/anchor', '0.9.1')
     assert tags.split('zot.safehomelan.com/ailog:v3.16.1') == ('zot.safehomelan.com', 'ailog', 'v3.16.1')
+
+
+# -------------------------------------------------------------------- forge --
+
+def test_runs_are_matched_by_workflow_file_not_by_repo_path():
+    """Gitea reports `path` as 'ship.yml@refs/heads/main', not the repo path.
+
+    Comparing it with '.gitea/workflows/ship.yml' meant no run ever matched, so
+    every estate update ended with "ship.yml did not start" even when it had.
+    """
+    from estate import forge
+
+    class FakeSession:
+        def __init__(self, payload):
+            self.payload = payload
+            self.headers = {}
+
+        def get(self, url, **kwargs):
+            class R:
+                status_code = 200
+
+                def __init__(self, body):
+                    self.body = body
+
+                def json(self):
+                    return self.body
+
+            if url.endswith('/actions/runs'):
+                return R(self.payload)
+            return R({})
+
+    runs = [{'id': 9, 'path': 'ship.yml@refs/heads/main', 'head_sha': 'abc'},
+            {'id': 8, 'path': 'mirror.yml@refs/heads/dev', 'head_sha': 'def'}]
+    f = forge.Forge(session=FakeSession({'workflow_runs': runs}))
+    assert forge.Forge.workflow_of(runs[0]) == 'ship.yml'
+    found = f.find_run('ship.yml', sha='abc', timeout=1)
+    assert found and found['id'] == 9
+    assert f.find_run('.gitea/workflows/mirror.yml', timeout=1)['id'] == 8
 
 
 # ---------------------------------------------------------------------- git --

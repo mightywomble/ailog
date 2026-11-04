@@ -60,6 +60,17 @@ class Forge:
             raise ForgeError(f'list runs -> {r.status_code} {r.text[:160]}')
         return r.json().get('workflow_runs') or []
 
+    @staticmethod
+    def workflow_of(run: dict) -> str:
+        """The workflow a run belongs to.
+
+        Gitea's ``path`` is ``<file>.yml@<ref>`` - just the *file name*, not the
+        repo path - so comparing it with ``.gitea/workflows/ship.yml`` never
+        matched and every estate update ended with "ship.yml did not start".
+        """
+        raw = str(run.get('path') or '')
+        return raw.split('@', 1)[0].rsplit('/', 1)[-1]
+
     def find_run(self, workflow: str, sha: str = '', newer_than: int = 0,
                  timeout: int = 120, cancel=None) -> dict | None:
         """The run of ``workflow`` for ``sha``, or the newest one after ``newer_than``.
@@ -72,7 +83,7 @@ class Forge:
             if cancel and cancel():
                 return None
             for run in self.runs(limit=30):
-                if (run.get('path') or '').split('@', 1)[0] != workflow:
+                if self.workflow_of(run) != self.workflow_of({'path': workflow}):
                     continue
                 if sha and run.get('head_sha') and run.get('head_sha') != sha:
                     continue

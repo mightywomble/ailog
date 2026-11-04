@@ -158,10 +158,10 @@
         if (again) again.hidden = false;
         if (job.status === 'done') {
             setProgress(100);
-            setState(job.error === 'already newest'
+            setState(job.note === 'already newest'
                 ? 'already newest — nothing to deploy'
                 : 'updated — the pane is re-reading this host',
-            job.error === 'already newest' ? '' : 'ok');
+            job.note === 'already newest' ? '' : 'ok');
             document.dispatchEvent(new CustomEvent('ailog:container-updated', {
                 detail: { hostKey: job.host_key, image: job.image, container: job.container },
             }));

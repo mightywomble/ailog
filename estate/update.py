@@ -31,9 +31,10 @@ from . import forge as forge_mod
 from . import render, settings, tags
 from .git import Conflict, GitError, Repo
 
-MIRROR_WF = '.gitea/workflows/mirror.yml'
-SHIP_WF = '.gitea/workflows/ship.yml'
-BUILD_WF = '.gitea/workflows/build.yml'
+# Matched against the run's workflow file name (estate.forge.Forge.workflow_of).
+MIRROR_WF = 'mirror.yml'
+SHIP_WF = 'ship.yml'
+BUILD_WF = 'build.yml'
 
 PULL_TIMEOUT = 180
 JOB_TTL = 3600
@@ -178,11 +179,14 @@ def plan(name: str, version: str = '') -> dict:
         'steps': [],
     }
     if not out['supported']:
-        out['reason'] = (
-            'built from source in this repo: its tag comes from a CI build of '
-            f'apps/{name}, so the estate path leaves it alone'
-            if kind == 'build' else
-            'a mirrored service needs an upstream source in wizard.yaml')
+        if kind == 'build' and entry.get('release') == 'manual':
+            out['reason'] = (f'{name} is built from source and pinned by hand under a version tag '
+                             f'(release: manual) - bump it deliberately rather than by a tag scan')
+        elif kind == 'build':
+            out['reason'] = (f'built from source in this repo: its tag comes from a CI build of '
+                             f'apps/{name}, so the estate path leaves it alone')
+        else:
+            out['reason'] = 'a mirrored service needs an upstream source in wizard.yaml'
         return out
 
     if version:
@@ -280,7 +284,8 @@ def perform(name: str, sink: Sink, version: str = '') -> dict:
     repo = Repo()
     sink.progress(2)
     sink.step('sync estate repo', detail=f'{settings.owner()}/{settings.name()} @ {settings.work_branch()}')
-    repo.sync()
+    head = repo.sync()
+    sink.step('sync estate repo', ok=True, detail=f'{(head or "")[:8]}')
     text = repo.read('wizard.yaml')
     entry = render.find_service(render.load_intent(text), name)
     if entry is None:
@@ -289,9 +294,13 @@ def perform(name: str, sink: Sink, version: str = '') -> dict:
     if problems:
         raise EstateError('; '.join(problems))
     if entry.get('kind') == 'build':
-        raise EstateError(f'{name} is built from source in this repo: its tag comes from a CI '
-                          f'build of apps/{name}, so a version bump would point the stack at an '
-                          f'image that does not exist. Release it by merging the app change.')
+        raise EstateError(
+            f'{name} is built from source and pinned under a version tag by hand '
+            f'(release: manual): a tag scan cannot know which build to move to.'
+            if entry.get('release') == 'manual' else
+            f'{name} is built from source in this repo: its tag comes from a CI build of '
+            f'apps/{name}, so a version bump would point the stack at an image that does '
+            f'not exist. Release it by merging the app change.')
     source = entry.get('source') or ''
     if not source:
         raise EstateError(f'{name} has no upstream source in wizard.yaml')
@@ -306,8 +315,9 @@ def perform(name: str, sink: Sink, version: str = '') -> dict:
         newest = tags.newest_tag(source)
         target = newest['best']
         if newest['up_to_date']:
-            sink.step('already newest', ok=True,
+            sink.step('newest upstream tag', ok=True,
                       detail=f'{current} is the newest {newest.get("repo") or source} tag')
+            sink.step('already newest', ok=True, detail=current)
             sink.progress(100)
             return {'up_to_date': True, 'current': current, 'name': name}
         sink.step('newest upstream tag', ok=True, detail=f'{current} -> {target}')
