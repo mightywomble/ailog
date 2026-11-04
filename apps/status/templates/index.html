@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homelab · status</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
+</head>
+<body>
+<div class="progress" id="progress"><i></i></div>
+
+<header class="top">
+  <div class="brand">
+    <span class="logo"></span>
+    <div>
+      <h1>homelab</h1>
+      <span class="sub">status.safehomelan.com</span>
+    </div>
+  </div>
+
+  <div class="overall" id="overall">
+    <span class="dot" id="overallDot"></span>
+    <span id="overallText">connecting…</span>
+  </div>
+
+  <div class="counts" id="counts"></div>
+
+  <div class="top-actions">
+    <span class="updated" id="updated">—</span>
+    <button id="refresh" class="btn" title="Poll every source now (R)">
+      <span class="spin"></span><span>Refresh</span>
+    </button>
+    <button id="theme" class="btn icon" title="Toggle light / dark (T)" aria-label="Toggle theme">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<section class="ribbon">
+  <div class="ribbon-head">
+    <h2>Last 12 hours</h2>
+    <span class="muted" id="ribbonSummary">loading history…</span>
+  </div>
+  <div class="timeline" id="timeline"></div>
+  <div class="ticks"><span>12h ago</span><span>9h</span><span>6h</span><span>3h</span><span>now</span></div>
+</section>
+
+<main>
+  <div class="lanes" id="lanes"></div>
+
+  <section class="issues">
+    <div class="issues-head">
+      <h2>Issues &amp; changes</h2>
+      <span class="muted">derived from polled state · newest first</span>
+    </div>
+    <div id="issues" class="issue-list"><div class="empty shimmer">Loading…</div></div>
+  </section>
+
+  <footer class="srcbar" id="srcbar"></footer>
+</main>
+
+<aside id="drawer" class="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div>
+      <span class="crumb" id="dCrumb">—</span>
+      <h2 id="dName">—</h2>
+      <span class="pill" id="dPill">—</span>
+    </div>
+    <button class="btn icon" id="dClose" title="Close (esc)" aria-label="Close">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 5l14 14M19 5L5 19"/></svg>
+    </button>
+  </div>
+  <div class="tabs" id="dTabs">
+    <button data-tab="overview" class="on">Overview</button>
+    <button data-tab="stats">Stats</button>
+    <button data-tab="logs">Logs</button>
+  </div>
+  <div class="drawer-body" id="dBody"></div>
+</aside>
+<div class="scrim" id="scrim"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
