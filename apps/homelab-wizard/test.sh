@@ -11,7 +11,7 @@ for i in $(seq 1 30); do curl -fsS "http://localhost:$PORT/healthz" >/dev/null 2
 fail=0
 check() { body=$(curl -sS -m 10 "http://localhost:$PORT$1" 2>/dev/null)
   case "$body" in *"$2"*) echo "ok   $3";; *) echo "FAIL $3 (got: $(printf '%s' "$body" | head -c 140))"; fail=1;; esac; }
-code() { got=$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "http://localhost:$PORT$1")
+code() { got=$(curl -sS -o /dev/null -w '%{http_code}' -m "${3:-10}" "http://localhost:$PORT$1")
   [ "$got" = "$2" ] && echo "ok   $1 -> $2" || { echo "FAIL $1 -> $got (wanted $2)"; fail=1; }; }
 check /healthz '"ok"' healthz
 code / 200
@@ -22,7 +22,9 @@ check /static/app.js 'openJob' "job runner"
 check /static/app.js 'pipeline' "pipeline"
 code /api/state 200
 check /api/state '"settings"' "settings key"
-code /api/ports 200
+# no ssh key in the smoke container: keep this generous, the point is that it
+# answers instead of hanging
+code /api/ports 200 40
 code /api/models 200
 body=$(curl -sS -o /dev/null -w '%{http_code}' -m 15 -X PUT -H 'Content-Type: application/json' \
   -d '{"entry":{"name":"BAD NAME","kind":"mirror"}}' "http://localhost:$PORT/api/services/bad")
