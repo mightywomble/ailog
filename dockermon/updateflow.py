@@ -459,6 +459,9 @@ def _worker(app, job_id: str, host_key: str, image: str, container: str) -> None
             _job_step(job_id, 'reading the host', detail=f'{host_key}')
             current = plan(host_key, image, container)
             _job_update(job_id, plan=current)
+            targets = len(current['targets'])
+            _job_step(job_id, 'reading the host', ok=True,
+                      detail=f"{targets} target{'' if targets == 1 else 's'}")
             if not current['supported']:
                 reasons = '; '.join(t['reason'] for t in current['targets'] if t['reason'])
                 _job_update(job_id, status='blocked',
