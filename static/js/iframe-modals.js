@@ -51,6 +51,42 @@
             : false;
     };
 
+    // The homelab wizard is a foreign document (wizard.safehomelan.com), so it
+    // is framed rather than merged, and the CSP's frame-src names its origin
+    // (core/security.py, from AILOG_WIZARD_URL). A deep link tells the wizard
+    // which service row to open, so "update" lands on that app instead of the
+    // service list.
+    window.openWizardModal = function (href, label) {
+        if (!href) return;
+        // The wizard cannot see this app's location, so the only way back is
+        // the Exit button here; the header keeps a plain link for anyone who
+        // wants the wizard's own full window.
+        const external = document.getElementById('wizardModalExtern');
+        if (external) external.setAttribute('href', href);
+        openFrame('wizardModal', 'wizardModalFrame', 'wizardModalTitle',
+                  href, label, 'Homelab wizard');
+    };
+    window.closeWizardModal = function () {
+        // closeFrame -> closeAppModal dispatches appmodal:close, and the
+        // listener below turns that into the Docker view's refresh, so closing
+        // by button, Escape or backdrop all behave the same.
+        closeFrame('wizardModal', 'wizardModalFrame');
+    };
+
+    // The wizard posts after a successful deploy/test (it cannot touch this
+    // document). Only its own origin is trusted.
+    window.addEventListener('message', (event) => {
+        const wizardOrigin = (window.AILOG_WIZARD_URL || 'https://wizard.safehomelan.com/');
+        let allowed = '';
+        try { allowed = new URL(wizardOrigin).origin; } catch (err) { allowed = ''; }
+        if (!allowed || event.origin !== allowed) return;
+        const data = event.data || {};
+        if (data.source !== 'homelab-wizard') return;
+        if (data.type === 'deployed' && typeof window.onWizardDeployed === 'function') {
+            window.onWizardDeployed(data);
+        }
+    });
+
     window.openReportsModal = function (hostKey, label, query) {
         // hostKey is optional: the modal can show the global report list.
         const params = new URLSearchParams({ embed: '1' });
@@ -104,6 +140,8 @@
             ?.addEventListener('click', window.closeReportsModal);
         document.getElementById('metricsModalClose')
             ?.addEventListener('click', window.closeMetricsModal);
+        document.getElementById('wizardModalClose')
+            ?.addEventListener('click', window.closeWizardModal);
 
         // The modal's own close (Escape / backdrop / shared handler) must also
         // unload the frame, which only these listeners know how to do.
@@ -111,12 +149,18 @@
             dockerModal: 'dockerModalFrame',
             reportsModal: 'reportsModalFrame',
             metricsModal: 'metricsModalFrame',
+            wizardModal: 'wizardModalFrame',
         };
         Object.keys(FRAMES).forEach((id) => {
             document.getElementById(id)?.addEventListener('appmodal:close', () => {
                 const frame = document.getElementById(FRAMES[id]);
                 if (frame && frame.getAttribute('src') !== 'about:blank') {
                     frame.setAttribute('src', 'about:blank');
+                }
+                // Escape / backdrop closes bypass closeWizardModal, so the
+                // "a deploy just finished" refresh has to fire here too.
+                if (id === 'wizardModal' && typeof window.onWizardClosed === 'function') {
+                    window.onWizardClosed();
                 }
             });
         });

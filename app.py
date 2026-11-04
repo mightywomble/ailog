@@ -39,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.14.1'
+APP_VERSION = '3.14.2'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -94,7 +94,10 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.context_processor
     def _inject_version():
-        return {'app_version': APP_VERSION}
+        # wizard_url is the same setting the CSP reads (AILOG_WIZARD_URL), so the
+        # wizard modal can never point somewhere the browser will refuse to frame.
+        from core.security import wizard_url
+        return {'app_version': APP_VERSION, 'wizard_url': wizard_url()}
 
     # Security baseline: auth gate, security headers, upload cap, /healthz.
     from core.security import install_security

@@ -3306,7 +3306,13 @@ const showHostInfoMain = async () => {
             // stack with several services (ailog + ailog-mcp) is one wizard row.
             const linkFor = (row) => wizardLink('update', {
                 service: row.stack || row.service || row.name,
+                // The wizard matches on the name first and falls back to the
+                // image, so a container that is not in wizard.yaml yet still
+                // opens a form that already knows what it is.
+                name: row.stack || row.service || row.name,
                 image: row.image,
+                container: row.name,
+                host: dockerViewHostId,
             });
             list.innerHTML = rows.map((row) => {
                 const badge = row.update_available
@@ -3319,8 +3325,11 @@ const showHostInfoMain = async () => {
                     : (row.error
                         ? `<span class="text-[11px] text-amber-300" title="${escapeHtml(row.error)}">registry: ${escapeHtml(String(row.error).slice(0, 60))}</span>`
                         : '');
+                // "update" opens the wizard *on this row* inside the dialog:
+                // a new tab dropped the user on the wizard's whole service
+                // list, where they had to find the app again.
                 const action = row.update_available
-                    ? `<a class="text-xs px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium" href="${escapeHtml(linkFor(row))}" target="_blank" rel="noopener" title="Open the homelab wizard on this service">update</a>`
+                    ? `<button type="button" class="text-xs px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium" data-wizard-open="${escapeHtml(linkFor(row))}" data-wizard-label="${escapeHtml(row.stack || row.service || row.name || '')}" title="Open the homelab wizard on this container">update</button>`
                     : '';
                 return `
                     <div class="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
@@ -3539,9 +3548,9 @@ const showHostInfoMain = async () => {
                                 <div class="text-xs termix-muted mt-1">Hostname / resources: <span id="docker-banner-node">…</span></div>
                                 <div class="text-xs termix-muted mt-1 hidden" id="docker-banner-update">Last update: <span>…</span></div>
                             </div>
-                            <a class="ml-auto text-xs px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 shrink-0 items-center gap-1 hidden sm:inline-flex"
-                               href="/docker/${encodeURIComponent(hostId)}" target="_blank" rel="noopener"
-                               title="Charts, per-app grouping, swarm cluster and per-container detail">full monitor ↗</a>
+                            <button type="button" id="docker-full-monitor-btn"
+                                    class="ml-auto text-xs px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 shrink-0 items-center gap-1 hidden sm:inline-flex"
+                                    title="Charts, per-app grouping, swarm cluster and per-container detail">full monitor</button>
                         </div>
                     </div>
 
@@ -3615,9 +3624,60 @@ const showHostInfoMain = async () => {
                 openServerReportModal();
             });
 
-            document.getElementById('docker-add-btn')?.addEventListener('click', () => {
-                window.open(wizardLink('new', { host: hostName }), '_blank', 'noopener');
+            // ---- wizard hand-off -------------------------------------------------
+            // Everything that *changes* the estate happens in the wizard, and it
+            // opens here, in a dialog, on the row that was clicked. A blank tab
+            // used to drop the user on the wizard's full service list.
+            const openWizard = (href, label) => {
+                if (typeof window.openWizardModal === 'function') {
+                    window.openWizardModal(href, label);
+                } else {
+                    window.open(href, '_blank', 'noopener');
+                }
+            };
+
+            // The full /docker/<host> page (charts, apps, cluster) belongs in the
+            // same dialog family as the other embedded views: it polls and has
+            // its own EventSource, so a tab is worse than a closable frame.
+            document.getElementById('docker-full-monitor-btn')?.addEventListener('click', () => {
+                if (typeof window.openDockerModal === 'function') {
+                    window.openDockerModal(hostId, hostName);
+                } else {
+                    window.open(`/docker/${encodeURIComponent(hostId)}?embed=1`, '_blank', 'noopener');
+                }
             });
+
+            document.getElementById('docker-add-btn')?.addEventListener('click', () => {
+                openWizard(wizardLink('new', { host: hostName, host_key: hostId }), `${hostName} · new service`);
+            });
+
+            // One delegated listener: the update list is re-rendered on every poll,
+            // so a per-row listener would be thrown away each time.
+            document.getElementById('docker-updates-list')?.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-wizard-open]');
+                if (!button) return;
+                openWizard(button.dataset.wizardOpen,
+                           button.dataset.wizardLabel || `${hostName} · update`);
+            });
+
+            // The wizard posts 'deployed' when a pipeline finishes and the frame
+            // fires appmodal:close when the dialog closes. Both mean the estate
+            // may have moved, so the update list is re-read rather than trusted.
+            const refreshAfterWizard = async () => {
+                if (logsMainMode !== 'docker' || !dockerViewHostId) return;
+                const target = dockerViewHostId;
+                try {
+                    await fetch(`/api/docker/hosts/${encodeURIComponent(target)}/updates/refresh`, { method: 'POST' });
+                    const res = await fetch(`/api/docker/hosts/${encodeURIComponent(target)}/updates?refresh=1`, { headers: { Accept: 'application/json' } });
+                    const data = await res.json();
+                    if (viewToken !== logsMainViewToken || logsMainMode !== 'docker') return;
+                    renderDockerUpdates({ ...data, success: res.ok && data.success !== false });
+                    renderDockerLogPicker(data.containers || []);
+                } catch (_) { /* the next poll will pick it up */ }
+                if (typeof refreshDockerBadges === 'function') refreshDockerBadges(true);
+            };
+            window.onWizardDeployed = refreshAfterWizard;
+            window.onWizardClosed = refreshAfterWizard;
 
             document.getElementById('docker-updates-refresh')?.addEventListener('click', async (event) => {
                 const button = event.currentTarget;
