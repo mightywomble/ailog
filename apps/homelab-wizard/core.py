@@ -260,10 +260,27 @@ def render_stack(entry, existing=None, registry="zot.safehomelan.com"):
     return HEADER.format(name=name) + yaml.safe_dump(doc, sort_keys=False, width=100)
 
 
+def with_tag(source, version):
+    """'ghcr.io/acme/app:1.2.3' + '1.2.4' -> 'ghcr.io/acme/app:1.2.4'.
+
+    The mirror list is keyed on the source reference, so a version bump that did
+    not move the tag looked like 'nothing changed' to mirror.yml and the new
+    image was never copied into zot.
+    """
+    ref = (source or "").strip()
+    if not ref or not version or "@" in ref:
+        return ref
+    head, sep, last = ref.rpartition("/")
+    if ":" in last:
+        last = last.split(":", 1)[0]
+    return f"{head}{sep}{last}:{version}"
+
+
 def mirror_entry(entry):
     if entry.get("kind") != "mirror" or not entry.get("source"):
         return None
-    return {"name": entry.get("repo") or entry["name"], "source": entry["source"]}
+    return {"name": entry.get("repo") or entry["name"],
+            "source": with_tag(entry["source"], entry.get("version"))}
 
 
 def validate(entry):
