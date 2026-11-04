@@ -7,10 +7,12 @@ import time
 
 import core
 import forge
+import registry
 import swarmio
 
 BUILD_WF = "build.yml"
 SHIP_WF = "ship.yml"
+MIRROR_WF = "mirror.yml"
 
 
 # ------------------------------------------------------------------ wizard
@@ -235,6 +237,81 @@ def pin_versions(tags):
     for b in bumped:
         b["committed"] = bool(res.get("committed"))
     return bumped
+
+
+def _settle(stack, timeout=120):
+    """Wait for the new image to be running before anyone tests it."""
+    settings = core.load()
+    deadline = time.time() + timeout
+    last = ""
+    while time.time() < deadline:
+        rows = swarmio.service_replicas(settings, stack)
+        last = " ".join(r["replicas"] for r in rows) or "no services"
+        if rows and all(r["replicas"].split("/")[0] == r["replicas"].split("/")[-1] for r in rows):
+            return last
+        time.sleep(5)
+    return last
+
+
+def update(job, name, run_tests=True):
+    """The version bump, end to end.
+
+    Bumping a version is not the same job as adding a service: resolve what
+    upstream actually has, write that one field, let the workflow that owns the
+    image move it into zot (mirror.yml for a mirrored image, build.yml for a
+    source build), then ship and deploy it.
+    """
+    settings = core.load()
+    if not os.path.isdir(os.path.join(settings["repo_dir"], ".git")):
+        core.ensure(settings)
+    gh = forge.Gitea(settings)
+    svc = find_service(name)
+    if not svc:
+        raise RuntimeError(f"{name} is not in wizard.yaml - use the new-service flow")
+    image = svc.get("source") or svc.get("image") or ""
+    kind = svc.get("kind") or "mirror"
+
+    job.step("upstream", "running", image)
+    pick = registry.newest_tag(image)
+    job.log(f"{pick['host']}/{pick['repo']}: now {pick['current'] or 'unknown'}, "
+            f"newest {pick['best']} (looked at {', '.join(pick['candidates'][:6])})")
+    if pick.get("up_to_date"):
+        job.step("upstream", "ok", f"already on {pick['tag']}")
+        job.log(f"{name} is already on the newest version-like tag - nothing to do")
+        return {"name": name, "up_to_date": True, "tag": pick["tag"], "deployed": False}
+    tag = pick["best"]
+    job.step("upstream", "ok", f"{pick['current'] or '?'} -> {tag}")
+
+    job.step("wizard.yaml", "running")
+    old = svc.get("version")
+    svc["version"] = tag
+    res = save_service(svc)
+    if not res.get("ok"):
+        svc["version"] = old      # never leave a half-written entry behind
+        raise RuntimeError("wizard.yaml rejected the bump: " + ", ".join(res.get("problems") or []))
+    job.step("wizard.yaml", "ok", f"{name} {tag}")
+    job.log("changed: " + ", ".join(res.get("files") or []))
+
+    job.step("commit", "running")
+    commit = core.commit_and_push(f"wizard: {name} {pick['current'] or ''} -> {tag}".replace("  ", " "))
+    sha = commit.get("sha") or core._git(core.repo_dir(), "rev-parse", "HEAD").strip()
+    job.step("commit", "ok", sha[:8])
+
+    # the image has to exist in zot before the swarm is asked to run it
+    wf = MIRROR_WF if kind == "mirror" else BUILD_WF
+    run = _wait_run(job, gh, wf, sha=sha)
+    job.step(wf, "running")
+    _tail_run(job, gh, run["id"], wf + " ")
+    job.step(wf, "ok")
+
+    out = {"name": name, "from": pick["current"], "tag": tag, "kind": kind}
+    out["ship"] = ship(job, f"{name}: {pick['current'] or '?'} -> {tag}")
+    job.step("replicas", "running")
+    job.step("replicas", "ok", _settle(name))
+    if run_tests:
+        out["tests"] = test_stack(job, name, svc.get("url") or None,
+                                  (svc.get("ports") or [{}])[0].get("host") or None)
+    return out
 
 
 def pull_image(job, image, node=None):

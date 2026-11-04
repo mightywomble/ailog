@@ -55,6 +55,11 @@
       <p class="hint mono" id="imagePreview"></p>
       <div class="row"><button class="btn" id="btnFetchTags">fetch upstream tags</button><span id="tagList" class="tags"></span></div>
       <p class="hint" id="tagNote"></p>
+      <div class="row wrap foot-actions">
+        <button class="btn warn" id="btnUpdate" hidden>update to newest</button>
+        <button class="btn go" id="btnNextSource">next</button>
+        <span class="hint" id="newestNote"></span>
+      </div>
     </section>
 
     <section class="stage" data-stage="compose">
@@ -65,6 +70,7 @@
       <div class="row"><button class="btn" id="btnConvert">convert with AI</button>
         <input id="f_hint" class="input" placeholder="extra context (optional)"></div>
       <div id="convertOut" class="out"></div>
+      <div class="stage-foot"><button class="btn go" data-next>next</button></div>
     </section>
 
     <section class="stage" data-stage="stack">
@@ -74,6 +80,7 @@
       <div class="row"><button class="btn" id="btnValidate">validate</button>
         <button class="btn ghost" id="btnRender">render from form</button></div>
       <div id="validateOut" class="out"></div>
+      <div class="stage-foot"><button class="btn go" data-next>next</button></div>
     </section>
 
     <section class="stage" data-stage="ports">
@@ -83,6 +90,7 @@
       <div class="row"><button class="btn" id="btnScanPorts">scan cluster</button><span id="portStats" class="hint"></span></div>
       <div id="suggestions" class="chips"></div>
       <div class="table-wrap"><table id="portTable" class="table"></table></div>
+      <div class="stage-foot"><button class="btn go" data-next>next</button></div>
     </section>
 
     <section class="stage" data-stage="details">
@@ -98,6 +106,27 @@
         <textarea id="f_env" class="input mono code" rows="4" placeholder="TZ=Europe/London"></textarea></label>
       <label>healthcheck command <input id="f_health" class="input mono" placeholder="curl -fsS localhost:8080/healthz"></label>
       <label class="check"><input type="checkbox" id="f_hostmode"> host-mode port (per-node bind)</label>
+      <div class="stage-foot"><button class="btn go" data-next>next</button></div>
+    </section>
+
+    <section class="stage" data-stage="creds">
+      <h2>· credentials</h2>
+      <p class="hint">The login for this service, written into the stack as environment variables.
+        Generate one here, or change it later by coming back to this stage.</p>
+      <div class="grid2">
+        <label>username <input id="f_creduser" class="input mono" placeholder="admin"></label>
+        <label>username env key <input id="f_creduserkey" class="input mono" value="ADMIN_USER"></label>
+      </div>
+      <div class="grid2">
+        <label>password <input id="f_credpass" class="input mono" placeholder="generate one"></label>
+        <label>password env key <input id="f_credpwkey" class="input mono" value="ADMIN_PASSWORD"></label>
+      </div>
+      <div class="row"><button class="btn ghost" id="btnGenPass">generate password</button>
+        <button class="btn ghost" id="btnUseCreds">use for tests</button>
+        <span class="hint" id="credNote"></span></div>
+      <p class="hint">90 characters, mixed case, digits and symbols — safe in YAML, Docker env and the
+        test form. Clearing both fields removes the two keys from the environment.</p>
+      <div class="stage-foot"><button class="btn go" data-next>next</button></div>
     </section>
 
     <section class="stage" data-stage="url">
@@ -113,13 +142,24 @@
       <div class="row"><button class="btn ghost" id="btnExposePreview">preview</button>
         <button class="btn" id="btnExpose">create proxy host</button></div>
       <pre id="exposeOut" class="out mono"></pre>
+      <div class="stage-foot"><button class="btn go" data-next>next</button></div>
     </section>
 
     <section class="stage" data-stage="review">
       <h2>7 · review</h2>
       <div id="reviewOut" class="review"></div>
-      <div class="row"><button class="btn ghost" id="btnSaveDraft">save to worktree</button>
-        <button class="btn" id="btnRunAll">run pipeline</button></div>
+      <div class="row wrap">
+        <button class="btn warn" id="btnSaveDraft">save to worktree</button>
+        <span class="q" id="saveHelp" tabindex="0">?</span>
+        <button class="btn go" id="btnRunAll">run pipeline</button>
+      </div>
+      <div class="tip" id="saveTip" hidden>
+        Writes <code>wizard.yaml</code>, <code>stacks/&lt;name&gt;/stack.yml</code> (and
+        <code>mirror-images.json</code> for a mirror) into <code>/data/repo</code> on the manager.
+        <b>Nothing is committed, built, pushed, mirrored or deployed</b> — it only renders the files so
+        you can look at the result of what you just typed. Any later stage that saves will do this too.
+        Use <b>run pipeline</b> when you want it to leave the box.
+      </div>
       <p class="hint">commit → build.yml (smoke test) → PR → merge → ship.yml (release + deploy)
         → proxy host → tests.</p>
     </section>
@@ -135,6 +175,7 @@
       <div class="runbar"><div class="track"><i id="runFill"></i></div><span id="runPct" class="mono">idle</span></div>
       <div id="runSteps" class="steps"></div>
       <pre id="log" class="log mono"></pre>
+      <div class="stage-foot"><button class="btn go" id="btnRunNext" hidden>next: test</button></div>
     </section>
 
     <section class="stage" data-stage="test">
@@ -148,7 +189,7 @@
         <label>username <input id="f_testuser" class="input mono"></label>
         <label>password <input id="f_testpass" class="input mono" type="password"></label>
       </div>
-      <div class="row"><button class="btn" id="btnTest">run tests</button></div>
+      <div class="row"><button class="btn go" id="btnTest">run tests</button></div>
       <div id="testOut" class="out"></div>
     </section>
   </section>
@@ -178,6 +219,27 @@
       <button class="btn ghost" id="btnTestKey">test key</button>
       <span id="settingsOut" class="hint"></span>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="updateModal" hidden>
+  <div class="modal-body">
+    <header><h3>What do you want to update?</h3><button class="icon" data-close>✕</button></header>
+    <p class="hint" id="updateWho"></p>
+    <label class="check"><input type="checkbox" data-part="source" checked>
+      <b>version</b> — the image tag</label>
+    <label class="check"><input type="checkbox" data-part="details">
+      <b>details</b> — ports, replicas, volumes, env, healthcheck</label>
+    <label class="check"><input type="checkbox" data-part="creds">
+      <b>credentials</b> — username and password</label>
+    <label class="check"><input type="checkbox" data-part="url">
+      <b>public URL</b> — nginx proxy host + DNS</label>
+    <label class="check"><input type="checkbox" data-part="stack">
+      <b>stack file</b> — the rendered YAML itself (comes after details in review)</label>
+    <p class="hint">Only the ticked stages are shown. Everything else is left exactly as it is in
+      wizard.yaml.</p>
+    <div class="row"><button class="btn go" id="btnPartsGo">show these stages</button>
+      <button class="btn ghost" id="btnPartsReview">skip to review</button></div>
   </div>
 </div>
 
