@@ -239,5 +239,9 @@
             if (el('updateModalLog')) { el('updateModalLog').hidden = true; el('updateModalLog').textContent = ''; }
             loadPlan();
         });
+        // Escape, the backdrop and the Close button all end in closeAppModal, so
+        // one listener here stops the poll however the dialog was dismissed. The
+        // server-side job keeps running; the pane re-reads when it is done.
+        el('updateModal')?.addEventListener('appmodal:close', stopPolling);
     });
 })();
