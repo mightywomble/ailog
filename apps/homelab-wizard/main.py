@@ -73,6 +73,11 @@ class PipelineBody(BaseModel):
     test: dict | None = None
 
 
+class UpdateBody(BaseModel):
+    name: str
+    test: bool = True
+
+
 class ExposeBody(BaseModel):
     domain: str
     forward_host: str = ""
@@ -264,6 +269,22 @@ def pull(body: PullBody):
     return {"job": hub.run("pull", f"pull {body.image}",
                            lambda j: pipeline.pull_image(j, body.image, body.node),
                            meta={"image": body.image}).id}
+
+
+@app.get("/api/newest")
+def newest(image: str):
+    """What "update" would move this image to, without touching anything."""
+    try:
+        return registry.newest_tag(image)
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc), "image": image})
+
+
+@app.post("/api/update")
+def update(body: UpdateBody):
+    return {"job": hub.run("update", f"update {body.name}",
+                           lambda j: pipeline.update(j, body.name, body.test),
+                           meta=body.model_dump()).id}
 
 
 @app.post("/api/build")
