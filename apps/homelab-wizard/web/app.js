@@ -93,7 +93,20 @@ async function boot() {
     $("#suffix").textContent = "." + (st.domain_suffix || "safehomelan.com");
     $("#f_forward").value = S.settings.ingress_ip || "100.79.189.118";
     renderList(); fillSettings(st.settings);
-    if (S.services.length && !S.current) loadService(S.services[0].name);
+    // Deep links from AILog's Docker view: ?mode=update&service=<name> opens
+    // that service on Source, ?mode=new starts the add-a-service journey.
+    // No parameters behaves exactly as before (first service, source stage).
+    const deep = new URLSearchParams(location.search);
+    const wanted = (deep.get("service") || "").trim();
+    const deepMode = (deep.get("mode") || "").trim().toLowerCase();
+    if (wanted && S.services.some((s) => s.name === wanted)) {
+      await loadService(wanted);
+      if (deepMode === "review") S.stage = "review";
+    } else if (deepMode === "new") {
+      $("#btnNew").click();
+    } else if (S.services.length && !S.current) {
+      loadService(S.services[0].name);
+    }
   } catch (err) {
     $("#serviceList").innerHTML = `<li class="empty">${esc(err.message)}</li>`;
   }
