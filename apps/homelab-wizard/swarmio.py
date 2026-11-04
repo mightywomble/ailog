@@ -11,15 +11,28 @@ import core
 KEY = os.environ.get("WIZ_SSH_KEY", "/data/ssh/id_ed25519")
 USER = os.environ.get("WIZ_SSH_USER", "david")
 
+# The container has no ~/.ssh/config, so names resolve here rather than on disk.
+ALIASES = {
+    "swarm1": "100.79.189.118", "swarm-manager": "100.79.189.118",
+    "worker1": "100.109.38.8", "worker2": "100.86.172.63",
+    "worker3": "100.65.120.72", "worker4": "100.106.96.24",
+    "casaos": "100.122.246.45", "pihole": "100.122.246.45",
+    "pve": "100.97.170.97", "pve2": "100.109.244.124",
+}
+# per-host override from the environment: WIZ_ALIAS_SWARM1=10.0.0.5
+ALIASES.update({k[len("WIZ_ALIAS_"):].lower().replace("_", ""): v
+               for k, v in os.environ.items() if k.startswith("WIZ_ALIAS_")})
+
 
 class SwarmError(RuntimeError):
     pass
 
 
 def _ssh(host):
+    host = ALIASES.get(host, host)
     return ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
             "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "LogLevel=ERROR", f"{USER}@{host}"]
+            "-o", "LogLevel=ERROR", f"{USER}@{ALIASES.get(host, host)}"]
 
 
 def run(host, command, timeout=120):
