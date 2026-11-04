@@ -126,6 +126,8 @@ def ensure(settings=None):
         _git(path, "rev-parse", "--verify", "--quiet", f"refs/remotes/{target}")
     except GitError:
         target = "origin/main"
+    _git(path, "config", "user.email", "wizard@safehomelan.com")
+    _git(path, "config", "user.name", "homelab wizard")
     _git(path, "checkout", "--quiet", "-B", branch, target)
     _git(path, "reset", "--quiet", "--hard", target)
     return path
@@ -193,7 +195,8 @@ def commit_and_push(message, files=None):
         return {"committed": False, "branch": branch, "files": []}
     for f in files:
         _git(path, "add", "-A", "--", f)
-    _git(path, "commit", "--quiet", "-m", message)
+    _git(path, "-c", "user.email=wizard@safehomelan.com", "-c", "user.name=homelab wizard",
+         "commit", "--quiet", "-m", message)
     _git(path, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
     return {"committed": True, "branch": branch, "sha": _git(path, "rev-parse", "HEAD").strip(),
             "files": files, "message": message}
