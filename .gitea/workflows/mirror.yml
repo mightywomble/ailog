@@ -10,11 +10,12 @@ name: Mirror upstream images to zot
 # Triggers: a push to the 'build' branch that changes mirror-images.json, or a
 # manual run (repo Actions -> "Mirror upstream images to zot" -> Run workflow),
 # e.g. to pick up a new upstream release.
+# No paths: filter here: on this Gitea the filter never matched a dev push, so
+# the mirror silently did nothing. The 'Check for changed entries' step below is
+# the real gate and exits in seconds when nothing moved.
 on:
   push:
     branches: [build, dev]
-    paths:
-      - mirror-images.json
   workflow_dispatch:
 
 jobs:

@@ -54,6 +54,19 @@ class Gitea:
             time.sleep(3)
         return None
 
+    def dispatch(self, workflow, ref="main"):
+        """Start a workflow by hand.
+
+        The mirror only runs on a push that changes mirror-images.json, which is
+        no help when the file is already correct on the branch (or when the
+        paths filter never fired) - so the pipeline can ring the bell itself.
+        """
+        r = self.http.post(f"{self.api}{self.path}/actions/workflows/{workflow}/dispatches",
+                           json={"ref": ref})
+        if r.status_code >= 400:
+            raise ForgeError(f"dispatch {workflow} -> {r.status_code} {r.text[:200]}")
+        return {"workflow": workflow, "ref": ref, "status": r.status_code}
+
     def create_pr(self, title, head, base="main", body=""):
         r = self.http.post(f"{self.api}{self.path}/pulls",
                            json={"title": title, "head": head, "base": base, "body": body})
