@@ -115,6 +115,7 @@ select.input { appearance: none; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .chips .chip, .tags .chip { cursor: pointer; }
 .chips .chip:hover, .tags .chip:hover { border-color: var(--accent); color: var(--text); }
+.tags .chip.on { border-color: var(--accent); color: var(--accent); }
 .tags { display: flex; flex-wrap: wrap; gap: 5px; }
 .tags .chip { font-family: var(--mono); }
 .suffix { align-self: center; color: var(--dim); margin-top: 18px; }
