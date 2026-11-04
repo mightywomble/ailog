@@ -9,11 +9,12 @@ services:
       WIZ_SETTINGS: /data/settings.json
       WIZ_SSH_KEY: /data/ssh/id_ed25519
       WIZ_SSH_USER: david
-      GIT_API_KEY: <redacted>
       ZOT_USER: david
-      ZOT_PASSWORD: <redacted>
-      OPENROUTER_API_KEY: <redacted>
       OPENROUTER_MODEL: anthropic/claude-sonnet-4.5
+    secrets:
+    - wizard_gitea_token
+    - wizard_zot_password
+    - wizard_openrouter_key
     volumes:
     - type: bind
       source: /opt/docker/data/homelab-wizard
@@ -41,3 +42,11 @@ services:
       replicas: 1
       restart_policy:
         condition: any
+
+secrets:
+  wizard_gitea_token:
+    external: true
+  wizard_zot_password:
+    external: true
+  wizard_openrouter_key:
+    external: true

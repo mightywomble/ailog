@@ -214,6 +214,13 @@
       <label>domain suffix <input id="s_domain_suffix" class="input mono"></label>
     </div>
     <p class="hint" id="modelNote"></p>
+    <hr>
+    <h4 class="mini">secrets</h4>
+    <p class="hint">Tokens and passwords typed here are written to <b>Docker secrets</b>
+      (<code>docker secret create</code>) and mounted at <code>/run/secrets/…</code>.
+      Nothing secret is written to <code>settings.json</code>, <code>wizard.yaml</code>
+      or a stack file.</p>
+    <div id="secretsOut" class="out"></div>
     <div class="row">
       <button class="btn" id="btnSaveSettings">save</button>
       <button class="btn ghost" id="btnTestKey">test key</button>
