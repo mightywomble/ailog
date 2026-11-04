@@ -428,6 +428,22 @@ $("#btnSettings").onclick = async () => {
   $("#s_model").innerHTML = (d.models || []).map((m) =>
     `<option value="${esc(m.id)}" ${m.id === d.current ? "selected" : ""}>${esc(m.name || m.id)}</option>`).join("");
 };
+$("#btnTestKey").onclick = async () => {
+  // a valid key is the one thing the AI step cannot fake: /api/v1/models is
+  // public, so only a real call proves the key works
+  const out = $("#settingsOut");
+  out.textContent = "checking…"; out.className = "hint";
+  try {
+    const r = await api("/api/ai/health");
+    out.textContent = r.ok ? `key ok - ${r.label || "no label"}${r.limit ? ", limit $" + r.limit : ""}`
+                           : `key rejected (${r.status}): ${r.error}`;
+    out.className = "hint " + (r.ok ? "ok" : "bad");
+  } catch (e) {
+    out.textContent = "key rejected: " + (e.message || e);
+    out.className = "hint bad";
+  }
+};
+
 $("#btnSaveSettings").onclick = async () => {
   const [owner, repo] = ($("#s_gitea_repo").value || "/").split("/");
   const patch = { gitea_url: $("#s_gitea_url").value.trim(), gitea_owner: owner || "david",

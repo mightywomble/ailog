@@ -181,6 +181,26 @@ def _chat(settings, messages, timeout=180):
     return data["choices"][0]["message"]["content"], data.get("usage") or {}
 
 
+def check_key(settings):
+    """Cheap live check for the settings panel: /api/v1/models is public, so a
+    455-model list proves nothing about the key. The key itself is the thing
+    that 401s with 'User not found.' when it has been revoked."""
+    core.require(settings, "openrouter_key")
+    r = httpx.get("https://openrouter.ai/api/v1/key",
+                  headers={"Authorization": f"Bearer {settings['openrouter_key']}"},
+                  timeout=20)
+    if r.status_code >= 400:
+        detail = ""
+        try:
+            detail = r.json().get("error", {}).get("message", "")
+        except Exception:
+            detail = r.text[:200]
+        return {"ok": False, "status": r.status_code, "error": detail or r.reason_phrase}
+    data = r.json().get("data") or {}
+    return {"ok": True, "label": data.get("label"), "limit": data.get("limit"),
+            "usage": data.get("usage"), "model": settings.get("openrouter_model")}
+
+
 def convert(settings, compose_text, stack_name, hint=""):
     audit = audit_compose(compose_text)
     user = ("Stack name: " + stack_name

@@ -165,6 +165,14 @@ def settings_put(body: SettingsPatch):
     return core.public()
 
 
+@app.get("/api/ai/health")
+def ai_health():
+    try:
+        return assist.check_key(core.load())
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+
+
 @app.get("/api/models")
 def models():
     return {"models": assist.models(), "current": core.load().get("openrouter_model")}
