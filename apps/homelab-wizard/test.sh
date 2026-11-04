@@ -29,5 +29,16 @@ code /api/models 200
 body=$(curl -sS -o /dev/null -w '%{http_code}' -m 15 -X PUT -H 'Content-Type: application/json' \
   -d '{"entry":{"name":"BAD NAME","kind":"mirror"}}' "http://localhost:$PORT/api/services/bad")
 [ "$body" = "400" ] && echo "ok   invalid service -> 400" || { echo "FAIL invalid service -> $body"; fail=1; }
+# tag listing is server-side because Docker Hub has no CORS headers. A live tag
+# fetch would make the smoke test depend on the internet, so assert the shape
+# (and the error path) instead: this is the endpoint that used to only be
+# reachable from the browser.
+code "/api/tags?image=" 400 20
+out=$(curl -sS -m 20 "http://localhost:$PORT/api/tags?image=docker.io/amir20/dozzle:latest")
+if echo "$out" | grep -q '"tags"'; then echo "ok   /api/tags -> live tags"
+elif echo "$out" | grep -q '"error"'; then echo "ok   /api/tags -> offline ($(echo "$out" | head -c 60))"
+else echo "FAIL /api/tags -> $out"; fail=1; fi
+check /static/app.js '/api/tags' "tag fetcher is server-side"
+
 docker logs "$NAME" 2>&1 | grep -qi traceback && { echo "FAIL traceback in logs"; fail=1; } || echo "ok   no traceback"
 exit $fail
