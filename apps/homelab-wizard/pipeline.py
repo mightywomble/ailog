@@ -191,6 +191,52 @@ def ship(job, title=None):
     return {"pr": pr["number"], "run": run["id"]}
 
 
+def released_tags(gh, run_id):
+    """Tags a ship run actually pushed, scraped from its release job log.
+
+    The pinned default in ${IMAGE_TAG:-<tag>} is the only thing standing between
+    a stacks-only deploy and a pull of a tag that was never pushed, so it has to
+    follow the last successful build.
+    """
+    tags = {}
+    try:
+        jobs_ = gh.jobs(run_id)
+    except Exception:
+        return tags
+    for wjob in jobs_:
+        text = gh.job_log(wjob.get("id")) or ""
+        for m in re.finditer(r"released\s+\S+/([A-Za-z0-9][A-Za-z0-9._-]*):(build-\d+)", text):
+            tags[m.group(1)] = m.group(2)
+    return tags
+
+
+def pin_versions(tags):
+    """Bump wizard.yaml's pinned fallback tag to what was just released."""
+    if not tags:
+        return []
+    wiz = load_wizard()
+    bumped, files = [], set()
+    for svc in wiz.get("services") or []:
+        if svc.get("kind") != "build":
+            continue
+        tag = tags.get(svc.get("repo") or svc.get("name"))
+        if tag and str(svc.get("version")) != tag:
+            svc["version"] = tag
+            bumped.append({"name": svc["name"], "version": tag})
+    if not bumped:
+        return []
+    core.write_yaml("wizard.yaml", wiz)
+    files.add("wizard.yaml")
+    for b in bumped:
+        svc = find_service(b["name"])
+        if svc:
+            files.update(_render_service(svc))
+    res = core.commit_and_push(f"wizard: pin {', '.join(b['name'] + ' at ' + b['version'] for b in bumped)}")
+    for b in bumped:
+        b["committed"] = bool(res.get("committed"))
+    return bumped
+
+
 def pull_image(job, image, node=None):
     settings = core.load()
     job.step("pull", "running", image)
