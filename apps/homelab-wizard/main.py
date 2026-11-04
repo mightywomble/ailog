@@ -18,7 +18,23 @@ import pipeline
 import swarmio
 from jobs import hub
 
-HERE = os.path.dirname(os.path.abspath(__file__))  # web/ is served from the image
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+@app.on_event("startup")
+def _sync_on_boot():
+    """A restart is a clean slate: force the worktree back to origin/<branch>.
+    (A crash mid-commit otherwise leaves the clone dirty, and a dirty clone is
+    deliberately never reset while the app is running.)"""
+    import threading
+
+    def go():
+        try:
+            core.ensure(core.load())
+        except Exception:
+            pass
+
+    threading.Thread(target=go, daemon=True).start()  # web/ is served from the image
 app = FastAPI(title="homelab-wizard", docs_url="/api/docs")
 
 
