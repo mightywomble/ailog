@@ -269,6 +269,15 @@ def pipeline_run(body: PipelineBody):
         out["build"] = pipeline.build(job, body.message)
         if body.deploy:
             out["ship"] = pipeline.ship(job, body.message)
+            # the pinned fallback tag must follow what this run released, or the
+            # next stacks-only deploy falls back to a tag zot no longer has
+            try:
+                job.step("pin tags", "running")
+                tags = pipeline.released_tags(forge.Gitea(core.load()), out["ship"]["run"])
+                pinned = pipeline.pin_versions(tags)
+                job.step("pin tags", "ok", ", ".join(p["name"] + ":" + p["version"] for p in pinned) or "nothing to pin")
+            except Exception as exc:
+                job.log(f"pin tags skipped: {exc}")
         if body.expose:
             settings = core.load()
             job.step("proxy host", "running", body.expose["domain"])
