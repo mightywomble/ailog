@@ -112,7 +112,7 @@ services:
   - host: 8083
     container: 8080
     mode: host
-  url: 
+  url: null
   replicas: 1
   volumes:
   - host: /var/run/docker.sock
@@ -362,3 +362,18 @@ services:
   env_count: 4
   companions:
   - mysql
+- name: homelab-wizard
+  kind: build
+  repo: homelab-wizard
+  version: build-35
+  service: wizard
+  ports:
+  - host: 8095
+    container: 8080
+    mode: ingress
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/homelab-wizard
+    container: /data
+  url: wizard.safehomelan.com
+  env: {}
