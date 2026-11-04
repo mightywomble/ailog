@@ -99,6 +99,7 @@ async function boot() {
   }
   const h = (location.hash || "").slice(1);
   if (STAGES.some(([id]) => id === h)) S.stage = h;
+  wireClose();
   go(S.stage); loadExposeMeta();
 }
 
@@ -370,6 +371,23 @@ function openJob(id, title) {
 }
 
 /* Only AILog's Docker view listens, and only from this document's origin. */
+/* The dialog AILog frames us in owns its own chrome, but a red X inside the
+   wizard is where the hand actually goes. Only shown when framed; clicking it
+   asks the parent to close the dialog (the wizard cannot close its own frame). */
+const FRAMED = (() => { try { return window.parent !== window; } catch (err) { return true; } })();
+
+function wireClose() {
+  const btn = $("#btnClose");
+  if (!btn) return;
+  btn.hidden = !FRAMED;
+  btn.onclick = () => {
+    if (!FRAMED) return;
+    try {
+      window.parent.postMessage({ source: "homelab-wizard", type: "close" }, "*");
+    } catch (err) { /* parent gone */ }
+  };
+}
+
 function tellParent(status, result) {
   if (window.parent === window) return;
   try {
