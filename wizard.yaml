@@ -309,12 +309,12 @@ services:
   image: zot.safehomelan.com/termix:26.10.3
   repo: termix
   version: 26.11.0
-  source: ghcr.io/termix-ssh/termix:26.10.3
+  source: ghcr.io/termix-ssh/termix:26.11.0
   ports:
   - host: 8080
     container: 8080
     mode: ingress
-  url: ''
+  url: ssh.safehomelan.com
   replicas: 1
   volumes:
   - host: /opt/docker/data/termix
