@@ -32,12 +32,19 @@ reserved_ports:
   '5001': ailog
 services:
 - name: ailog
-  kind: mirror
+  # Built from david/ailog and pushed to zot under a human version tag by hand.
+  # `release: manual` keeps the literal pin: ship.yml exports ONE IMAGE_TAG per
+  # stack, so a stack holding two ${IMAGE_TAG:-...} images (this one and
+  # ailog-mcp) is refused unless CI built both - and mirroring
+  # docker.io/mightywomble/ailog would overwrite the released image with a
+  # stale upstream one, which is what the removed mirror entry used to allow.
+  kind: build
+  release: manual
   service: ailog
-  image: zot.safehomelan.com/ailog:latest
+  image: zot.safehomelan.com/ailog:v3.17.0
   repo: ailog
-  version: latest
-  source: docker.io/mightywomble/ailog:latest
+  version: v3.17.0
+  source: ''
   ports:
   - host: 5001
     container: 5001

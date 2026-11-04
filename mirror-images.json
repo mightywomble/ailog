@@ -42,10 +42,6 @@
       "source": "docker.io/mintplexlabs/anythingllm:1.19.0"
     },
     {
-      "name": "ailog",
-      "source": "docker.io/mightywomble/ailog:latest"
-    },
-    {
       "name": "langlearn",
       "source": "docker.io/mightywomble/langlearn:1.0"
     },
