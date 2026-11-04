@@ -825,9 +825,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-11-04): `zot.safehomelan.com/ailog:v3.14.1`
+**Current production image** (as of 2026-11-04): `zot.safehomelan.com/ailog:v3.14.2`
 (`:latest` points at the same manifest), digest
-`sha256:8bd656540eaec3ebea667bf0bcb9529f3c3f4c74b48822b326198875ed824463`, running as
+`sha256:7983d40d4b6ef65716c9b959cbceaa01626291ef640b88bea2e3bf71c24b5ca6`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
@@ -836,7 +836,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.14.1 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.14.2 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
