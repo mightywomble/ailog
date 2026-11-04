@@ -38,6 +38,7 @@ from . import stats as dstats
 from . import swarm as dswarm
 from . import updates as dupdates
 from core.timeutil import utcnow
+from database import release_session
 
 docker_bp = Blueprint('docker', __name__)
 
@@ -76,6 +77,7 @@ def _save_endpoint(host_key: str, result: dict):
         row.last_error = result.get('error')
         row.last_checked_at = utcnow()
         db.session.commit()
+        _forget_endpoint_cache()
     except Exception:
         try:
             from database import db
@@ -84,14 +86,42 @@ def _save_endpoint(host_key: str, result: dict):
             pass
 
 
+ENDPOINT_TTL = 3.0
+_endpoint_cache = {'ts': 0.0, 'rows': {}}
+_endpoint_cache_lock = threading.Lock()
+
+
+def _forget_endpoint_cache() -> None:
+    with _endpoint_cache_lock:
+        _endpoint_cache['ts'] = 0.0
+        _endpoint_cache['rows'] = {}
+
+
 def _known_endpoints() -> dict:
+    """Discovery results for every host, shared for a few seconds.
+
+    Every stats poll and every background scan resolves a transport, and each
+    of those used to be a separate query against the (NFS-backed) database. The
+    rows only change when something is discovered, so a 3 second cache costs
+    nothing in accuracy and removes most of the database traffic.
+    """
+    now = time.time()
+    with _endpoint_cache_lock:
+        # ts == 0 means "never read", so an empty table is still cached (and a
+        # discovery result invalidates it explicitly).
+        if _endpoint_cache['ts'] and (now - _endpoint_cache['ts']) < ENDPOINT_TTL:
+            return _endpoint_cache['rows']
     model = _endpoint_model()
     if model is None:
         return {}
     try:
-        return {row.host_key: row.to_dict() for row in model.query.all()}
+        rows = {row.host_key: row.to_dict() for row in model.query.all()}
     except Exception:
         return {}
+    with _endpoint_cache_lock:
+        _endpoint_cache['ts'] = now
+        _endpoint_cache['rows'] = rows
+    return rows
 
 
 # --------------------------------------------------------------------------
@@ -116,9 +146,15 @@ def _transport_for(host_key: str):
     row = _known_endpoints().get(host_key) or {}
     mode = row.get('mode')
 
+    # Everything below leaves the database behind (an SSH probe, a Docker SDK
+    # client); holding this thread's connection through it is what starved the
+    # pool. See database.release_session.
+    release_session()
+
     if not mode:
         found = ep.discover_host(host_key)
         _save_endpoint(host_key, found)
+        release_session()              # discovery does SSH; do not pin a connection
         if not found.get('reachable'):
             raise DockerRequestError(found.get('error') or 'Docker API unreachable')
         mode = found.get('mode')

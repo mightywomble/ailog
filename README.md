@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-11-04 | v3.15.0 | **The app says what it is doing, and stops starving its own database.** Every background scan and metric probe held a pooled SQLAlchemy connection for the length of its SSH round and each registry lookup, and the Docker update scan started *one thread per host* — 17 hosts meant 17 pinned connections against a 5+10 pool, so every request died with `QueuePool limit ... connection timed out` and the dashboard came up empty. Connections are now released before any network I/O (`database.release_session`), the scan runs three hosts at a time from one queue, discovery rows are cached for 3 s, and a starved pool fails in 10 s instead of 30. Alongside it: an **activity strip** that names the job and the host — "Collecting host metrics · 3 of 12 hosts · contacting casaos · 25%" — with a determinate bar, and a red close button inside the wizard for when it is framed by AILog. | ✅ Complete |
 | 2026-11-04 | v3.14.2 | **Update and full monitor open in dialogs, on the thing you clicked.** The `update` button on a container row opened the wizard in a blank tab on its whole service list, so the app you had just identified had to be found again; it now opens the wizard *in a dialog* deep-linked to that container — exact name first, then the image, and if the container is not in `wizard.yaml` at all (a compose container on casaos) the add-a-service form opens prefilled with its name, image, tag and repo, so "update" becomes "adopt, then update". `full monitor` uses the same dialog family as the other embedded views instead of a tab, with an Exit button, Escape and backdrop close. The wizard posts back when a job ends and the pane re-reads that host's update list, and `AILOG_WIZARD_URL` now drives both the deep links and the CSP's `frame-src` (without naming the wizard's origin, the frame is refused and the dialog is blank). | ✅ Complete |
 | 2026-11-04 | v3.14.1 | **Swarm task revisions are not 'containers that need attention'.** A deploy leaves the previous task's container behind on the node, exited; the update checker counted it as a broken container *and* offered its old image as an update, so every swarm host went red after every deploy. Only the current task of a service is judged now — a service with no running task still reports as attention. | ✅ Complete |
 | 2026-11-04 | v3.14.0 | **Docker Information, one click from the host list.** The Docker mark moved above the SSH prompt and is now a status square: green when nothing needs doing, red when an image upstream has moved on or a container is not healthy, dashed grey until the first scan. Clicking it opens a Docker-scoped view instead of Host Information — same banner, a purple **Analyse Docker Logs** that scopes the server report to container logs only, the docker fleet's CPU/RAM/NET/STORAGE as a percentage of the host itself, a container-updates pane that compares local manifest digests with the registry (pinned tags included, zot authenticated from swarm secrets), and a live per-container log tail with follow, filter and AI analyse. Adding or updating a container hands off to the homelab wizard by deep link (`?mode=update&service=<stack>`). Badges read a background scan and a cached metrics snapshot, so the sidebar never waits on SSH. | ✅ Complete |
@@ -212,6 +213,23 @@ are the things you *do* to a host:
   updated). The wizard posts `{source:'homelab-wizard', type:'deployed'}` back
   when a job ends and the pane re-reads the host. `AILOG_WIZARD_URL` sets the
   wizard's address for both the links and the CSP's `frame-src`.
+
+### 📶 **The activity strip**
+
+Two things take long enough to look like a freeze: collecting every host's
+metrics on a cold start (an SSH round each), and rescanning a host's images
+against their registries (a manifest lookup per image). Both now report
+progress to `GET /api/activity`, which only reads two in-memory dicts — no SSH,
+no database — so the strip can poll it every 1.5 s without competing with the
+work it describes:
+
+* **Metrics:** `Collecting host metrics · 3 of 12 hosts · contacting casaos · 25%`
+* **Docker:** `Scanning containers for updates · 1 of 9 hosts · checking
+  swarm-worker4 · 11%`
+
+The bar is determinate when a total is known and an indeterminate sweep before
+that. It hides itself when nothing is running, backs off to an 8 s poll when
+idle, and stops polling in a hidden tab. On a phone it sits above the tab bar.
 
 ### 🔍 **Advanced Search Capabilities**
 * **Global Search:** Search across all logs from all configured hosts simultaneously
@@ -825,7 +843,7 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-11-04): `zot.safehomelan.com/ailog:v3.14.2`
+**Current production image** (as of 2026-11-04): `zot.safehomelan.com/ailog:v3.15.0`
 (`:latest` points at the same manifest), digest
 `sha256:7983d40d4b6ef65716c9b959cbceaa01626291ef640b88bea2e3bf71c24b5ca6`, running as
 `ailog_ailog.1` on `swarm-worker1`. Production runs remediation in **`dry_run`**
@@ -836,7 +854,7 @@ playbook only executes with `--check --diff`. Redeploy after a push with:
 # --force alone reuses the image the node already has; name the tag so the
 # node actually resolves and pulls the new digest.
 docker service update --with-registry-auth --force \
-  --image zot.safehomelan.com/ailog:v3.14.2 ailog_ailog
+  --image zot.safehomelan.com/ailog:v3.15.0 ailog_ailog
 ```
 
 Build the image with `--provenance=false --sbom=false`, otherwise BuildKit emits a manifest
