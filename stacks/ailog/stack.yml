@@ -1,8 +1,9 @@
 # AILog (multi-host log analysis platform) on the swarm, image mirrored into
 # zot by repo1's "Mirror upstream images to zot" workflow.
 # Upstream: https://git.safehomelan.com/david/ailog (vibecoded app; image
-# docker.io/mightywomble/ailog has no version tags, so zot carries a sha-
-# digest tag + :latest and this stack tracks :latest)
+# docker.io/mightywomble/ailog has no useful version tags upstream, so the
+# release workflow publishes version-tagged copies into zot; this stack pins
+# one of those (v3.13.5, 2026-10-31). Bump the tag to upgrade.
 # - single container; the SQLite app db persists on the shared NFS
 #   (/opt/docker/data/ailog) so the service can reschedule to any node
 # - NO LOGIN: the app is unauthenticated by design - trusted internal
@@ -13,7 +14,7 @@
 # IP>:5001 (routing mesh)
 services:
   ailog:
-    image: zot.safehomelan.com/ailog:latest
+    image: zot.safehomelan.com/ailog:v3.13.5
     environment:
       DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
       # Master key for encrypting uploaded SSH private keys at rest
