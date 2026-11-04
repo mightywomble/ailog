@@ -3,7 +3,7 @@
 # Upstream: https://git.safehomelan.com/david/ailog (vibecoded app; image
 # docker.io/mightywomble/ailog has no useful version tags upstream, so the
 # release workflow publishes version-tagged copies into zot; this stack pins
-# one of those (v3.15.0, 2026-11-04). Bump the tag to upgrade.
+# one of those (v3.15.1, 2026-11-04). Bump the tag to upgrade.
 # - single container; the SQLite app db persists on the shared NFS
 #   (/opt/docker/data/ailog) so the service can reschedule to any node
 # - NO LOGIN: the app is unauthenticated by design - trusted internal
@@ -14,7 +14,7 @@
 # IP>:5001 (routing mesh)
 services:
   ailog:
-    image: zot.safehomelan.com/ailog:v3.15.0
+    image: zot.safehomelan.com/ailog:v3.15.1
     environment:
       DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
       # Registry credentials for the update checker (dockermon/updates.py).
