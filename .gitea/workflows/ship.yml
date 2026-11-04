@@ -36,11 +36,12 @@ jobs:
             APPS=$(ls apps 2>/dev/null || true)
             STACKS=$(ls stacks 2>/dev/null || true)
           fi
-          # single line, space separated: this runner does not parse the
-          # GitHub-style multi-line "name<<EOF" output syntax
-          echo "apps=$(echo $APPS | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-          echo "stacks=$(echo $STACKS | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-          echo "apps: $APPS"; echo "stacks: $STACKS"
+          # write the changed set to files: this runner resolves job outputs but
+          # not step outputs inside the same job, so the build step reads these
+          printf '%s\n' $APPS > .changed-apps
+          printf '%s\n' $STACKS > .changed-stacks
+          echo "apps: $(tr '\n' ' ' < .changed-apps)"
+          echo "stacks: $(tr '\n' ' ' < .changed-stacks)"
 
       - name: Tag
         id: meta
@@ -55,10 +56,12 @@ jobs:
         env:
           ZOT_URL: ${{ secrets.ZOT_URL }}
           BUILD_TAG: ${{ steps.meta.outputs.tag }}
-          APPS: ${{ needs.release.outputs.apps }}
+          APPS_FILE: .changed-apps
         run: |
           set -e
           REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
+          APPS=$(cat .changed-apps 2>/dev/null || true)
+          echo "apps to build: ${APPS:-none}"
           cfg() { python3 -c "import json;print(json.load(open('apps/$1/build.json')).get('$2',''))"; }
 
           for APP in $APPS; do
