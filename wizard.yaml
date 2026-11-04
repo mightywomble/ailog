@@ -377,3 +377,7 @@ services:
     container: /data
   url: wizard.safehomelan.com
   env: {}
+  image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-35}
+  source: ''
+  env_count: 8
+  companions: []
