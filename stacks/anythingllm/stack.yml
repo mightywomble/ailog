@@ -1,40 +1,23 @@
-# AnythingLLM (all-in-one private AI chat app with document RAG) on the swarm,
-# image mirrored into zot by repo1's "Mirror upstream images to zot" workflow
-# (run manually 2026-10-18; the push-triggered diff check is broken - see
-# the anythingllm deploy notes).
-# Upstream guide: https://docs.anythingllm.com/installation-docker/local-docker
-# - single container; the app runs as UID/GID 1000 and keeps everything (SQLite
-#   db, LanceDB vectors, documents, .env) under /app/server/storage, which is
-#   bind-mounted to the shared NFS so the service can reschedule to any node
-#   (storage dir + .env pre-created on the NFS, chowned 1000:1000)
-# - swarm nodes expose AVX2 (verified 2026-10-18 after the pve2 CPU type
-#   change), so the default embedded LanceDB vector db works; without AVX2 the
-#   container dies with "Illegal instruction (core dumped)" and the pg image
-#   variant + pgvector would be needed instead
-# - cap_add SYS_ADMIN per the upstream docker run recommendation
-# - STORAGE_DIR is the only app env preset; LLM provider / embedder are NOT
-#   preset so they can be configured in the UI - the first visit runs
-#   onboarding: create the admin account, pick an LLM provider and paste its
-#   API key (there are no default credentials)
-# Access: http://<any swarm node LAN IP>:3005 or http://<any node Tailscale
-# IP>:3005 (routing mesh)
+# anythingllm - rendered from wizard.yaml by homelab-wizard.
+# Owned by the wizard: image tag, published ports, replicas, volumes.
+# Everything else here is hand-maintained and survives a re-render.
 services:
   anythingllm:
-    image: zot.safehomelan.com/anythingllm:1.18.0
+    image: zot.safehomelan.com/anythingllm:1.19.0
     environment:
-      STORAGE_DIR: "/app/server/storage"
-      TZ: "Europe/London"
+      STORAGE_DIR: /app/server/storage
+      TZ: Europe/London
     cap_add:
-      - SYS_ADMIN
+    - SYS_ADMIN
     volumes:
-      - type: bind
-        source: /opt/docker/data/anythingllm/storage
-        target: /app/server/storage
-      - type: bind
-        source: /opt/docker/data/anythingllm/storage/.env
-        target: /app/server/.env
+    - type: bind
+      source: /opt/docker/data/anythingllm/storage
+      target: /app/server/storage
+    - type: bind
+      source: /opt/docker/data/anythingllm/storage/.env
+      target: /app/server/.env
     ports:
-      - "3005:3001"
+    - 3005:3001
     deploy:
       replicas: 1
       restart_policy:
