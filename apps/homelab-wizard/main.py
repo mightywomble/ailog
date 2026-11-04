@@ -16,6 +16,7 @@ import core
 import forge
 import pipeline
 import registry
+import vault as secrets_mod
 import swarmio
 from jobs import hub
 
@@ -30,6 +31,10 @@ def _sync_on_boot():
     import threading
 
     def go():
+        try:
+            core.save({})        # drop any secret an older version wrote to disk
+        except Exception:
+            pass
         try:
             core.ensure(core.load())
         except Exception:
@@ -71,6 +76,11 @@ class PipelineBody(BaseModel):
     deploy: bool = True
     expose: dict | None = None
     test: dict | None = None
+
+
+class SecretBody(BaseModel):
+    name: str
+    value: str
 
 
 class UpdateBody(BaseModel):
@@ -167,8 +177,51 @@ def settings_get():
 
 @app.put("/api/settings")
 def settings_put(body: SettingsPatch):
-    core.save({k: v for k, v in body.patch.items() if v != "••••••"})
-    return core.public()
+    patch = {k: v for k, v in body.patch.items() if v != "••••••"}
+    # a token/password/key typed here becomes a swarm secret; settings.json only
+    # ever holds the pointer, so a backup of /data cannot leak the estate
+    stored, problems = {}, {}
+    for key in list(patch):
+        if key not in core.SECRETS:
+            continue
+        value = patch.pop(key)
+        if not value:
+            continue
+        name = next((n for n, (k, _) in secrets_mod.WIZARD_SECRETS.items() if k == key), None)
+        if not name:
+            continue
+        try:
+            stored[key] = secrets_mod.store(core.load(), name, value)
+        except Exception as exc:
+            problems[key] = str(exc)
+    core.save(patch)
+    out = core.public()
+    out["secrets"] = stored
+    if problems:
+        out["secret_errors"] = problems
+    return out
+
+
+@app.get("/api/secrets")
+def secrets_state():
+    settings = core.load()
+    try:
+        swarm = secrets_mod.list_(settings)
+        error = None
+    except Exception as exc:
+        swarm, error = [], str(exc)
+    audit = secrets_mod.audit(pipeline.load_wizard(), core.repo_dir())
+    return {"swarm": swarm, "error": error, "audit": audit,
+            "mounted": [n for n in secrets_mod.WIZARD_SECRETS if secrets_mod.read_file(n)],
+            "plaintext_rows": len(audit)}
+
+
+@app.post("/api/secrets")
+def secrets_store(body: SecretBody):
+    try:
+        return secrets_mod.store(core.load(), body.name, body.value)
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
 
 
 @app.get("/api/ai/health")
