@@ -16,7 +16,7 @@
 #   grammar.daveknowstech.com -> :8001
 services:
   cloudflared:
-    image: cloudflare/cloudflared:2026.10.4
+    image: zot.safehomelan.com/cloudflared:2026.10.7
     command: tunnel --no-autoupdate run --token eyJhIjoiM2Q5NjBmODMzNDJlZTI1NjhhNDYyMTI0OTJhZTBkMzMiLCJ0IjoiZWU5OTE0YzYtMTNkOS00ZGQwLWE0MzUtNDc5YWYxNWU5MWEyIiwicyI6Ik1ESmxabVZtWkdVdFlqbG1NQzAwWWpnMkxXSTRPRGd0TXpBMVlUaGpOekF3WldRMiJ9
     deploy:
       replicas: 2

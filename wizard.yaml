@@ -93,8 +93,8 @@ services:
   service: cloudflared
   image: cloudflare/cloudflared:2026.10.4
   repo: cloudflared
-  version: 2026.10.4
-  source: docker.io/cloudflare/cloudflared:2026.10.4
+  version: 2026.10.7
+  source: docker.io/cloudflare/cloudflared:2026.10.7
   ports: []
   url: ''
   replicas: 2
