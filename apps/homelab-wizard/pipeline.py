@@ -455,15 +455,22 @@ def test_stack(job, stack, domain=None, port=None, creds=None):
         job.log(("PASS " if ok else "FAIL ") + name + (f" - {detail}" if detail else ""))
         job.step(name, "ok" if ok else "failed", str(detail)[:80])
 
-    replicas = swarmio.service_replicas(settings, stack)
-    running = desired = 0
-    for r in replicas:
-        try:
-            run, want = r["replicas"].split("/")
-            running += int(run)
-            desired += int(want)
-        except Exception:
-            pass
+    # a rolling update shows 1/2 for a few seconds; sampling once reported a
+    # healthy service as failed
+    replicas, running, desired = [], 0, 0
+    for _ in range(18):
+        replicas = swarmio.service_replicas(settings, stack)
+        running = desired = 0
+        for r in replicas:
+            try:
+                run, want = r["replicas"].split("/")
+                running += int(run)
+                desired += int(want)
+            except Exception:
+                pass
+        if desired and running == desired:
+            break
+        time.sleep(5)
     add("replicas", desired > 0 and running == desired,
         f"{running}/{desired} over {len(replicas)} service(s)")
 
