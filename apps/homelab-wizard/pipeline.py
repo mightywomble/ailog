@@ -67,6 +67,8 @@ def save_service(entry):
     problems = core.validate(entry)
     if problems:
         return {"ok": False, "problems": problems, "files": []}
+    if entry.get("kind") == "mirror":
+        entry["source"] = core.with_tag(entry.get("source"), entry.get("version"))
     wiz = load_wizard()
     services = wiz.setdefault("services", [])
     for i, svc in enumerate(services):
@@ -137,7 +139,8 @@ def _tail_run(job, gh, run_id, label=""):
     return conclusion
 
 
-def _wait_run(job, gh, workflow, sha=None, after=0, timeout=180):
+def _wait_run(job, gh, workflow, sha=None, after=0, timeout=180, dispatch=False,
+              branch=None):
     job.step(f"waiting for {workflow}", "running")
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -146,6 +149,12 @@ def _wait_run(job, gh, workflow, sha=None, after=0, timeout=180):
             job.log(f"{workflow}: run {run['id']} for {str(run.get('head_sha'))[:8]}")
             return run
         time.sleep(3)
+    if dispatch:
+        # no push to trigger it (or the paths filter did not fire): ask directly
+        job.log(f"{workflow} did not start on its own - triggering it on {branch or 'main'}")
+        gh.dispatch(workflow, branch or "main")
+        return _wait_run(job, gh, workflow, after=after, timeout=timeout,
+                         branch=branch)
     raise RuntimeError(f"{workflow} did not start in {timeout}s - is the runner online?")
 
 
@@ -322,7 +331,8 @@ def update(job, name, run_tests=True):
 
     # the image has to exist in zot before the swarm is asked to run it
     wf = MIRROR_WF if kind == "mirror" else BUILD_WF
-    run = _wait_run(job, gh, wf, sha=sha)
+    run = _wait_run(job, gh, wf, sha=sha, timeout=90, dispatch=True,
+                    branch=settings.get("work_branch", "dev"))
     job.step(wf, "running")
     _tail_run(job, gh, run["id"], wf + " ")
     job.step(wf, "ok")
