@@ -312,28 +312,27 @@ $("#btnFetchTags").onclick = async () => {
   const src = $("#f_source").value.trim();
   if (!src) return;
   $("#tagList").innerHTML = `<span class="chip">fetching…</span>`;
-  const host = src.includes("/") ? src.split("/")[0] : "docker.io";
-  const repo = src.replace(/^[^/]+\//, "").split(":")[0];
   try {
-    const tags = await upstreamTags(host, repo);
-    $("#tagList").innerHTML = tags.slice(0, 18).map((t) => `<span class="chip" data-tag="${esc(t)}">${esc(t)}</span>`).join("");
+    // the registry call is server-side: Docker Hub sends no CORS headers, so a
+    // browser fetch can only fail with "NetworkError when attempting to fetch
+    // resource." This also handles ghcr.io tokens and our own zot credentials.
+    const d = await api("/api/tags?image=" + encodeURIComponent(src));
+    const cur = d.current;
+    $("#tagList").innerHTML = (d.tags || []).slice(0, 24).map((t) =>
+      `<span class="chip ${t === cur ? "on" : ""}" data-tag="${esc(t)}">${esc(t)}</span>`).join("")
+      || `<span class="chip">no tags listed</span>`;
+    $("#tagNote").textContent = `${d.host}/${d.repo} · ${d.count} tags` + (cur ? ` · current ${cur}` : "");
     $$("#tagList .chip").forEach((c) => c.onclick = () => {
-      $("#f_version").value = c.dataset.tag; $("#imagePreview").textContent = imageRef();
+      if (!c.dataset.tag) return;
+      $("#f_version").value = c.dataset.tag;
+      $("#imagePreview").textContent = imageRef();
+      $$("#tagList .chip").forEach((x) => x.classList.remove("on"));
+      c.classList.add("on");
     });
-  } catch (err) { $("#tagList").innerHTML = `<span class="chip">${esc(err.message)}</span>`; }
-};
-
-async function upstreamTags(host, repo) {
-  if (["docker.io", "index.docker.io"].includes(host)) {
-    const t = await fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull`).then((r) => r.json());
-    const d = await fetch(`https://registry-1.docker.io/v2/${repo}/tags/list?n=60`,
-      { headers: { Authorization: "Bearer " + t.token } }).then((r) => r.json());
-    return (d.tags || []).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  } catch (err) {
+    $("#tagList").innerHTML = `<span class="chip">${esc(err.message || err)}</span>`;
   }
-  const r = await fetch(`https://${host}/v2/${repo}/tags/list?n=60`);
-  if (!r.ok) throw new Error(`HTTP ${r.status} listing tags`);
-  return ((await r.json()).tags || []);
-}
+};
 
 /* ------------------------------------------------------------------ ports */
 async function loadPorts() { if (S.ports) { renderPorts(); return; } $("#portTable").innerHTML = `<tr><td class="empty shimmer">scanning nodes…</td></tr>`; await scanPorts(); }

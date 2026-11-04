@@ -15,6 +15,7 @@ import assist
 import core
 import forge
 import pipeline
+import registry
 import swarmio
 from jobs import hub
 
@@ -171,6 +172,16 @@ def ai_health():
         return assist.check_key(core.load())
     except Exception as exc:
         return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+
+
+@app.get("/api/tags")
+def tags(image: str, limit: int = 80):
+    """Upstream tags. Server-side on purpose: Docker Hub has no CORS headers, so
+    the browser can only fail here (NetworkError)."""
+    try:
+        return registry.list_tags(image, limit=limit)
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc), "image": image})
 
 
 @app.get("/api/models")
