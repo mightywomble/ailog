@@ -201,3 +201,9 @@ select.input { appearance: none; }
   .head { padding: 14px; }
 }
 .mini { margin: 18px 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+
+/* Close, when the wizard is framed by AILog: red, top right, and the only way
+   the frame can ask the dialog around it to go away. Standalone it stays
+   hidden - a browser tab has its own close control. */
+.icon.danger { color: #fff; background: var(--bad); border-color: var(--bad); }
+.icon.danger:hover { background: color-mix(in srgb, var(--bad) 82%, #000); border-color: color-mix(in srgb, var(--bad) 82%, #000); color: #fff; }
