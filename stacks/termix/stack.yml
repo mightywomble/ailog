@@ -1,23 +1,17 @@
-# Termix (SSH / terminal access server) from the zot mirror (repo1
-# "Mirror upstream images to zot" workflow), deployed per the upstream docs:
-# https://docs.termix.site/install/server/docker/
-# - guacd companion provides remote-desktop support
-# - data persists on the shared NFS (/opt/docker/data/termix) so the service
-#   can reschedule to any node
-# - UI: http://<any-swarm-node-tailscale-ip>:8080
-# - guacd 4822 published via the routing mesh (reachable on any node's
-#   Tailscale IP; guacd itself has no auth — trusted network only)
+# termix - rendered from wizard.yaml by homelab-wizard.
+# Owned by the wizard: image tag, published ports, replicas, volumes.
+# Everything else here is hand-maintained and survives a re-render.
 services:
   termix:
-    image: zot.safehomelan.com/termix:26.10.3
+    image: zot.safehomelan.com/termix:26.11.0
     environment:
-      PORT: "8080"
+      PORT: '8080'
     ports:
-      - "8080:8080"
+    - '8080'
     volumes:
-      - type: bind
-        source: /opt/docker/data/termix
-        target: /app/data
+    - type: bind
+      source: /opt/docker/data/termix
+      target: /app/data
     deploy:
       replicas: 1
       restart_policy:
@@ -25,11 +19,11 @@ services:
   guacd:
     image: zot.safehomelan.com/guacd:1.6.0
     ports:
-      - "4822:4822"
-    # override the image healthcheck (nc probe every 5m, no start period)
-    # so a rescheduled task reports healthy in ~15-25s, not ~5m
+    - 4822:4822
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822 || exit 1"]
+      test:
+      - CMD-SHELL
+      - nc -z 127.0.0.1 4822 || exit 1
       interval: 15s
       timeout: 5s
       retries: 3
