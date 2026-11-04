@@ -3,7 +3,7 @@
 # Upstream: https://git.safehomelan.com/david/ailog (vibecoded app; image
 # docker.io/mightywomble/ailog has no useful version tags upstream, so the
 # release workflow publishes version-tagged copies into zot; this stack pins
-# one of those (v3.13.5, 2026-10-31). Bump the tag to upgrade.
+# one of those (v3.14.0, 2026-11-04). Bump the tag to upgrade.
 # - single container; the SQLite app db persists on the shared NFS
 #   (/opt/docker/data/ailog) so the service can reschedule to any node
 # - NO LOGIN: the app is unauthenticated by design - trusted internal
@@ -14,9 +14,15 @@
 # IP>:5001 (routing mesh)
 services:
   ailog:
-    image: zot.safehomelan.com/ailog:v3.13.5
+    image: zot.safehomelan.com/ailog:v3.14.0
     environment:
       DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
+      # Registry credentials for the update checker (dockermon/updates.py).
+      # zot answers Basic realm="zot", so every manifest HEAD without these is
+      # a 401 and Container updates reports "registry: ... answered HTTP 401".
+      # The password comes from the zot_password secret mounted below; the app
+      # reads /run/secrets/zot_password itself (no ZOT_PASSWORD_FILE needed).
+      ZOT_USER: "david"
       # Master key for encrypting uploaded SSH private keys at rest
       # (Fernet, PBKDF2-derived). Keep stable - changing it makes previously
       # stored keys undecryptable.
@@ -30,6 +36,8 @@ services:
       # slug|hosts|dry_run|expiry). Without it the app falls back to a
       # development constant. Changing it only invalidates in-flight plans.
       AILOG_SECRET_KEY: "<redacted>"
+    secrets:
+      - zot_password
     volumes:
       - type: bind
         source: /opt/docker/data/ailog
@@ -94,3 +102,9 @@ services:
       restart_policy:
         condition: any
 
+
+secrets:
+  # Shared registry credential (david's zot login). Used by the update checker
+  # to read manifest digests; mounted at /run/secrets/zot_password.
+  zot_password:
+    external: true
