@@ -38,10 +38,19 @@ services:
       PORT: "3000"
     ports:
       - "3000:3000"
+    # Startup migrations can take ~60s on a cold/NFS-backed DB. The image
+    # healthcheck only allows ~80s total before killing the task, which made
+    # the server flap on first boot, so allow a longer start period here.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 6
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
 
   database:
     image: zot.safehomelan.com/postgres:17-alpine
@@ -61,7 +70,7 @@ services:
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
 
   redis:
     image: zot.safehomelan.com/redis:7-alpine
@@ -78,11 +87,19 @@ services:
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
 
   guacd:
     image: zot.safehomelan.com/guacd:1.6.0
+    # The image healthcheck only fires every 5 minutes with no start period,
+    # so Swarm reports 0/1 for ages. Check the daemon port quickly instead.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
