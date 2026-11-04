@@ -56,3 +56,28 @@ Both runners are instance-level: `build` (labels `ubuntu-latest`, `build`) and
 
 `ZOT_URL` `ZOT_USER` `ZOT_PASSWORD` `GIT_API_KEY` `GIT_SERVER_URL` `GIT_USER`
 (Gitea refuses `GITHUB_`/`GITEA_` prefixes).
+
+## Deploy rules the wizard relies on
+
+`ship.yml` exports `IMAGE_TAG` for a stack **only if** that stack references an
+app the same run pushed *and* that tag is actually in zot. Everything else
+deploys with the pinned fallback in the stack file:
+
+```yaml
+image: zot.safehomelan.com/<app>:${IMAGE_TAG:-build-48}
+```
+
+That pin is what a stacks-only change falls back to, so it must stay real. After
+a successful `ship`, the wizard scrapes the release job log for
+`released <registry>/<app>:build-<n>`, bumps `version:` in `wizard.yaml`,
+re-renders the stack and commits the pin. A stale pin is not a cosmetic problem:
+on run 37 it made every task get rejected with
+`build-37: not found`.
+
+## AI compose conversion
+
+`POST /api/ai/convert` needs a live OpenRouter key. `GET /api/models` returns the
+catalogue with or without one (`/api/v1/models` is public), so
+`GET /api/ai/health` makes a real call to `/api/v1/key` — the settings panel's
+**test key** button uses it. `401 {"error":{"message":"User not found."}}` means
+the key was revoked or deleted, not that the model is wrong.
