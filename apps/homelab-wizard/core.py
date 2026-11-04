@@ -131,6 +131,25 @@ def ensure(settings=None):
     return path
 
 
+_last_sync = [0.0]
+
+
+def sync_if_stale(settings=None, min_interval=60):
+    """Fetch + reset at most once a minute, so the UI reflects merges made
+    elsewhere (a PR merged in Gitea, another browser's commit) without paying
+    for a git round trip on every request."""
+    import time
+    settings = settings or load()
+    if time.time() - _last_sync[0] < min_interval:
+        return False
+    _last_sync[0] = time.time()
+    try:
+        ensure(settings)
+        return True
+    except Exception:
+        return False
+
+
 def read_yaml(name, settings=None):
     path = os.path.join(repo_dir(settings), name)
     return (yaml.safe_load(open(path)) or {}) if os.path.exists(path) else {}
