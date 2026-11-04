@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-11-04 | v3.14.2 | **Update and full monitor open in dialogs, on the thing you clicked.** The `update` button on a container row opened the wizard in a blank tab on its whole service list, so the app you had just identified had to be found again; it now opens the wizard *in a dialog* deep-linked to that container — exact name first, then the image, and if the container is not in `wizard.yaml` at all (a compose container on casaos) the add-a-service form opens prefilled with its name, image, tag and repo, so "update" becomes "adopt, then update". `full monitor` uses the same dialog family as the other embedded views instead of a tab, with an Exit button, Escape and backdrop close. The wizard posts back when a job ends and the pane re-reads that host's update list, and `AILOG_WIZARD_URL` now drives both the deep links and the CSP's `frame-src` (without naming the wizard's origin, the frame is refused and the dialog is blank). | ✅ Complete |
 | 2026-11-04 | v3.14.1 | **Swarm task revisions are not 'containers that need attention'.** A deploy leaves the previous task's container behind on the node, exited; the update checker counted it as a broken container *and* offered its old image as an update, so every swarm host went red after every deploy. Only the current task of a service is judged now — a service with no running task still reports as attention. | ✅ Complete |
 | 2026-11-04 | v3.14.0 | **Docker Information, one click from the host list.** The Docker mark moved above the SSH prompt and is now a status square: green when nothing needs doing, red when an image upstream has moved on or a container is not healthy, dashed grey until the first scan. Clicking it opens a Docker-scoped view instead of Host Information — same banner, a purple **Analyse Docker Logs** that scopes the server report to container logs only, the docker fleet's CPU/RAM/NET/STORAGE as a percentage of the host itself, a container-updates pane that compares local manifest digests with the registry (pinned tags included, zot authenticated from swarm secrets), and a live per-container log tail with follow, filter and AI analyse. Adding or updating a container hands off to the homelab wizard by deep link (`?mode=update&service=<stack>`). Badges read a background scan and a cached metrics snapshot, so the sidebar never waits on SSH. | ✅ Complete |
 | 2026-10-31 | v3.13.5 | **The inline SSH prompt is no longer cut in half.** v3.13.4 fixed the expanded panel, but the pane you get straight from a host card still carried `p-3`, and xterm's fit addon measures its parent's *border-box* — so 12px of padding was spent on a row, pushing the prompt's bottom half past the pane's clip. The padding now lives on a wrapper (and `#ssh-terminal-body` is pinned to `padding: 0 !important`), so the prompt and cursor sit fully inside the pane at 1280×720, 1440×900 and 1536×864. The inline terminal also moved into `partials/ssh-terminal-inline.html` to keep `index.html` a shell. | ✅ Complete |
@@ -176,6 +177,8 @@ are the things you *do* to a host:
   yet. It is fed by `GET /api/docker/overview`, which only reads cached data
   (the metrics snapshot plus the last background scan) and queues a scan when it
   is stale — the badge is polled every 60 s and must never hold an SSH round.
+* **Full monitor:** the chart-heavy `/docker/<host>` page opens in a dialog with
+  an Exit button rather than a new tab, since it polls while it is open.
 * **Banner:** the same shape as Host Information — name, OS, `user@ip`,
   hostname and resources, and (for wizard-onboarded `db-*` hosts) the distro and
   last update from `/hosts/db/<id>/info`. Docker's own `info` fills the gaps for
@@ -201,9 +204,14 @@ are the things you *do* to a host:
   replica on another node is not invisible.
 * **Add or update:** both are handed to the homelab wizard
   (`wizard.safehomelan.com`) rather than done in AILog, because the wizard owns
-  `wizard.yaml`, the build pipeline and the swarm deploy. The links carry
-  `?mode=update&service=<stack>` / `?mode=new` and the wizard opens on that
-  service's Source stage.
+  `wizard.yaml`, the build pipeline and the swarm deploy. It opens **in a dialog**
+  on the row you clicked, not in a tab: the link carries
+  `?mode=update&service=<stack>&name=&image=&container=&host=` and the wizard
+  resolves it by name, then by image, and otherwise prefills its add-a-service
+  form with that container's details (an app outside the estate is adopted, then
+  updated). The wizard posts `{source:'homelab-wizard', type:'deployed'}` back
+  when a job ends and the pane re-reads the host. `AILOG_WIZARD_URL` sets the
+  wizard's address for both the links and the CSP's `frame-src`.
 
 ### 🔍 **Advanced Search Capabilities**
 * **Global Search:** Search across all logs from all configured hosts simultaneously

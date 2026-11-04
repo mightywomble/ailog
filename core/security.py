@@ -13,6 +13,9 @@ hardened without touching code:
     AILOG_MAX_UPLOAD_MB      request body cap in MB        (default: 32)
     AILOG_HSTS               1 to send Strict-Transport-Security
     AILOG_CSP                override the Content-Security-Policy, or 'off'
+    AILOG_WIZARD_URL         homelab wizard base URL, also the one origin
+                             allowed in frame-src   (default:
+                             https://wizard.safehomelan.com/)
     AILOG_WS_ALLOW_NO_ORIGIN 1 to accept websocket upgrades without Origin
     AILOG_WS_ALLOWED_ORIGINS comma separated extra origins/patterns for the
                            SSH terminal websocket (e.g. https://*.home.arpa)
@@ -56,8 +59,42 @@ DEFAULT_CSP = (
 )
 
 
+DEFAULT_WIZARD_URL = 'https://wizard.safehomelan.com/'
+
+
 def _env(name: str, default: str = '') -> str:
     return (os.getenv(name) or default).strip()
+
+
+def wizard_url() -> str:
+    """The homelab wizard (wizard.safehomelan.com) base URL.
+
+    One setting feeds both the Docker view's hand-off links and the CSP: the
+    wizard is the only foreign document this app frames, so the origin has to
+    agree in both places or the modal renders an empty box.
+    """
+    return _env('AILOG_WIZARD_URL', DEFAULT_WIZARD_URL) or DEFAULT_WIZARD_URL
+
+
+def wizard_origin() -> str:
+    """``scheme://host[:port]`` of the wizard, or '' when it is not a URL."""
+    parts = urlsplit(wizard_url())
+    if not parts.scheme or not parts.netloc:
+        return ''
+    return f'{parts.scheme}://{parts.netloc}'
+
+
+def default_csp() -> str:
+    """DEFAULT_CSP, with the wizard allowed in a frame.
+
+    `frame-src` has to name the wizard explicitly: it runs on its own origin,
+    and `'self'` alone makes the browser refuse the embed (the modal opens on a
+    blank frame with a console violation and nothing else).
+    """
+    origin = wizard_origin()
+    if not origin:
+        return DEFAULT_CSP
+    return DEFAULT_CSP.replace("frame-src 'self';", f"frame-src 'self' {origin};")
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -104,7 +141,7 @@ class SecurityConfig:
             except ValueError:
                 continue
 
-        csp = _env('AILOG_CSP', DEFAULT_CSP)
+        csp = _env('AILOG_CSP') or default_csp()
         if csp.lower() == 'off':
             csp = ''
 

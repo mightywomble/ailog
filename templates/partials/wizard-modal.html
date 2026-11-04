@@ -1,0 +1,19 @@
+<!-- The homelab wizard, on the service you clicked. "Update" in the Docker
+     view opens this instead of a new tab: the wizard owns wizard.yaml, the
+     build pipeline and the swarm deploy, and a deep link tells it which
+     service to open. The frame is unloaded on close so a half-finished
+     build log stops polling. -->
+<div id="wizardModal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-xl">
+    <div class="app-modal-head">
+      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-emerald-400"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7h6l2 3h8v9H4z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h8M8 15h5"/></svg>
+        <span id="wizardModalTitle" class="truncate">Homelab wizard</span>
+      </div>
+      <a id="wizardModalExtern" class="app-modal-close mr-2 no-underline" href="#" target="_blank" rel="noopener"
+         title="Open the same step in its own tab">open in tab ↗</a>
+      <button id="wizardModalClose" type="button" class="app-modal-close" data-modal-close>Exit</button>
+    </div>
+    <iframe id="wizardModalFrame" class="flex-1 w-full" src="about:blank"
+            referrerpolicy="no-referrer" title="Homelab wizard"></iframe>
+  </div>
+</div>

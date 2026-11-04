@@ -46,6 +46,11 @@
         } catch (e) { /* private mode */ }
       })();
     </script>
+    <script>
+        // The homelab wizard's origin, from the same setting the CSP frame-src
+        // uses. app-core.js reads this instead of hard-coding the hostname.
+        window.AILOG_WIZARD_URL = {{ wizard_url | tojson }};
+    </script>
     <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
     <script>
         tailwind.config = {
@@ -765,6 +770,8 @@
             src="about:blank" referrerpolicy="no-referrer" title="Server reports"></iframe>
   </div>
 </div>
+
+{% include "partials/wizard-modal.html" %}
 
 <div id="dockerModal" class="app-modal hidden">
   <div class="app-modal-panel app-modal-xl">

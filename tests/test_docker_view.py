@@ -108,7 +108,15 @@ def test_the_updates_pane_offers_the_wizard_for_a_moving_image():
     # wizard.yaml is keyed on the stack, so that is what the deep link carries
     assert 'row.stack || row.service || row.name' in block
     assert "wizardLink('update'" in block
-    assert 'href="${escapeHtml(linkFor(row))}"' in block
+    # a container that is not in wizard.yaml still has to open on itself: the
+    # wizard falls back to the image, then to prefilling the add-a-service form
+    assert 'image: row.image' in block
+    assert 'container: row.name' in block
+    # the row's action opens the dialog, in place - not a blank tab that drops
+    # the user on the wizard's whole service list
+    assert 'data-wizard-open="${escapeHtml(linkFor(row))}"' in block
+    assert 'target="_blank"' not in block
+    assert "document.getElementById('docker-updates-list')?.addEventListener('click'" in view
 
 
 def test_the_log_pane_tails_follows_and_filters():
@@ -141,3 +149,25 @@ def test_adding_a_container_goes_to_the_wizard():
     add = view[view.index("document.getElementById('docker-add-btn')"):]
     add = add[:add.index('docker-updates-refresh')]
     assert "wizardLink('new'" in add
+
+
+def test_the_wizard_opens_in_the_dialog_not_a_new_tab():
+    view = _docker_view()
+    # both hand-offs go through the frame helper, which is what keeps the user
+    # in the app (and what carries the Exit button)
+    assert 'window.openWizardModal' in view
+    assert "openWizard(wizardLink('new'" in view
+    assert "window.open(wizardLink('new'" not in view
+    # and a deploy the wizard finished refreshes what the pane shows
+    assert 'window.onWizardDeployed = refreshAfterWizard' in view
+    assert 'window.onWizardClosed = refreshAfterWizard' in view
+
+
+def test_the_full_monitor_opens_in_the_docker_dialog():
+    view = _docker_view()
+    block = view[view.index('id="docker-full-monitor-btn"'):]
+    block = block[:block.index('</button>')]
+    assert 'full monitor' in block
+    assert 'href=' not in block                      # a button, not a link
+    assert "window.openDockerModal(hostId, hostName)" in view
+    assert 'href="/docker/${encodeURIComponent(hostId)}" target="_blank"' not in view

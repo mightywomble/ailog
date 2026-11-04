@@ -293,3 +293,38 @@ def test_no_cdn_script_tags_remain():
             if tag.startswith('http'):
                 offenders.append((name, tag))
     assert offenders == []
+
+
+# --- the wizard frame -----------------------------------------------------
+
+
+def test_the_wizard_is_the_only_foreign_frame_allowed(monkeypatch):
+    """The wizard modal is an iframe on another origin: frame-src has to name
+    it, or the browser renders an empty dialog."""
+    from core import security
+    monkeypatch.delenv('AILOG_CSP', raising=False)
+    monkeypatch.setenv('AILOG_WIZARD_URL', 'https://wizard.safehomelan.com/')
+    csp = security.default_csp()
+    assert "frame-src 'self' https://wizard.safehomelan.com;" in csp
+    # still self-only for frames unless the wizard is configured
+    assert security.DEFAULT_CSP.count('frame-src') == 1
+    assert "frame-ancestors 'self'" in csp
+
+
+def test_the_wizard_url_is_one_setting(monkeypatch):
+    from core import security
+    monkeypatch.setenv('AILOG_WIZARD_URL', 'http://100.79.189.118:8095/some/path')
+    assert security.wizard_url() == 'http://100.79.189.118:8095/some/path'
+    assert security.wizard_origin() == 'http://100.79.189.118:8095'
+    assert 'frame-src \'self\' http://100.79.189.118:8095;' in security.default_csp()
+
+
+def test_an_explicit_csp_still_wins(monkeypatch):
+    monkeypatch.setenv('AILOG_CSP', "default-src 'self'")
+    assert SecurityConfig.from_env().csp == "default-src 'self'"
+
+
+def test_the_page_carries_the_wizard_url(client):
+    html = client.get('/').get_data(as_text=True)
+    assert 'window.AILOG_WIZARD_URL' in html
+    assert 'wizard.safehomelan.com' in html
