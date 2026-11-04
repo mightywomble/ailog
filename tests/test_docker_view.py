@@ -3,8 +3,8 @@
 These are the same kind of source assertions the rest of the UI suite uses: the
 view is a few hundred lines of template string, so the cheap way to keep its
 contract honest is to assert the wiring that the request is about - the square's
-position and state, the docker-only analysis scope, the fleet pane, and the
-hand-off to the wizard.
+position and state, the docker-only analysis scope, the fleet pane, the in-app
+update dialog, and the wizard hand-off for *new* services only.
 """
 
 import os
@@ -99,22 +99,21 @@ def test_the_fleet_pane_is_next_to_the_analyse_button():
     assert 'id="docker-fleet"' in view
 
 
-def test_the_updates_pane_offers_the_wizard_for_a_moving_image():
+def test_the_updates_pane_updates_the_container_you_clicked():
     view = _docker_view()
     assert 'id="docker-updates-list"' in view
     assert 'id="docker-updates-count"' in view
     assert 'id="docker-updates-refresh"' in view
-    block = view[view.index('const linkFor = (row)'):view.index('const renderDockerLog =')]
-    # wizard.yaml is keyed on the stack, so that is what the deep link carries
-    assert 'row.stack || row.service || row.name' in block
-    assert "wizardLink('update'" in block
-    # a container that is not in wizard.yaml still has to open on itself: the
-    # wizard falls back to the image, then to prefilling the add-a-service form
+    block = view[view.index('const targetFor = (row)'):view.index('const renderDockerLog =')]
+    # the row carries the image and the container it is about, so the update is
+    # addressed at those and nothing else on the host
     assert 'image: row.image' in block
     assert 'container: row.name' in block
-    # the row's action opens the dialog, in place - not a blank tab that drops
-    # the user on the wizard's whole service list
-    assert 'data-wizard-open="${escapeHtml(linkFor(row))}"' in block
+    # the action opens ailog's own dialog, in place
+    assert 'data-update-image="${escapeHtml(row.image' in block
+    assert 'data-update-container="${escapeHtml(row.name' in block
+    assert 'data-wizard-open' not in block
+    assert 'wizardLink(' not in block
     assert 'target="_blank"' not in block
     assert "document.getElementById('docker-updates-list')?.addEventListener('click'" in view
 
@@ -153,11 +152,13 @@ def test_adding_a_container_goes_to_the_wizard():
 
 def test_the_wizard_opens_in_the_dialog_not_a_new_tab():
     view = _docker_view()
-    # both hand-offs go through the frame helper, which is what keeps the user
-    # in the app (and what carries the Exit button)
+    # the remaining hand-off (a new service) goes through the frame helper,
+    # which is what keeps the user in the app and carries the Exit button;
+    # updates no longer go to the wizard at all
     assert 'window.openWizardModal' in view
     assert "openWizard(wizardLink('new'" in view
     assert "window.open(wizardLink('new'" not in view
+    assert "wizardLink('update'" not in view
     # and a deploy the wizard finished refreshes what the pane shows
     assert 'window.onWizardDeployed = refreshAfterWizard' in view
     assert 'window.onWizardClosed = refreshAfterWizard' in view
