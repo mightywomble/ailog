@@ -1,6 +1,6 @@
 [project]
 name = "homelab-manager"
-version = "3.14.0"
+version = "3.14.1"
 requires-python = ">=3.12"
 
 [tool.ruff]

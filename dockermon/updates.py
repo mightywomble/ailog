@@ -278,6 +278,20 @@ def updates_for(host_key: str, containers, run, refresh: bool = False) -> dict:
     :func:`sshstats.snapshot` (or the SDK collector).
     """
     rows = [c for c in (containers or []) if c.get('image')]
+    # A swarm service keeps the exited containers of its previous task
+    # revisions on the node, so after every deploy the host would show its own
+    # old image as "not running" (and compare that old image against the
+    # registry) for a service that is perfectly healthy. Judge only the current
+    # task: a service with at least one running container has its exited
+    # revisions dropped, while a service with none running still reports as
+    # attention.
+    running_services = {
+        c.get('service') for c in rows
+        if c.get('service') and (c.get('state') or '').lower() == 'running'
+    }
+    rows = [c for c in rows
+            if not (c.get('service') in running_services
+                    and (c.get('state') or '').lower() != 'running')]
     images = sorted({str(c['image']) for c in rows if c.get('image')})
     local = _local_digests(run, images)
 

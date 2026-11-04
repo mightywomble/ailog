@@ -211,3 +211,44 @@ def test_docker_page_renders(client, fake_host):
     assert 'container-list' in html
     assert 'chart-cpu' in html
     assert 'chart-net' in html
+
+
+# ---------------------------------------------- swarm task revisions (unit) --
+
+def _stub_registry(monkeypatch, digest='sha256:' + 'a' * 64):
+    """Every image looks locally current, so only 'is it running' remains."""
+    import dockermon.updates as dupdates
+    monkeypatch.setattr(dupdates, '_local_digests',
+                        lambda run, images: {i: digest for i in images})
+    monkeypatch.setattr(dupdates, 'remote_digest',
+                        lambda image, timeout=12, refresh=False: {'digest': digest})
+
+
+def test_exited_swarm_revisions_are_not_attention(monkeypatch):
+    # A deploy leaves the previous task's container behind, exited. That is not
+    # a broken container and its old image must not be offered as an update -
+    # otherwise every swarm node goes red each time a service is updated.
+    import dockermon.updates as dupdates
+    _stub_registry(monkeypatch)
+    containers = [
+        {'name': 'web_web.1.new', 'image': 'zot/web:v2', 'state': 'running', 'service': 'web_web'},
+        {'name': 'web_web.1.old', 'image': 'zot/web:v1', 'state': 'exited', 'service': 'web_web'},
+        {'name': 'standalone', 'image': 'nginx:1.27', 'state': 'exited', 'service': None},
+    ]
+    out = dupdates.updates_for('h', containers, lambda command: (True, ''))
+    names = [c['name'] for c in out['containers']]
+    assert 'web_web.1.new' in names
+    assert 'web_web.1.old' not in names          # superseded task revision
+    assert 'standalone' in names                 # a real stopped container
+    assert [a['name'] for a in out['attention_only']] == ['standalone']
+
+
+def test_a_swarm_service_with_no_running_task_is_still_attention(monkeypatch):
+    # Nothing is running for the service: that host does need looking at.
+    import dockermon.updates as dupdates
+    _stub_registry(monkeypatch)
+    containers = [
+        {'name': 'web_web.1.old', 'image': 'zot/web:v1', 'state': 'exited', 'service': 'web_web'},
+    ]
+    out = dupdates.updates_for('h', containers, lambda command: (True, ''))
+    assert [a['name'] for a in out['attention_only']] == ['web_web.1.old']
