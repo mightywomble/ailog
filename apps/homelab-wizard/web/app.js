@@ -1,4 +1,5 @@
-/* homelab-wizard: one flow, nine touchpoints, every long action a job. */
+/* homelab-wizard: one flow, nine touchpoints, every long action a job.
+   Stages: source, compose, stack file, ports, details, url, review, build, test. */
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
