@@ -29,9 +29,15 @@ jobs:
         id: changed
         run: |
           set -e
-          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-            APPS=$(git diff --name-only HEAD~1 HEAD | grep '^apps/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
-            STACKS=$(git diff --name-only HEAD~1 HEAD | grep '^stacks/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
+          # a merge commit's first parent is the previous main tip, so this is
+          # exactly "what the pull request changed"
+          git log --oneline -3 || true
+          echo "HEAD=$(git rev-parse HEAD) P1=$(git rev-parse HEAD^1 2>/dev/null || echo none)"
+          if git rev-parse --verify HEAD^1 >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD^1 HEAD)
+            echo "changed files:"; printf '%s\n' "$CHANGED"
+            APPS=$(printf '%s\n' "$CHANGED" | grep '^apps/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
+            STACKS=$(printf '%s\n' "$CHANGED" | grep '^stacks/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
           else
             APPS=$(ls apps 2>/dev/null || true)
             STACKS=$(ls stacks 2>/dev/null || true)
@@ -113,9 +119,13 @@ jobs:
           set -e
           # multi-line job outputs are unreliable across Gitea runners, so the
           # changed set is recomputed here rather than passed from release
-          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-            APPS=$(git diff --name-only HEAD~1 HEAD | grep '^apps/' | cut -d/ -f2 | sort -u || true)
-            STACKS=$(git diff --name-only HEAD~1 HEAD | grep '^stacks/' | cut -d/ -f2 | sort -u || true)
+          git log --oneline -3 || true
+          echo "HEAD=$(git rev-parse HEAD) P1=$(git rev-parse HEAD^1 2>/dev/null || echo none)"
+          if git rev-parse --verify HEAD^1 >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD^1 HEAD)
+            echo "changed files:"; printf '%s\n' "$CHANGED"
+            APPS=$(printf '%s\n' "$CHANGED" | grep '^apps/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
+            STACKS=$(printf '%s\n' "$CHANGED" | grep '^stacks/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
           else
             APPS=$(ls apps 2>/dev/null || true)
             STACKS=$(ls stacks 2>/dev/null || true)
