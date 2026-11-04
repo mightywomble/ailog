@@ -82,10 +82,26 @@ class Gitea:
         r = self.http.get(f"{self.api}{self.path}/pulls", params={"state": "open"})
         return r.json() if r.status_code == 200 else []
 
+    def conflicts(self, index):
+        """Names of the files Gitea cannot merge, empty when the PR is clean."""
+        try:
+            rows = self.http.get(f"{self.api}{self.path}/pulls/{index}/files",
+                                 params={"limit": 500}).json()
+        except Exception:
+            return []
+        return [f.get("filename") for f in rows if f.get("status") == "conflict"]
+
     def merge_pr(self, index, attempts=8):
-        """Gitea answers 405 {"message":"Please try again later"} while another
-        merge (or its own index update) is in flight. It is a lock, not a
-        failure: back off and retry, then give up with the last response."""
+        """Merge, and say why when it will not.
+
+        Two different things used to look identical here:
+
+        * 405 "Please try again later" while another merge holds the lock - back
+          off and retry, it clears
+        * 405 forever while `mergeable` is false, which means the branch
+          genuinely conflicts with main. Retrying cannot fix that, so report the
+          files and stop instead of burning eight attempts.
+        """
         last = ""
         delay = 1.0
         for attempt in range(attempts):
@@ -94,6 +110,17 @@ class Gitea:
             if r.status_code in (200, 201):
                 return {"merged": True, "attempts": attempt + 1}
             last = f"{r.status_code} {r.text[:160]}"
+            if attempt >= 2:
+                try:
+                    pr = self.http.get(f"{self.api}{self.path}/pulls/{index}").json()
+                except Exception:
+                    pr = {}
+                if pr.get("mergeable") is False:
+                    files = self.conflicts(index) or []
+                    raise ForgeError(
+                        f"PR #{index} conflicts with {pr.get('base', {}).get('ref', 'main')}"
+                        + (": " + ", ".join(files) if files else " (no file list available)")
+                        + " - resolve it on the work branch and run again")
             time.sleep(delay)
             delay = min(delay * 2, 8.0)
         raise ForgeError(f"merge PR #{index} after {attempts} attempts: {last}")
