@@ -93,26 +93,109 @@ async function boot() {
     $("#suffix").textContent = "." + (st.domain_suffix || "safehomelan.com");
     $("#f_forward").value = S.settings.ingress_ip || "100.79.189.118";
     renderList(); fillSettings(st.settings);
-    // Deep links from AILog's Docker view: ?mode=update&service=<name> opens
-    // that service on Source, ?mode=new starts the add-a-service journey.
-    // No parameters behaves exactly as before (first service, source stage).
-    const deep = new URLSearchParams(location.search);
-    const wanted = (deep.get("service") || "").trim();
-    const deepMode = (deep.get("mode") || "").trim().toLowerCase();
-    if (wanted && S.services.some((s) => s.name === wanted)) {
-      await loadService(wanted);
-      if (deepMode === "review") S.stage = "review";
-    } else if (deepMode === "new") {
-      $("#btnNew").click();
-    } else if (S.services.length && !S.current) {
-      loadService(S.services[0].name);
-    }
+    applyDeepLink();
   } catch (err) {
     $("#serviceList").innerHTML = `<li class="empty">${esc(err.message)}</li>`;
   }
   const h = (location.hash || "").slice(1);
   if (STAGES.some(([id]) => id === h)) S.stage = h;
   go(S.stage); loadExposeMeta();
+}
+
+/* ------------------------------------------------------------- deep links */
+/* AILog's Docker view opens this wizard in a dialog, on the container you
+   clicked. The link carries the name, the image and the stack, because the
+   three do not always agree: wizard.yaml is keyed on the stack name, a
+   container in a compose project is called `<project>-<service>-1`, and an app
+   running outside the estate is in neither.
+
+   Order of resolution: exact name -> image match -> not in wizard.yaml (so
+   start the add-a-service journey with the container's details filled in). */
+function normaliseName(raw) {
+  return String(raw || "").trim().toLowerCase()
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "")
+    .replace(/[^a-z0-9._-]+/g, "-");
+}
+
+function stackNameFrom(raw) {
+  const name = normaliseName(raw);
+  // a swarm task container is <stack>_<service>.<replica>.<taskid>
+  const swarm = name.match(/^([a-z0-9-]+)_[a-z0-9-]+\.\d+\.[a-z0-9]+$/);
+  if (swarm) return swarm[1];
+  // a compose container is <project>-<service>-<replica>
+  const stripped = name.replace(/_/g, "-").replace(/-\d+$/, "");
+  return stripped || name;
+}
+
+function repoOf(image) {
+  const ref = String(image || "").split("@")[0];
+  const last = ref.split("/").pop() || "";
+  return last.split(":")[0];
+}
+
+function tagOf(image) {
+  const ref = String(image || "").split("@")[0];
+  const last = ref.split("/").pop() || "";
+  return last.includes(":") ? last.split(":")[1] : "";
+}
+
+function serviceByImage(image) {
+  const want = repoOf(image).toLowerCase();
+  if (!want) return null;
+  const hit = S.services.find((s) => repoOf(s.source || s.image || "").toLowerCase() === want);
+  return hit ? hit.name : null;
+}
+
+function applyDeepLink() {
+  const deep = new URLSearchParams(location.search);
+  const wanted = (deep.get("service") || deep.get("name") || "").trim();
+  const image = (deep.get("image") || "").trim();
+  const mode = (deep.get("mode") || "").trim().toLowerCase();
+  const container = (deep.get("container") || "").trim();
+  const host = (deep.get("host") || "").trim();
+
+  const exact = wanted && S.services.some((s) => s.name === wanted) ? wanted : null;
+  const byImage = exact ? null : serviceByImage(image);
+  const target = exact || byImage;
+
+  if (target) {
+    loadService(target).then(() => {
+      if (mode === "review") { S.stage = "review"; go(S.stage); }
+      if (!exact && byImage) {
+        $("#newestNote").textContent = `matched on image (${repoOf(image)}) — the container is called ${wanted || container}`;
+      }
+    });
+    return;
+  }
+
+  if (!mode && !wanted && !image) {
+    if (S.services.length && !S.current) loadService(S.services[0].name);
+    return;
+  }
+
+  // "Add a container" from AILog carries no image: an empty add-a-service form.
+  if (!wanted && !image) {
+    $("#btnNew").click();
+    $("#newestNote").textContent = host ? `new service for ${host}` : "";
+    return;
+  }
+
+  // Not in wizard.yaml yet (a compose container, or something added by hand).
+  // Start the add-a-service journey with what the container already tells us,
+  // rather than dumping the user on somebody else's service.
+  $("#btnNew").click();
+  const name = stackNameFrom(wanted || container || repoOf(image));
+  $("#f_name").value = name;
+  $("#f_source").value = image;
+  $("#f_version").value = tagOf(image) || "latest";
+  $("#f_repo").value = repoOf(image);
+  $("#f_kind").value = "mirror";
+  $("#f_subdomain").value = name;
+  $("#imagePreview").textContent = imageRef();
+  $("#newestNote").textContent = host
+    ? `${container || wanted || name} on ${host} is not in wizard.yaml yet — adding it here creates the stack, then updates it`
+    : `${container || wanted || name} is not in wizard.yaml yet — this adds it to the estate`;
+  go("source");
 }
 
 function renderList() {
@@ -279,8 +362,24 @@ function openJob(id, title) {
       if (e.result?.tests) renderTest(e.result.tests);
       if (e.result?.expose) $("#exposeOut").textContent = `host ${e.result.expose.id}\n${e.result.expose.url}`;
       refreshServices().catch(() => {});
+      // AILog frames this wizard in a dialog. It cannot read this document, so
+      // it is told when a job ends and re-reads that host's update list itself.
+      tellParent(e.status, e.result);
     }
   };
+}
+
+/* Only AILog's Docker view listens, and only from this document's origin. */
+function tellParent(status, result) {
+  if (window.parent === window) return;
+  try {
+    window.parent.postMessage({
+      source: "homelab-wizard",
+      type: status === "ok" ? "deployed" : "job",
+      status, service: S.current || null,
+      image: (result && (result.image || result.stack)) || null,
+    }, "*");
+  } catch (err) { /* not framed, or the parent went away */ }
 }
 
 function appendLog(text, isErr) {
