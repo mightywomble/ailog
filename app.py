@@ -39,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.16.1'
+APP_VERSION = '3.17.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -146,6 +146,11 @@ def create_app(config: dict | None = None) -> Flask:
     # Self-healing remediation: catalog, cards, ansible-runner planning
     from remediation import remediation_bp
     app.register_blueprint(remediation_bp)
+
+    # The swarm estate: wizard.yaml, the stack files, and the CI that ships them.
+    # Owns nothing docker-facing - it commits a version bump and watches the run.
+    from estate import estate_bp
+    app.register_blueprint(estate_bp)
 
     # Groups, tags, inventory exports and DB backup/restore (modular bolt-on)
     from inventory import groups_bp as _inv_groups_bp, export_bp as _inv_export_bp, dbadmin_bp as _inv_dbadmin_bp

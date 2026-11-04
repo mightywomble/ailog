@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-11-04 | v3.17.0 | **Swarm updates now go through the estate's own pipeline, not around it.** The update dialog's swarm path used to run `docker service update --force`, which rolls the running image onto whatever the registry serves for that tag and quietly drifts away from the tag git pins. For a service the estate owns, `estate/` now does what a person would: sync a checkout of `homelab-ops`, resolve the newest upstream version (`estate/tags.py` - same major, same packaging, never a commit sha or a `pr-` tag), bump `wizard.yaml`, the stack's `image:` line and `mirror-images.json` in one commit, push `dev`, wait for `mirror.yml` to copy the image into zot, open the PR to `main`, merge it, and follow `ship.yml` - steps, percentage and the run's own log - until `docker stack deploy` has run. Conflicts are handled by regeneration, not merging: every edit is a function of the tree plus a version, so a rejected push resets and re-runs it, and a service somebody else already moved stops with a reason instead of being stomped. Build-kind services are refused on purpose (their tag comes from a CI build, and pinning to a tag that is not in zot is how a stack once went down with `build-37: not found`). `AILOG_ALLOW_ESTATE=off|plan|on`; the app commits, CI deploys. | ✅ Complete |
 | 2026-11-04 | v3.16.1 | **The update job's first step resolves.** "reading the host" stayed an unanswered bullet when the plan came back with nothing to do (an image that is on no container of that host); it now closes with the number of targets it found, so the dialog reads as a finished job with a reason instead of a job that stopped mid-line. | ✅ Complete |
 | 2026-11-04 | v3.16.0 | **Pressing update updates the container you clicked.** Update used to hand the row to the homelab wizard, whose update path is a `wizard.yaml` tag bump — a CasaOS app is a compose project that is not in `wizard.yaml`, so the click fell through to the wizard's *add-a-service* journey and the app had to be found again. AILog now does the update itself, scoped to the container behind the row: `dockermon/updateflow.py` reads the container's own labels and decides the shape — a compose service becomes `docker compose -f <recorded file> pull <service>` + `up -d --no-deps <service>` (so gitea's neighbours are not bounced), a swarm service becomes `docker service update --image <ref> --force --with-registry-auth` on a manager it finds for itself, and a container with neither is refused with the reason rather than guessed at. The dialog shows the kind, the exact commands and the target before anything runs, then streams the job (step, command, output) and re-reads the host when it finishes. `AILOG_ALLOW_UPDATES` = `on` (default) / `dry_run` (show the commands) / `off`. Replicas of one service are one update, not three. | ✅ Complete |
 | 2026-11-04 | v3.15.1 | **A "re-check" now joins the scan queue instead of jumping it.** The per-host refresh endpoint started its own thread, so a manual re-check bypassed both the concurrency bound and the progress reporting; it goes through `scan_async` like everything else, which is why the activity strip now shows `Scanning containers for updates · 1 of 6 hosts · checking casaos` when you press re-check. | ✅ Complete |
@@ -859,11 +860,12 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-11-04): `zot.safehomelan.com/ailog:v3.15.1`
+**Current production image** (as of 2026-11-04): `zot.safehomelan.com/ailog:v3.16.1`
 (`:latest` points at the same manifest), digest
-`sha256:cb391deb3f083964786e4ceeadbacbd36d019df321fc2ed5d5f19758f069c303`, running as
+`sha256:cb2d6d68491b7becf89578ab2dfde849f8663f4497450dfdcf20afcf24e27647`, running as
 `ailog_ailog.1` on `swarm-worker4`. Production runs remediation in **`dry_run`**
-(`AILOG_ALLOW_REMEDIATION=dry_run`), so plans can be made and applied but every
+(`AILOG_ALLOW_REMEDIATION=dry_run`), and container updates for real
+(`AILOG_ALLOW_UPDATES=on`) because that button exists to be pressed), so plans can be made and applied but every
 playbook only executes with `--check --diff`. Redeploy after a push with:
 
 ```bash

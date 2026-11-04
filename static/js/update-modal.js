@@ -27,6 +27,7 @@
     const KIND_LABEL = {
         compose: 'compose project',
         swarm: 'swarm service',
+        estate: 'swarm · via CI',
         container: 'standalone container',
     };
 
@@ -35,6 +36,22 @@
             clearTimeout(state.timer);
             state.timer = null;
         }
+    };
+
+    // The bar only appears once a job is running: a plan is instant, an update
+    // is not, and a bar that fills on the plan would be a lie about progress.
+    const setProgress = (pct) => {
+        const wrap = el('updateModalBar');
+        const fill = el('updateModalFill');
+        if (!wrap || !fill) return;
+        if (pct === null || pct === undefined) {
+            wrap.hidden = true;
+            return;
+        }
+        const value = Math.max(0, Math.min(100, Number(pct) || 0));
+        wrap.hidden = false;
+        wrap.setAttribute('aria-valuenow', String(Math.round(value)));
+        fill.style.width = `${value}%`;
     };
 
     const setState = (text, tone) => {
@@ -46,10 +63,19 @@
 
     const renderTarget = (target) => {
         const kind = KIND_LABEL[target.kind] || target.kind;
+        const estate = target.estate || null;
         const where = target.kind === 'compose'
             ? `project ${target.project || '?'}${target.file ? ` · ${target.file}` : ''}`
-            : (target.kind === 'swarm' ? `runs on ${target.runs_on || '?'}` : '');
+            : (target.kind === 'estate'
+                ? `wizard.yaml · ${estate && estate.kind ? estate.kind : 'service'}${estate && estate.upstream ? ` · ${estate.upstream}` : ''}`
+                : (target.kind === 'swarm' ? `runs on ${target.runs_on || '?'}` : ''));
         const commands = (target.commands || []).map((c) => `$ ${esc(c)}`).join('\n');
+        // The estate path is a pipeline, not a command: show the steps it will
+        // take, and the version it is moving to.
+        const estateSteps = target.kind === 'estate' && estate
+            ? `<div class="text-xs termix-text mt-2">${esc(estate.current || '?')} → <span class="text-amber-300 font-mono">${esc(estate.target || '?')}</span></div>
+               <ol class="text-[11px] termix-muted mt-1 ml-4 list-decimal space-y-0.5">${(estate.steps || []).map((step) => `<li>${esc(step)}</li>`).join('')}</ol>`
+            : `<pre class="text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words mt-2 p-2 rounded bg-black/40 border border-white/10 termix-text">${commands}</pre>`;
         return `
             <div class="p-3 rounded-lg bg-white/5 border border-white/10">
                 <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -59,8 +85,7 @@
                 ${where ? `<div class="text-[11px] termix-muted font-mono truncate mt-1" title="${esc(where)}">${esc(where)}</div>` : ''}
                 ${target.reason
                     ? `<div class="text-xs text-red-300 mt-2">${esc(target.reason)}</div>`
-                    : `<div class="text-[11px] termix-muted mt-2">${esc(target.note || '')}</div>
-                       <pre class="text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words mt-2 p-2 rounded bg-black/40 border border-white/10 termix-text">${commands}</pre>`}
+                    : `<div class="text-[11px] termix-muted mt-2">${esc(target.note || '')}</div>${estateSteps}`}
                 ${target.containers && target.containers.length
                     ? `<div class="text-[11px] termix-muted mt-1 truncate" title="${esc(target.containers.join(', '))}">containers: ${esc(target.containers.join(', '))}</div>`
                     : ''}
@@ -85,8 +110,11 @@
         if (targets) targets.innerHTML = (plan.targets || []).map(renderTarget).join('')
             || '<div class="text-xs text-red-400">nothing on this host matches that image</div>';
         if (run) {
+            const viaEstate = (plan.targets || []).some((t) => t.kind === 'estate');
             run.disabled = !plan.supported;
-            run.textContent = plan.mode === 'dry_run' ? 'Show the commands (dry run)' : 'Update now';
+            run.textContent = plan.mode === 'dry_run'
+                ? 'Show the plan (dry run)'
+                : (viaEstate ? 'Commit + deploy via CI' : 'Update now');
             run.title = plan.supported
                 ? 'Pull the newer image and recreate only this service'
                 : 'This container cannot be updated safely from here';
@@ -118,6 +146,7 @@
         if (!job) return;
         renderSteps(job);
         if (job.status === 'running') {
+            setProgress(job.progress);
             setState(`${job.label || 'working'} · ${job.elapsed}s`);
             return;
         }
@@ -128,11 +157,16 @@
         if (run) run.disabled = true;
         if (again) again.hidden = false;
         if (job.status === 'done') {
-            setState('updated — the pane is re-reading this host', 'ok');
+            setProgress(100);
+            setState(job.error === 'already newest'
+                ? 'already newest — nothing to deploy'
+                : 'updated — the pane is re-reading this host',
+            job.error === 'already newest' ? '' : 'ok');
             document.dispatchEvent(new CustomEvent('ailog:container-updated', {
                 detail: { hostKey: job.host_key, image: job.image, container: job.container },
             }));
         } else {
+            setProgress(null);
             setState(job.error || 'the update failed — see the log', 'error');
         }
     };
@@ -161,6 +195,7 @@
         const targets = el('updateModalTargets');
         if (run) run.disabled = true;
         if (targets) targets.innerHTML = '';
+        setProgress(null);
         if (summary) summary.textContent = `Reading ${state.label || state.hostKey}…`;
         const params = new URLSearchParams();
         if (state.image) params.set('image', state.image);
@@ -210,6 +245,7 @@
     const start = async () => {
         const run = el('updateModalRun');
         if (run) run.disabled = true;
+        setProgress(1);
         setState('starting…');
         try {
             const res = await fetch(`/api/docker/hosts/${encodeURIComponent(state.hostKey)}/update`, {

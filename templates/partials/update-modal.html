@@ -4,6 +4,10 @@
      neither is possible), the exact commands, then runs them and streams the
      output. Nothing else on the host is addressed.
 
+     A swarm service the estate owns is updated through CI instead: the dialog
+     then shows the plan's steps (bump, commit, PR, mirror, deploy) and the bar
+     follows the run, because the work is a pipeline, not a shell command.
+
      Before this, the row handed off to the homelab wizard, whose update path is
      a wizard.yaml tag bump - so a CasaOS compose project fell through to the
      wizard's add-a-service journey. -->
@@ -19,6 +23,10 @@
     <div class="app-modal-body">
       <div class="space-y-3">
         <div id="updateModalSummary" class="text-xs termix-muted">Reading the host…</div>
+        <div id="updateModalBar" class="w-full bg-white/10 rounded-full h-1.5" hidden
+             role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="updateModalFill" class="bg-amber-400 h-1.5 rounded-full" style="width: 0%"></div>
+        </div>
         <div id="updateModalTargets" class="space-y-2"></div>
         <div class="flex items-center gap-3 flex-wrap">
           <button id="updateModalRun" type="button" disabled
