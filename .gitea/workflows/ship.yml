@@ -130,17 +130,17 @@ jobs:
             APPS=$(ls apps 2>/dev/null || true)
             STACKS=$(ls stacks 2>/dev/null || true)
           fi
-          if [ -z "$STACKS" ]; then
-            # an app was rebuilt but no stack file changed: redeploy exactly the
-            # stacks that reference that image (ailog-mcp lives in stacks/ailog)
-            for APP in $APPS; do
-              for f in stacks/*/stack.yml; do
-                grep -q "/$APP:" "$f" && dirname "$f" | cut -d/ -f2
-              done
-            done | sort -u > /tmp/stacks-from-apps || true
-            STACKS=$(tr '\n' ' ' < /tmp/stacks-from-apps)
-            echo "stacks that reference rebuilt apps: $STACKS"
-          fi
+          # Always add the stacks that reference a rebuilt app - not only when no
+          # stack file changed. A merge that touched both apps/x and stacks/y used
+          # to deploy y alone, so x's new image was built, pushed and never run.
+          for APP in $APPS; do
+            for f in stacks/*/stack.yml; do
+              grep -q "/$APP:" "$f" && dirname "$f" | cut -d/ -f2
+            done
+          done | sort -u > /tmp/stacks-from-apps || true
+          FROM_APPS=$(tr '\n' ' ' < /tmp/stacks-from-apps)
+          echo "stacks that reference rebuilt apps: $FROM_APPS"
+          STACKS=$(printf '%s\n%s\n' "$STACKS" "$FROM_APPS" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
           echo "rebuilt apps this run: ${APPS:-none}"
           echo "deploying: $STACKS"
           REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
@@ -159,9 +159,24 @@ jobs:
             done
           }
 
+          missing_images() {   # echoes zot images in $1 that are not in the registry
+            grep -oE 'zot\.safehomelan\.com/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+' "stacks/$1/stack.yml" \
+              | sed 's/\${IMAGE_TAG:-[^}]*}/'"${IMAGE_TAG:-latest}"'/' | sort -u \
+              | while read -r IMG; do
+                  docker manifest inspect "$IMG" >/dev/null 2>&1 || echo "$IMG"
+                done
+          }
+
           FAILED=""
           for APP in $STACKS; do
             [ -f "stacks/$APP/stack.yml" ] || continue
+            # A tag that is not in zot takes the service down: swarm accepts the
+            # deploy, then every task is rejected with "not found". Check first.
+            MISSING=$(missing_images "$APP")
+            if [ -n "$MISSING" ]; then
+              echo "!!! $APP not deployed - image(s) missing from zot:"; echo "$MISSING"
+              FAILED="$FAILED $APP"; continue
+            fi
             TAG=$(stack_tag "$APP")
             if [ -n "$TAG" ]; then
               echo "=== deploying $APP with IMAGE_TAG=$TAG ==="
