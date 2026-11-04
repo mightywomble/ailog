@@ -73,8 +73,8 @@ services:
   service: anythingllm
   image: zot.safehomelan.com/anythingllm:1.18.0
   repo: anythingllm
-  version: 1.18.0
-  source: docker.io/mintplexlabs/anythingllm:1.18.0
+  version: 1.19.0
+  source: docker.io/mintplexlabs/anythingllm:1.19.0
   ports:
   - host: 3005
     container: 3001
