@@ -139,6 +139,31 @@ def collect_containers(client, stats_limit: int = 60, workers: int = 8) -> list[
     return rows
 
 
+def _df_totals(client) -> dict:
+    """`docker system df` as totals, for the fleet storage share.
+
+    Container SizeRw alone misses images, volumes and build cache, and
+    SizeRootfs counts shared layers once per container.
+    """
+    try:
+        df = client.df() or {}
+    except Exception:
+        return {}
+    keys = {'Images': 'images', 'Containers': 'containers',
+            'Volumes': 'volumes', 'BuildCache': 'build_cache'}
+    out = {}
+    for source, name in keys.items():
+        rows = df.get(source) or []
+        size = 0
+        for row in rows:
+            try:
+                size += int((row or {}).get('Size') or 0)
+            except (TypeError, ValueError):
+                continue
+        out[name] = {'count': len(rows), 'size': float(size), 'reclaimable': 0.0}
+    return out
+
+
 def collect_totals(client, containers: list[dict] | None = None) -> dict:
     """Aggregate live CPU/RAM/network usage for a Docker node.
 

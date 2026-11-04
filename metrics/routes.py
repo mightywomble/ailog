@@ -405,6 +405,23 @@ def collect_servers() -> Dict[str, Any]:
     return payload
 
 
+def cached_servers_payload() -> Dict[str, Any] | None:
+    """The last collection round, or ``None`` when nothing has been collected.
+
+    Endpoints that are polled in the background (the Docker sidebar badge) must
+    never trigger a cold SSH round: an empty cache means "ask again later", not
+    "block this request behind every host".
+    """
+    with _lock:
+        payload = _cache['payload']
+        cached_ts = _cache['ts']
+    if payload is None:
+        return None
+    if (time.time() - cached_ts) >= SNAPSHOT_TTL * 4:
+        return None
+    return payload
+
+
 def servers_payload(force: bool = False) -> Dict[str, Any]:
     """Return a snapshot, never blocking a request behind a live SSH round.
 

@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-11-04 | v3.14.0 | **Docker Information, one click from the host list.** The Docker mark moved above the SSH prompt and is now a status square: green when nothing needs doing, red when an image upstream has moved on or a container is not healthy, dashed grey until the first scan. Clicking it opens a Docker-scoped view instead of Host Information — same banner, a purple **Analyse Docker Logs** that scopes the server report to container logs only, the docker fleet's CPU/RAM/NET/STORAGE as a percentage of the host itself, a container-updates pane that compares local manifest digests with the registry (pinned tags included, zot authenticated from swarm secrets), and a live per-container log tail with follow, filter and AI analyse. Adding or updating a container hands off to the homelab wizard by deep link (`?mode=update&service=<stack>`). Badges read a background scan and a cached metrics snapshot, so the sidebar never waits on SSH. | ✅ Complete |
 | 2026-10-31 | v3.13.5 | **The inline SSH prompt is no longer cut in half.** v3.13.4 fixed the expanded panel, but the pane you get straight from a host card still carried `p-3`, and xterm's fit addon measures its parent's *border-box* — so 12px of padding was spent on a row, pushing the prompt's bottom half past the pane's clip. The padding now lives on a wrapper (and `#ssh-terminal-body` is pinned to `padding: 0 !important`), so the prompt and cursor sit fully inside the pane at 1280×720, 1440×900 and 1536×864. The inline terminal also moved into `partials/ssh-terminal-inline.html` to keep `index.html` a shell. | ✅ Complete |
 | 2026-10-31 | v3.13.4 | **Docker marks are back on every Docker host, and the SSH prompt stays in view.** Netdata only reports Docker where its plugin runs, so most cards had lost the mark; presence now comes from a small SSH probe (`command -v docker` + `docker ps -a`) run in the background, remembered per host and persisted in `AppSetting`, so a deploy no longer blanks the badges. Threaded SSH calls now get a Flask app context (without it every key materialisation failed with *Working outside of application context* → *Permission denied publickey*). The laptop SSH panel no longer clips its last row: xterm's fit addon measures the parent's border-box, so the padding moved off the terminal's own parent, plus a ResizeObserver and a scroll-to-bottom after fit. Narrow phones: header buttons and the Hosts *Refresh* button can no longer be pushed off-screen. | ✅ Complete |
 | 2026-10-31 | v3.13.3 | **Host cards redesigned.** The server name sits top-centre and one row of equal square icons (22px desktop, 24px phone) runs along the bottom: a solid green/red reachability square, then the OS mark — Numix-square-inspired, flat and monochrome, drawn from the detected distro (Ubuntu, Debian, Alpine, Arch, Fedora, RHEL family, SUSE, macOS, Windows, BSD, generic Linux) — then Docker, with the `>_` SSH button on the far right. The SSH square keeps a thumb-sized invisible hit pad. Netdata-matched hosts now report their OS as `{family, id, name}` like the SSH collector, so the mark is no longer a generic monitor, and Docker presence comes from Netdata's `docker.containers.running` context. | ✅ Complete |
@@ -163,6 +164,46 @@ Container numbers come from the existing Docker collectors (`dockermon.routes.ho
 * **Refresh cadence:** background re-probe every `AILOG_DOCKER_REFRESH_SECONDS` (default `300`, minimum `30`) or on demand with the **Scan Docker** button in the hosts sidebar.
 * **Docker on the target host:** the `docker` CLI must be installed; AILog runs `sudo -n docker …` and falls back to `docker …` (docker group membership also works).
 
+### 🐋 **Docker Information (per host)**
+
+Clicking the Docker square on a host card opens a Docker-scoped view instead of
+the host information pane. The square sits above the SSH prompt because the two
+are the things you *do* to a host:
+
+* **Square state:** green = nothing needs doing, red = an image the registry has
+  moved on from or a container that is not healthy, dashed grey = not scanned
+  yet. It is fed by `GET /api/docker/overview`, which only reads cached data
+  (the metrics snapshot plus the last background scan) and queues a scan when it
+  is stale — the badge is polled every 60 s and must never hold an SSH round.
+* **Banner:** the same shape as Host Information — name, OS, `user@ip`,
+  hostname and resources, and (for wizard-onboarded `db-*` hosts) the distro and
+  last update from `/hosts/db/<id>/info`. Docker's own `info` fills the gaps for
+  config-file hosts.
+* **Analyse Docker Logs (purple):** opens the server report with **only** the
+  docker source ticked — container logs on this host, not its files or journal.
+* **Docker fleet vs host:** CPU, RAM, NET and STORAGE for every container on the
+  host as a percentage of the host's own totals. CPU is summed from
+  `docker stats` (a percentage of one core) and divided by the core count; RAM is
+  the sum of container usage over host RAM; NET is container bytes/second over
+  the host NIC's rate; STORAGE is `docker system df` (images + containers +
+  volumes + build cache) over the root filesystem size.
+* **Container updates:** one row per image, with the local and registry manifest
+  digests. Update detection compares the digest the host holds for the tag with
+  the digest the registry currently serves — that works for pinned tags
+  (`postgres:16` stays `16` while upstream republishes it) as well as `latest`.
+  Registry answers are cached for 30 minutes; private registries (zot) are
+  authenticated from `AILOG_REGISTRY_USER`/`_PASSWORD` or the `zot_user`/
+  `zot_password` Docker secrets.
+* **Container logs:** pick a container to tail it, with `follow` (a 5 s poll
+  while the view is open and the tab visible), a line filter, and AI analyse on
+  what is on screen. Swarm services are read with `docker service logs` so a
+  replica on another node is not invisible.
+* **Add or update:** both are handed to the homelab wizard
+  (`wizard.safehomelan.com`) rather than done in AILog, because the wizard owns
+  `wizard.yaml`, the build pipeline and the swarm deploy. The links carry
+  `?mode=update&service=<stack>` / `?mode=new` and the wizard opens on that
+  service's Source stage.
+
 ### 🔍 **Advanced Search Capabilities**
 * **Global Search:** Search across all logs from all configured hosts simultaneously
 * **Scoped Search:** Target specific log files or journal units for precise results
@@ -242,7 +283,9 @@ the skip message states the cap, what was collected and what was left out.
 Docker monitoring endpoints: `GET /docker/<host_key>`, `GET /api/docker/endpoints`,
 `POST /api/docker/discover`, `GET /api/docker/hosts/<k>/{,stats,containers,nodes,history,swarm}`,
 `GET /api/docker/hosts/<k>/history/stream` (SSE), `POST /api/docker/hosts/<k>/swarm/refresh`,
-`POST /api/docker/history/clear`.
+`POST /api/docker/history/clear`. The Docker Information view adds `GET /api/docker/overview`
+(sidebar badges), `GET /api/docker/hosts/<k>/fleet` (docker usage as a share of the host),
+`GET /api/docker/hosts/<k>/updates` and `POST /api/docker/hosts/<k>/updates/refresh`.
 
 Endpoints: `POST /serverreport/stream` (SSE), `POST /serverreport/preflight`,
 `GET /api/serverreport/defaults`, `GET /reports`, `GET /reports/<id>`,

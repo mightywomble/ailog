@@ -472,7 +472,7 @@ a.ov-row-main:hover { text-decoration: underline; }
   --hc-icon: 22px;
   position: relative;
   box-sizing: border-box;
-  min-height: 92px;
+  min-height: 104px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -500,7 +500,9 @@ a.ov-row-main:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
-/* the bottom row: every icon is the same square, SSH pushed to the right */
+/* the bottom row: every icon is the same square. Docker and SSH are the two
+ * things you can *do* here, so they stack in the corner -- Docker above SSH --
+ * while reachability and OS stay flat along the row. */
 #hosts-sidebar .host-card .hc-foot {
   margin-top: auto;
   width: 100%;
@@ -537,9 +539,42 @@ a.ov-row-main:hover { text-decoration: underline; }
   height: calc(var(--hc-icon) - 5px);
   display: block;
 }
+#hosts-sidebar .host-card .hc-actions {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .18rem;
+}
 #hosts-sidebar .host-card .hc-docker {
+  padding: 0;
   color: var(--faint);
   border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+}
+/* green = nothing needs doing, red = an update is pending or a container is
+   unhealthy, grey = not scanned yet. A solid square, like the reachability dot. */
+#hosts-sidebar .host-card .hc-docker[data-state="ok"] {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--bg);
+}
+#hosts-sidebar .host-card .hc-docker[data-state="attention"] {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--bg);
+}
+#hosts-sidebar .host-card .hc-docker[data-state="unknown"] {
+  color: var(--faint);
+  border-style: dashed;
+}
+#hosts-sidebar .host-card .hc-docker:hover {
+  border-color: var(--text);
+}
+#hosts-sidebar .host-card .hc-docker:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 #hosts-sidebar .host-card .hc-docker svg {
   width: calc(var(--hc-icon) - 5px);
@@ -550,7 +585,7 @@ a.ov-row-main:hover { text-decoration: underline; }
 
 /* far right: the square prompt button that opens the SSH terminal */
 #hosts-sidebar .host-card .hc-ssh {
-  margin-left: auto;
+  margin-left: 0;
   position: relative;
   box-sizing: border-box;
   width: var(--hc-icon);
@@ -604,6 +639,7 @@ a.ov-row-main:hover { text-decoration: underline; }
   }
   #hosts-sidebar .host-card .hc-foot { justify-content: center; }
   #hosts-sidebar .host-card .hc-os,
+  #hosts-sidebar .host-card .hc-actions,
   #hosts-sidebar .host-card .hc-docker,
   #hosts-sidebar .host-card .hc-ssh,
   #hosts-sidebar .host-card .hc-sub,
@@ -848,9 +884,35 @@ a.ov-row-main:hover { text-decoration: underline; }
   }
   #mobile-host-cards .host-card .hc-docker[hidden] { display: none; }
 
-  /* the reason you are here: a square green prompt on the far right */
-  #mobile-host-cards .host-card .hc-ssh {
+  /* Docker above SSH, same corner stack as the sidebar tile */
+  #mobile-host-cards .host-card .hc-actions {
     margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .22rem;
+  }
+  #mobile-host-cards .host-card .hc-docker {
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  #mobile-host-cards .host-card .hc-docker[data-state="ok"] {
+    background: var(--ok);
+    border-color: var(--ok);
+    color: var(--bg);
+  }
+  #mobile-host-cards .host-card .hc-docker[data-state="attention"] {
+    background: var(--bad);
+    border-color: var(--bad);
+    color: var(--bg);
+  }
+  #mobile-host-cards .host-card .hc-docker[data-state="unknown"] {
+    border-style: dashed;
+  }
+  /* the reason you are here: a square green prompt below the Docker square */
+  #mobile-host-cards .host-card .hc-ssh {
+    margin-left: 0;
     position: relative;
     box-sizing: border-box;
     width: var(--hc-icon);
