@@ -29,6 +29,15 @@ code /api/models 200
 body=$(curl -sS -o /dev/null -w '%{http_code}' -m 15 -X PUT -H 'Content-Type: application/json' \
   -d '{"entry":{"name":"BAD NAME","kind":"mirror"}}' "http://localhost:$PORT/api/services/bad")
 [ "$body" = "400" ] && echo "ok   invalid service -> 400" || { echo "FAIL invalid service -> $body"; fail=1; }
+# the two paths: a tick-box modal for an existing service, credentials stage,
+# and the one-click update endpoint. Assert the surface exists.
+check / 'id="updateModal"' "update modal"
+check / 'data-stage="creds"' "credentials stage"
+check /static/app.js 'makePassword' "password generator"
+check /static/app.js 'function stages()' "stage paths"
+check /static/app.js '/api/update' "update route"
+code "/api/newest?image=" 400 20
+
 # tag listing is server-side because Docker Hub has no CORS headers. A live tag
 # fetch would make the smoke test depend on the internet, so assert the shape
 # (and the error path) instead: this is the endpoint that used to only be
