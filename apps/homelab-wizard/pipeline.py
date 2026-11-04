@@ -271,6 +271,29 @@ def update(job, name, run_tests=True):
     image = svc.get("source") or svc.get("image") or ""
     kind = svc.get("kind") or "mirror"
 
+    if kind == "build":
+        # nothing upstream to resolve: the newest version is whatever this repo
+        # builds from its own source, and ship.yml hands out the build-N tag
+        job.step("upstream", "ok", "built from source in apps/" + (svc.get("repo") or name))
+        out = {"name": name, "kind": kind, "tag": None}
+        job.step("commit", "running")
+        commit = core.commit_and_push(f"wizard: rebuild {name}")
+        sha = commit.get("sha") or core._git(core.repo_dir(), "rev-parse", "HEAD").strip()
+        job.step("commit", "ok", sha[:8])
+        run = _wait_run(job, gh, BUILD_WF, sha=sha)
+        job.step(BUILD_WF, "running")
+        _tail_run(job, gh, run["id"], BUILD_WF + " ")
+        job.step(BUILD_WF, "ok")
+        out["ship"] = ship(job, f"{name}: rebuild from source")
+        tags = released_tags(gh, out["ship"]["run"])
+        out["pinned"] = pin_versions(tags)
+        job.step("replicas", "running")
+        job.step("replicas", "ok", _settle(name))
+        if run_tests:
+            out["tests"] = test_stack(job, name, svc.get("url") or None,
+                                      (svc.get("ports") or [{}])[0].get("host") or None)
+        return out
+
     job.step("upstream", "running", image)
     pick = registry.newest_tag(image)
     job.log(f"{pick['host']}/{pick['repo']}: now {pick['current'] or 'unknown'}, "
@@ -306,6 +329,8 @@ def update(job, name, run_tests=True):
 
     out = {"name": name, "from": pick["current"], "tag": tag, "kind": kind}
     out["ship"] = ship(job, f"{name}: {pick['current'] or '?'} -> {tag}")
+    if kind == "build":                     # (mirrors keep their literal tag)
+        out["pinned"] = pin_versions(released_tags(gh, out["ship"]["run"]))
     job.step("replicas", "running")
     job.step("replicas", "ok", _settle(name))
     if run_tests:
