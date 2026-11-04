@@ -113,12 +113,20 @@ jobs:
             STACKS=$(grep -l 'IMAGE_TAG' stacks/*/stack.yml | cut -d/ -f2 | sort -u || true)
           fi
           echo "deploying with IMAGE_TAG=$IMAGE_TAG: $STACKS"
+          FAILED=""
           for APP in $STACKS; do
             [ -f "stacks/$APP/stack.yml" ] || continue
             echo "=== deploying $APP ==="
-            docker stack deploy -c "stacks/$APP/stack.yml" "$APP" --with-registry-auth
+            # one broken stack must not stop the rest of the estate deploying
+            if ! docker stack deploy -c "stacks/$APP/stack.yml" "$APP" --with-registry-auth; then
+              echo "!!! $APP failed to deploy"; FAILED="$FAILED $APP"
+            fi
           done
           for APP in $STACKS; do
             [ -f "stacks/$APP/stack.yml" ] || continue
             echo "--- $APP"; docker stack ps "$APP" --no-trunc | head -8
           done
+          if [ -n "$FAILED" ]; then
+            echo "::error::stacks that failed to deploy:$FAILED"
+            exit 1
+          fi
