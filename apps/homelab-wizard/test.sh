@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Boot with no token, no repo and no ssh key: still serve the UI, still answer
 # in JSON, never 500.
-set -u
+set -u  # smoke test: boots with no credentials, no repo, no ssh key
 IMG="${1:-homelab-wizard:candidate}"
 PORT=15915; NAME="smoke-wizard-$$"; DATA=$(mktemp -d)
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1; rm -rf "$DATA"; }
