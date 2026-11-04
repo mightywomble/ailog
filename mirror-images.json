@@ -55,7 +55,7 @@
     },
     {
       "name": "cloudflared",
-      "source": "docker.io/cloudflare/cloudflared:2026.10.4"
+      "source": "docker.io/cloudflare/cloudflared:2026.10.7"
     },
     {
       "name": "dozzle",
