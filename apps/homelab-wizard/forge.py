@@ -69,16 +69,21 @@ class Gitea:
         r = self.http.get(f"{self.api}{self.path}/pulls", params={"state": "open"})
         return r.json() if r.status_code == 200 else []
 
-    def merge_pr(self, index, attempts=3):
+    def merge_pr(self, index, attempts=8):
+        """Gitea answers 405 {"message":"Please try again later"} while another
+        merge (or its own index update) is in flight. It is a lock, not a
+        failure: back off and retry, then give up with the last response."""
         last = ""
-        for _ in range(attempts):
+        delay = 1.0
+        for attempt in range(attempts):
             r = self.http.post(f"{self.api}{self.path}/pulls/{index}/merge",
                                json={"Do": "merge", "delete_branch_after_merge": False})
             if r.status_code in (200, 201):
-                return {"merged": True}
+                return {"merged": True, "attempts": attempt + 1}
             last = f"{r.status_code} {r.text[:160]}"
-            time.sleep(2)   # 405 "Please try again later" is Gitea's merge lock
-        raise ForgeError(f"merge PR #{index}: {last}")
+            time.sleep(delay)
+            delay = min(delay * 2, 8.0)
+        raise ForgeError(f"merge PR #{index} after {attempts} attempts: {last}")
 
 
 # ------------------------------------------------------------------ nginx
