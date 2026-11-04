@@ -131,13 +131,36 @@ jobs:
             STACKS=$(tr '\n' ' ' < /tmp/stacks-from-apps)
             echo "stacks that reference rebuilt apps: $STACKS"
           fi
-          echo "deploying with IMAGE_TAG=$IMAGE_TAG: $STACKS"
+          echo "rebuilt apps this run: ${APPS:-none}"
+          echo "deploying: $STACKS"
+          REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
+
+          # IMAGE_TAG only means something for images THIS run pushed. A run that
+          # only touched stacks/ (or a stack whose app did not rebuild) must use
+          # the pinned ${IMAGE_TAG:-<tag>} default, otherwise swarm tries to pull
+          # build-<n> that was never pushed and the service is rejected.
+          stack_tag() {   # echoes the tag to use for $1, empty = keep pinned
+            for A in $APPS; do
+              grep -q "/$A:" "stacks/$1/stack.yml" || continue
+              if docker manifest inspect "$REGISTRY/$A:$IMAGE_TAG" >/dev/null 2>&1; then
+                echo "$IMAGE_TAG"; return 0
+              fi
+              echo "!!! $1 references $A but $REGISTRY/$A:$IMAGE_TAG is not in the registry" >&2
+            done
+          }
+
           FAILED=""
           for APP in $STACKS; do
             [ -f "stacks/$APP/stack.yml" ] || continue
-            echo "=== deploying $APP ==="
+            TAG=$(stack_tag "$APP")
+            if [ -n "$TAG" ]; then
+              echo "=== deploying $APP with IMAGE_TAG=$TAG ==="
+            else
+              echo "=== deploying $APP with its pinned image tags ==="
+            fi
             # one broken stack must not stop the rest of the estate deploying
-            if ! docker stack deploy -c "stacks/$APP/stack.yml" "$APP" --with-registry-auth; then
+            if ! ( if [ -n "$TAG" ]; then IMAGE_TAG="$TAG"; else unset IMAGE_TAG; fi
+                   docker stack deploy -c "stacks/$APP/stack.yml" "$APP" --with-registry-auth ); then
               echo "!!! $APP failed to deploy"; FAILED="$FAILED $APP"
             fi
           done
