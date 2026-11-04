@@ -39,7 +39,7 @@
     },
     {
       "name": "anythingllm",
-      "source": "docker.io/mintplexlabs/anythingllm:1.18.0"
+      "source": "docker.io/mintplexlabs/anythingllm:1.19.0"
     },
     {
       "name": "ailog",
