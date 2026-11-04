@@ -365,7 +365,7 @@ services:
 - name: homelab-wizard
   kind: build
   repo: homelab-wizard
-  version: build-48
+  version: build-66
   service: wizard
   ports:
   - host: 8095
@@ -377,7 +377,7 @@ services:
     container: /data
   url: wizard.safehomelan.com
   env: {}
-  image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-48}
+  image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-66}
   source: ''
   env_count: 8
   companions: []

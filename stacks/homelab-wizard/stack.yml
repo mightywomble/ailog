@@ -3,7 +3,7 @@
 # Everything else here is hand-maintained and survives a re-render.
 services:
   wizard:
-    image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-48}
+    image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-66}
     environment:
       TZ: Europe/London
       WIZ_SETTINGS: /data/settings.json
