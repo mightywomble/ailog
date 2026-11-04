@@ -55,7 +55,7 @@ jobs:
         env:
           ZOT_URL: ${{ secrets.ZOT_URL }}
           BUILD_TAG: ${{ steps.meta.outputs.tag }}
-          APPS: ${{ steps.changed.outputs.apps }}
+          APPS: ${{ needs.release.outputs.apps }}
         run: |
           set -e
           REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
@@ -108,9 +108,15 @@ jobs:
         run: |
           set -e
           if [ -z "$STACKS" ]; then
-            # apps changed but no stack file touched: redeploy every stack that
-            # consumes IMAGE_TAG so a rebuild actually reaches the swarm
-            STACKS=$(grep -l 'IMAGE_TAG' stacks/*/stack.yml | cut -d/ -f2 | sort -u || true)
+            # an app was rebuilt but no stack file changed: redeploy exactly the
+            # stacks that reference that image (ailog-mcp lives in stacks/ailog)
+            for APP in $APPS; do
+              for f in stacks/*/stack.yml; do
+                grep -q "/$APP:" "$f" && dirname "$f" | cut -d/ -f2
+              done
+            done | sort -u > /tmp/stacks-from-apps || true
+            STACKS=$(tr '\n' ' ' < /tmp/stacks-from-apps)
+            echo "stacks that reference rebuilt apps: $STACKS"
           fi
           echo "deploying with IMAGE_TAG=$IMAGE_TAG: $STACKS"
           FAILED=""
