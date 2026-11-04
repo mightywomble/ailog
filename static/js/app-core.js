@@ -3302,17 +3302,16 @@ const showHostInfoMain = async () => {
                 list.innerHTML = '<div class="text-xs termix-muted">No containers on this host.</div>';
                 return;
             }
-            // wizard.yaml is keyed on the stack name, so pass that first: a
-            // stack with several services (ailog + ailog-mcp) is one wizard row.
-            const linkFor = (row) => wizardLink('update', {
-                service: row.stack || row.service || row.name,
-                // The wizard matches on the name first and falls back to the
-                // image, so a container that is not in wizard.yaml yet still
-                // opens a form that already knows what it is.
-                name: row.stack || row.service || row.name,
-                image: row.image,
-                container: row.name,
-                host: dockerViewHostId,
+            // A row is one distinct image, so the update is addressed at the
+            // image (and the first container carrying it). The dialog resolves
+            // what that image is here - a compose service, a swarm service, or
+            // neither - and updates only that.
+            const targetFor = (row) => ({
+                hostKey: dockerViewHostId,
+                hostName,
+                image: row.image || '',
+                container: row.name || '',
+                label: row.name || row.image || 'container',
             });
             list.innerHTML = rows.map((row) => {
                 const badge = row.update_available
@@ -3325,11 +3324,13 @@ const showHostInfoMain = async () => {
                     : (row.error
                         ? `<span class="text-[11px] text-amber-300" title="${escapeHtml(row.error)}">registry: ${escapeHtml(String(row.error).slice(0, 60))}</span>`
                         : '');
-                // "update" opens the wizard *on this row* inside the dialog:
-                // a new tab dropped the user on the wizard's whole service
-                // list, where they had to find the app again.
+                // "update" opens ailog's own update dialog, bound to this
+                // row. It used to frame the homelab wizard, whose update path
+                // is a wizard.yaml tag bump - a CasaOS compose project is not
+                // in wizard.yaml, so the click fell through to the wizard's
+                // add-a-service journey.
                 const action = row.update_available
-                    ? `<button type="button" class="text-xs px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium" data-wizard-open="${escapeHtml(linkFor(row))}" data-wizard-label="${escapeHtml(row.stack || row.service || row.name || '')}" title="Open the homelab wizard on this container">update</button>`
+                    ? `<button type="button" class="text-xs px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium" data-update-image="${escapeHtml(row.image || '')}" data-update-container="${escapeHtml(row.name || '')}" data-update-label="${escapeHtml(row.name || row.image || '')}" title="Pull the newer image and recreate only this service">update</button>`
                     : '';
                 return `
                     <div class="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
@@ -3567,7 +3568,7 @@ const showHostInfoMain = async () => {
                                     class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">
                                 Add a container…
                             </button>
-                            <p class="text-[11px] termix-muted">Updates and new services go through the homelab wizard (wizard.yaml → build → swarm deploy).</p>
+                            <p class="text-[11px] termix-muted">Updates run here, on the container you picked. New services go through the homelab wizard (wizard.yaml → build → swarm deploy).</p>
                         </div>
                         <div class="xl:col-span-2 p-3 rounded-lg bg-white/5 border border-white/10" id="docker-fleet">
                             <div class="text-xs termix-muted">Loading docker fleet usage…</div>
@@ -3654,15 +3655,27 @@ const showHostInfoMain = async () => {
             // One delegated listener: the update list is re-rendered on every poll,
             // so a per-row listener would be thrown away each time.
             document.getElementById('docker-updates-list')?.addEventListener('click', (event) => {
-                const button = event.target.closest('[data-wizard-open]');
+                const button = event.target.closest('[data-update-image], [data-update-container]');
                 if (!button) return;
-                openWizard(button.dataset.wizardOpen,
-                           button.dataset.wizardLabel || `${hostName} · update`);
+                const options = {
+                    hostKey: hostId,
+                    hostName,
+                    image: button.dataset.updateImage || '',
+                    container: button.dataset.updateContainer || '',
+                    label: button.dataset.updateLabel || '',
+                };
+                if (typeof window.openUpdateModal === 'function') {
+                    window.openUpdateModal(options);
+                } else {
+                    // Fallback: no dialog module, so say rather than do nothing.
+                    window.alert(`Update ${options.label} on ${hostName} — the update dialog is unavailable.`);
+                }
             });
 
-            // The wizard posts 'deployed' when a pipeline finishes and the frame
-            // fires appmodal:close when the dialog closes. Both mean the estate
-            // may have moved, so the update list is re-read rather than trusted.
+            // An update that finished (or a wizard hand-off for a new service)
+            // means this host's images may have moved, so the list is re-read
+            // rather than trusted. update-modal.js dispatches the event; it does
+            // not reach into this closure.
             const refreshAfterWizard = async () => {
                 if (logsMainMode !== 'docker' || !dockerViewHostId) return;
                 const target = dockerViewHostId;
@@ -3678,6 +3691,11 @@ const showHostInfoMain = async () => {
             };
             window.onWizardDeployed = refreshAfterWizard;
             window.onWizardClosed = refreshAfterWizard;
+            document.addEventListener('ailog:container-updated', (event) => {
+                const from = event.detail && event.detail.hostKey;
+                if (!from || from !== dockerViewHostId) return;
+                refreshAfterWizard();
+            });
 
             document.getElementById('docker-updates-refresh')?.addEventListener('click', async (event) => {
                 const button = event.currentTarget;

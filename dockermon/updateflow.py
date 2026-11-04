@@ -1,0 +1,503 @@
+"""Updating exactly one container, from the container itself.
+
+:mod:`dockermon.updates` answers "has this image moved upstream?".  This module
+answers the next question - "so how does *this* container get the new bits?" -
+and then does it, on the host it is running on, touching nothing else.
+
+Three shapes exist in this estate and they need different commands:
+
+``compose``
+    a docker-compose project (the CasaOS apps: gitea, pihole, nginxproxymanager,
+    managelm).  ``docker compose -f <file> pull <service>`` then
+    ``up -d --no-deps <service>``.  ``--no-deps`` is the whole point: updating
+    gitea must not bounce its database or a sidecar that shares the project.
+
+``swarm``
+    a service in a stack (ailog itself, everything wizard.yaml renders).
+    ``docker service update --image <ref> --force --with-registry-auth`` on a
+    manager.  It is addressed at one service, so the rest of the stack is
+    untouched.
+
+``container``
+    ``docker run`` with no compose labels and no swarm service.  There is no
+    recorded intent to replay (ports, mounts, env, restart policy), so this is
+    refused with the reason rather than guessed at.
+
+The old hand-off framed the whole homelab wizard for any of these, and the
+wizard's update path is a ``wizard.yaml`` tag bump - which a CasaOS compose
+project is not in, so the click landed on the add-a-service journey.  Doing the
+update here means "gitea, on casaos" is a two-command change with a log, not a
+release pipeline.
+"""
+
+from __future__ import annotations
+
+import shlex
+import threading
+import time
+import uuid
+
+from database import release_session
+from . import endpoints as ep
+
+COMPOSE_PROJECT = 'com.docker.compose.project'
+COMPOSE_SERVICE = 'com.docker.compose.service'
+COMPOSE_FILES = 'com.docker.compose.project.config_files'
+COMPOSE_WORKDIR = 'com.docker.compose.project.working_dir'
+SWARM_SERVICE = 'com.docker.swarm.service.name'
+
+# One shell prelude per SSH call: sudo only if it actually works, and the
+# compose plugin only if this host has it.  Both answers are per invocation
+# because each call is a fresh shell; the alternative (assume sudo, assume
+# v2 compose) fails on exactly the Hosts that matter (CasaOS runs compose v1
+# in some apps and v2 in others).
+PRELUDE = (
+    'if sudo -n docker info >/dev/null 2>&1; then DK="sudo -n docker"; else DK="docker"; fi; '
+    'if $DK compose version >/dev/null 2>&1; then DC="$DK compose"; else DC="docker-compose"; fi; '
+)
+
+MODES = ('off', 'dry_run', 'on')
+
+
+def _env(name: str, default: str = '') -> str:
+    import os
+    return (os.getenv(name) or default).strip()
+
+
+def mode() -> str:
+    """``AILOG_ALLOW_UPDATES``: off (plan only) / dry_run (print) / on (do it).
+
+    On by default because this is the one action in ailog that exists to be
+    pressed; the confirmation, the visible command and the job log are what make
+    it safe, not a default that silently does nothing.
+    """
+    value = _env('AILOG_ALLOW_UPDATES', 'on').lower()
+    return value if value in MODES else 'on'
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(_env(name, str(default)))
+    except ValueError:
+        return default
+
+
+PULL_TIMEOUT = _int_env('AILOG_UPDATE_PULL_TIMEOUT', 900)
+RUN_TIMEOUT = _int_env('AILOG_UPDATE_RUN_TIMEOUT', 180)
+
+
+# --------------------------------------------------------------------------
+# pure helpers (the part worth testing without a host)
+# --------------------------------------------------------------------------
+
+def target_of(inspect_row: dict) -> dict:
+    """Turn one ``docker inspect`` row into the thing we can act on.
+
+    The labels are the whole story: a container belongs to a compose service, a
+    swarm service, or neither.  Falls back to the compose file's directory when
+    the config-files label was written by an older compose (it is absent on
+    projects created before compose 1.25-ish), because guessing the file from
+    the working directory is still better than refusing.
+    """
+    labels = ((inspect_row.get('Config') or {}).get('Labels') or {}) or {}
+    name = str(inspect_row.get('Name') or '').lstrip('/')
+    image = str((inspect_row.get('Config') or {}).get('Image') or '')
+
+    swarm = (labels.get(SWARM_SERVICE) or '').strip()
+    if swarm:
+        return {
+            'kind': 'swarm',
+            'service': swarm,
+            'image': image,
+            'containers': [name],
+            'project': labels.get('com.docker.stack.namespace') or '',
+            'file': '',
+        }
+
+    project = (labels.get(COMPOSE_PROJECT) or '').strip()
+    service = (labels.get(COMPOSE_SERVICE) or '').strip()
+    if service:
+        files = [part.strip() for part in (labels.get(COMPOSE_FILES) or '').split(',') if part.strip()]
+        workdir = (labels.get(COMPOSE_WORKDIR) or '').strip()
+        if not files and workdir:
+            files = [workdir.rstrip('/') + '/docker-compose.yml']
+        return {
+            'kind': 'compose',
+            'service': service,
+            'image': image,
+            'containers': [name],
+            'project': project,
+            'file': files[0] if files else '',
+            'files': files,
+        }
+
+    return {
+        'kind': 'container',
+        'service': '',
+        'image': image,
+        'containers': [name],
+        'project': '',
+        'file': '',
+    }
+
+
+def group_targets(rows) -> list[dict]:
+    """One target per service, not per container.
+
+    A row in the updates pane is aggregated by image, so three replicas of the
+    same image arrive as three containers of one service; running the same
+    ``service update`` three times would restart the service three times.
+    """
+    out: list[dict] = []
+    seen: dict[tuple, dict] = {}
+    for row in rows or []:
+        target = target_of(row)
+        key = (target['kind'], target['service'] or target['containers'][0])
+        if key in seen:
+            seen[key]['containers'].extend(target['containers'])
+            continue
+        seen[key] = target
+        out.append(target)
+    for target in out:
+        target['reason'] = unsupported_reason(target)
+        target['commands'] = commands_for(target)
+    return out
+
+
+def unsupported_reason(target: dict) -> str:
+    if target['kind'] == 'container':
+        return ('no compose project and no swarm service: docker has no record of '
+                'how this container was created, so it cannot be recreated safely')
+    if target['kind'] == 'compose' and not target.get('files'):
+        return 'the compose project has no config file recorded on this host'
+    if target['kind'] == 'swarm' and not target.get('service'):
+        return 'the container has no swarm service label'
+    return ''
+
+
+def compose_commands(target: dict) -> list[str]:
+    files = target.get('files') or ([target['file']] if target.get('file') else [])
+    if not files:
+        return []
+    flags = ' '.join(f'-f {shlex.quote(path)}' for path in files)
+    service = shlex.quote(target['service'])
+    return [
+        PRELUDE + f'$DC {flags} pull {service}',
+        PRELUDE + f'$DC {flags} up -d --no-deps {service}',
+    ]
+
+
+def swarm_commands(target: dict) -> list[str]:
+    """Roll one swarm service onto the image the registry currently serves.
+
+    ``--force`` because a moving tag (``:latest``) has an identical image spec,
+    and without it swarm considers the update a no-op and keeps the old digest.
+    ``--with-registry-auth`` because zot needs the credentials the manager
+    already holds from the last deploy.
+    """
+    if not target.get('service'):
+        return []
+    return [
+        PRELUDE + ('$DK service update --image {image} --with-registry-auth --force {service}'
+                   .format(image=shlex.quote(target['image']),
+                           service=shlex.quote(target['service']))),
+    ]
+
+
+def commands_for(target: dict) -> list[str]:
+    if target['kind'] == 'compose':
+        return compose_commands(target)
+    if target['kind'] == 'swarm':
+        return swarm_commands(target)
+    return []
+
+
+# --------------------------------------------------------------------------
+# host reads
+# --------------------------------------------------------------------------
+
+def _runner(host_key: str):
+    """(info, run) for one host; ``run`` keeps stderr so failures are readable."""
+    info = ep.resolve_host(host_key)
+    if not info:
+        raise RuntimeError(f"Unknown host '{host_key}'")
+    user = info.get('user') or 'root'
+    ip = info.get('ip') or '127.0.0.1'
+    key_id = info.get('ssh_key_id')
+
+    def run(command: str, timeout: int = 60):
+        return ep.ssh_run(user, ip, command, ssh_key_id=key_id, timeout=timeout)
+
+    return info, run
+
+
+def _ps_rows(run) -> list[dict]:
+    ok, out = run(PRELUDE + "docker ps -a --format '{{.Names}}\t{{.Image}}'", timeout=25)
+    if not ok:
+        raise RuntimeError((out or 'docker ps failed').strip()[:300])
+    rows = []
+    for line in (out or '').splitlines():
+        name, _, image = line.partition('\t')
+        if name.strip():
+            rows.append({'name': name.strip(), 'image': image.strip()})
+    return rows
+
+
+def _inspect(run, names) -> list[dict]:
+    if not names:
+        return []
+    import json
+    quoted = ' '.join(shlex.quote(name) for name in names)
+    ok, out = run(PRELUDE + f"$DK inspect --format '{{{{json .}}}}' {quoted}", timeout=30)
+    if not ok:
+        raise RuntimeError((out or 'docker inspect failed').strip()[:300])
+    rows = []
+    for line in (out or '').splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
+def _is_manager(run) -> bool:
+    ok, out = run(PRELUDE + '$DK info --format "{{.Swarm.ControlAvailable}}"', timeout=20)
+    return bool(ok and (out or '').strip().lower() == 'true')
+
+
+_manager_cache = {'ts': 0.0, 'key': '', 'for': ''}
+_manager_lock = threading.Lock()
+MANAGER_TTL = 300.0
+
+
+def manager_for(host_key: str, run=None) -> str:
+    """A host that can run ``docker service update``.
+
+    A worker refuses swarm commands, so a stack's containers on a worker would
+    otherwise be un-updatable from the node they happen to live on.  The answer
+    is cached per asked-for host for five minutes, because finding it costs an
+    SSH round trip per configured host.
+    """
+    now = time.time()
+    with _manager_lock:
+        if (_manager_cache['key'] and _manager_cache['for'] == host_key
+                and (now - _manager_cache['ts']) < MANAGER_TTL):
+            return _manager_cache['key']
+
+    if run is None:
+        _info, run = _runner(host_key)
+    if _is_manager(run):
+        with _manager_lock:
+            _manager_cache.update(ts=time.time(), key=host_key, **{'for': host_key})
+        return host_key
+
+    for other in ep.all_host_keys():
+        if other == host_key:
+            continue
+        try:
+            release_session()
+            _other_info, other_run = _runner(other)
+            if _is_manager(other_run):
+                with _manager_lock:
+                    _manager_cache.update(ts=time.time(), key=other, **{'for': host_key})
+                return other
+        except Exception:
+            continue
+    return ''
+
+
+def plan(host_key: str, image: str = '', container: str = '') -> dict:
+    """What would be run, for the containers a pane row refers to."""
+    image = (image or '').strip()
+    container = (container or '').strip()
+    if not image and not container:
+        raise RuntimeError('an image or a container name is required')
+
+    info, run = _runner(host_key)
+    release_session()
+    rows = _ps_rows(run)
+    wanted = [r['name'] for r in rows
+              if (container and r['name'] == container)
+              or (image and r['image'] == image)]
+    if not wanted and container:
+        wanted = [container]
+    release_session()
+    inspected = _inspect(run, wanted)
+    targets = group_targets(inspected)
+
+    manager = ''
+    if any(t['kind'] == 'swarm' and not t['reason'] for t in targets):
+        manager = manager_for(host_key, run)
+    for target in targets:
+        if target['kind'] == 'swarm':
+            target['runs_on'] = manager or host_key
+            target['note'] = ('rolls this service onto whatever the registry serves for '
+                              f'{target["image"]} now; the tag pinned in homelab-ops is unchanged')
+        elif target['kind'] == 'compose':
+            target['runs_on'] = host_key
+            target['note'] = (f'recreates only the {target["service"]} service of project '
+                              f'{target["project"] or "?"} — no other container in it is touched')
+        else:
+            target['runs_on'] = host_key
+            target['note'] = ''
+
+    return {
+        'host_key': host_key,
+        'host_name': info.get('friendly_name') or info.get('name') or host_key,
+        'image': image,
+        'container': container,
+        'targets': targets,
+        'supported': bool(targets) and all(t['commands'] for t in targets),
+        'mode': mode(),
+        'ts': time.time(),
+    }
+
+
+# --------------------------------------------------------------------------
+# running it
+# --------------------------------------------------------------------------
+
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+JOB_TTL = 3600
+
+
+def _job_update(job_id: str, **patch) -> None:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job:
+            job.update(patch)
+
+
+def _job_step(job_id: str, label: str, ok=None, detail: str = '') -> None:
+    """Record a step, and resolve the same step in place when it finishes.
+
+    A step is opened when its command starts (``ok=None``, so the dialog can show
+    what is running) and closed with the exit status; appending twice would show
+    every command as two lines, one of them permanently unresolved.
+    """
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            return
+        last = job['steps'][-1] if job['steps'] else None
+        if last and last['label'] == label:
+            if detail:
+                last['detail'] = detail
+            if ok is not None:
+                last['ok'] = ok
+            job['label'] = label
+            return
+        job['steps'].append({'label': label, 'ok': ok, 'detail': detail})
+        job['label'] = label
+
+
+def _job_log(job_id: str, text: str) -> None:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is not None:
+            job['output'].append(text)
+            job['output'] = job['output'][-200:]
+
+
+def job(job_id: str) -> dict | None:
+    with _jobs_lock:
+        found = _jobs.get(job_id)
+        if not found:
+            return None
+        snapshot = dict(found)
+        snapshot['steps'] = [dict(step) for step in found['steps']]
+        snapshot['output'] = list(found['output'])
+    snapshot['elapsed'] = round(time.time() - snapshot['started'], 1)
+    return snapshot
+
+
+def clear() -> None:
+    with _jobs_lock:
+        _jobs.clear()
+
+
+def _prune() -> None:
+    cutoff = time.time() - JOB_TTL
+    with _jobs_lock:
+        for key in [k for k, v in _jobs.items() if v.get('finished') and v['finished'] < cutoff]:
+            _jobs.pop(key, None)
+
+
+def _execute(job_id: str, host_key: str, target: dict, dry: bool) -> bool:
+    """Run one target's commands. Returns True when everything exited 0."""
+    runs_on = target.get('runs_on') or host_key
+    _info, run = _runner(runs_on)
+    release_session()
+    every_ok = True
+    for command in target.get('commands') or []:
+        label = 'pull' if ' pull ' in command else ('recreate' if ' up ' in command else 'service update')
+        _job_step(job_id, f"{label} {target['service']}", detail=command)
+        if dry:
+            _job_log(job_id, f"$ {command}\n(dry run — not executed)")
+            _job_step(job_id, f"{label} {target['service']}", ok=True, detail='dry run')
+            continue
+        started = time.time()
+        ok, out = run(command, timeout=PULL_TIMEOUT if label == 'pull' else RUN_TIMEOUT)
+        release_session()
+        for line in (out or '').strip().splitlines():
+            _job_log(job_id, line)
+        _job_step(job_id, f"{label} {target['service']}", ok=ok,
+                  detail=f"{round(time.time() - started, 1)}s")
+        if not ok:
+            every_ok = False
+            break
+    return every_ok
+
+
+def _worker(app, job_id: str, host_key: str, image: str, container: str) -> None:
+    with app.app_context():
+        try:
+            _job_step(job_id, 'reading the host', detail=f'{host_key}')
+            current = plan(host_key, image, container)
+            _job_update(job_id, plan=current)
+            if not current['supported']:
+                reasons = '; '.join(t['reason'] for t in current['targets'] if t['reason'])
+                _job_update(job_id, status='blocked',
+                            error=reasons or 'nothing on this host matches that image')
+                return
+            dry = current['mode'] != 'on'
+            if dry:
+                _job_step(job_id, 'dry run', detail='AILOG_ALLOW_UPDATES is not "on"')
+            every_ok = True
+            for target in current['targets']:
+                every_ok = _execute(job_id, host_key, target, dry) and every_ok
+            _job_update(job_id, status='done' if every_ok else 'error',
+                        error='' if every_ok else 'one or more commands failed — see the log')
+        except Exception as exc:                      # noqa: BLE001 - shown in the dialog
+            _job_update(job_id, status='error', error=str(exc) or exc.__class__.__name__)
+        finally:
+            _job_update(job_id, finished=time.time())
+            release_session()
+
+
+def start(app, host_key: str, image: str = '', container: str = '') -> dict:
+    """Queue the update and return the job the dialog polls."""
+    _prune()
+    job_id = uuid.uuid4().hex[:12]
+    with _jobs_lock:
+        _jobs[job_id] = {
+            'id': job_id,
+            'host_key': host_key,
+            'image': image,
+            'container': container,
+            'status': 'running',
+            'label': 'queued',
+            'steps': [],
+            'output': [],
+            'plan': None,
+            'error': '',
+            'started': time.time(),
+            'finished': 0.0,
+        }
+    threading.Thread(target=_worker, args=(app, job_id, host_key, image, container),
+                     name=f'docker-update-{job_id}', daemon=True).start()
+    return job(job_id)

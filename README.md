@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-11-04 | v3.16.0 | **Pressing update updates the container you clicked.** Update used to hand the row to the homelab wizard, whose update path is a `wizard.yaml` tag bump — a CasaOS app is a compose project that is not in `wizard.yaml`, so the click fell through to the wizard's *add-a-service* journey and the app had to be found again. AILog now does the update itself, scoped to the container behind the row: `dockermon/updateflow.py` reads the container's own labels and decides the shape — a compose service becomes `docker compose -f <recorded file> pull <service>` + `up -d --no-deps <service>` (so gitea's neighbours are not bounced), a swarm service becomes `docker service update --image <ref> --force --with-registry-auth` on a manager it finds for itself, and a container with neither is refused with the reason rather than guessed at. The dialog shows the kind, the exact commands and the target before anything runs, then streams the job (step, command, output) and re-reads the host when it finishes. `AILOG_ALLOW_UPDATES` = `on` (default) / `dry_run` (show the commands) / `off`. Replicas of one service are one update, not three. | ✅ Complete |
 | 2026-11-04 | v3.15.1 | **A "re-check" now joins the scan queue instead of jumping it.** The per-host refresh endpoint started its own thread, so a manual re-check bypassed both the concurrency bound and the progress reporting; it goes through `scan_async` like everything else, which is why the activity strip now shows `Scanning containers for updates · 1 of 6 hosts · checking casaos` when you press re-check. | ✅ Complete |
 | 2026-11-04 | v3.15.0 | **The app says what it is doing, and stops starving its own database.** Every background scan and metric probe held a pooled SQLAlchemy connection for the length of its SSH round and each registry lookup, and the Docker update scan started *one thread per host* — 17 hosts meant 17 pinned connections against a 5+10 pool, so every request died with `QueuePool limit ... connection timed out` and the dashboard came up empty. Connections are now released before any network I/O (`database.release_session`), the scan runs three hosts at a time from one queue, discovery rows are cached for 3 s, and a starved pool fails in 10 s instead of 30. Alongside it: an **activity strip** that names the job and the host — "Collecting host metrics · 3 of 12 hosts · contacting casaos · 25%" — with a determinate bar, and a red close button inside the wizard for when it is framed by AILog. | ✅ Complete |
 | 2026-11-04 | v3.14.2 | **Update and full monitor open in dialogs, on the thing you clicked.** The `update` button on a container row opened the wizard in a blank tab on its whole service list, so the app you had just identified had to be found again; it now opens the wizard *in a dialog* deep-linked to that container — exact name first, then the image, and if the container is not in `wizard.yaml` at all (a compose container on casaos) the add-a-service form opens prefilled with its name, image, tag and repo, so "update" becomes "adopt, then update". `full monitor` uses the same dialog family as the other embedded views instead of a tab, with an Exit button, Escape and backdrop close. The wizard posts back when a job ends and the pane re-reads that host's update list, and `AILOG_WIZARD_URL` now drives both the deep links and the CSP's `frame-src` (without naming the wizard's origin, the frame is refused and the dialog is blank). | ✅ Complete |
@@ -204,15 +205,25 @@ are the things you *do* to a host:
   while the view is open and the tab visible), a line filter, and AI analyse on
   what is on screen. Swarm services are read with `docker service logs` so a
   replica on another node is not invisible.
-* **Add or update:** both are handed to the homelab wizard
-  (`wizard.safehomelan.com`) rather than done in AILog, because the wizard owns
-  `wizard.yaml`, the build pipeline and the swarm deploy. It opens **in a dialog**
-  on the row you clicked, not in a tab: the link carries
-  `?mode=update&service=<stack>&name=&image=&container=&host=` and the wizard
-  resolves it by name, then by image, and otherwise prefills its add-a-service
-  form with that container's details (an app outside the estate is adopted, then
-  updated). The wizard posts `{source:'homelab-wizard', type:'deployed'}` back
-  when a job ends and the pane re-reads the host. `AILOG_WIZARD_URL` sets the
+* **Update:** `update` on a row opens AILog's own dialog, bound to that row
+  (`data-update-image` / `data-update-container`). The server reads the
+  container's labels and states what it is: a **compose service** (CasaOS apps,
+  managelm) → `docker compose -f <file recorded by compose> pull <service>` then
+  `up -d --no-deps <service>`; a **swarm service** → `docker service update
+  --image <ref> --force --with-registry-auth <service>` on a manager (found by
+  probing the estate and cached for 5 minutes, because a worker refuses swarm
+  commands); anything else → refused, because `docker run` leaves no record of
+  how to recreate it. The commands are shown before the button enables, the job
+  streams its steps and output, and the pane re-reads the host afterwards. Scope
+  is the whole point: one service, `--no-deps`, nothing else on the host.
+  `AILOG_ALLOW_UPDATES=off|dry_run|on` (default `on`).
+* **Add a container:** still handed to the homelab wizard
+  (`wizard.safehomelan.com`), because that one *does* change the estate's
+  source of truth: the wizard owns `wizard.yaml`, the build pipeline and the
+  swarm deploy, and an app outside it has to be adopted first. It opens **in a
+  dialog**, not in a tab, deep-linked with `?mode=new&host=`. Before v3.16.0 the
+  update row went here too, which is why a CasaOS container ended up in the
+  add-a-service form. `AILOG_WIZARD_URL` sets the
   wizard's address for both the links and the CSP's `frame-src`.
 
 ### 📶 **The activity strip**
@@ -313,7 +324,10 @@ Docker monitoring endpoints: `GET /docker/<host_key>`, `GET /api/docker/endpoint
 `GET /api/docker/hosts/<k>/history/stream` (SSE), `POST /api/docker/hosts/<k>/swarm/refresh`,
 `POST /api/docker/history/clear`. The Docker Information view adds `GET /api/docker/overview`
 (sidebar badges), `GET /api/docker/hosts/<k>/fleet` (docker usage as a share of the host),
-`GET /api/docker/hosts/<k>/updates` and `POST /api/docker/hosts/<k>/updates/refresh`.
+`GET /api/docker/hosts/<k>/updates` and `POST /api/docker/hosts/<k>/updates/refresh`
+(scan). Updating: `GET /api/docker/hosts/<k>/update/plan?image=&container=` (what it
+is and the exact commands), `POST /api/docker/hosts/<k>/update` (needs `confirm: true`),
+`GET /api/docker/update/jobs/<id>` (step, command, output).
 
 Endpoints: `POST /serverreport/stream` (SSE), `POST /serverreport/preflight`,
 `GET /api/serverreport/defaults`, `GET /reports`, `GET /reports/<id>`,

@@ -19,6 +19,9 @@ GET  /api/docker/hosts/<host_key>/fleet      docker usage as a share of the host
 GET  /api/docker/hosts/<host_key>/updates    containers whose image moved
 POST /api/docker/hosts/<host_key>/updates/refresh   queue a fresh scan
 GET  /api/docker/overview                    sidebar badges: ok / attention
+GET  /api/docker/hosts/<host_key>/update/plan  how this container gets its update
+POST /api/docker/hosts/<host_key>/update       do it, for that container only
+GET  /api/docker/update/jobs/<job_id>          the dialog's live progress
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ from . import sshstats
 from . import stats as dstats
 from . import swarm as dswarm
 from . import updates as dupdates
+from . import updateflow as duflow
 from core.timeutil import utcnow
 from database import release_session
 
@@ -608,6 +612,59 @@ def api_updates_refresh(host_key):
     # what the activity strip reads its progress from.
     started = dupdates.scan_async(app, [host_key])
     return jsonify({'success': True, 'started': started[0] if started else None})
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/update/plan')
+def api_update_plan(host_key):
+    """How *this* container would be updated: the kind, the target, the commands.
+
+    Reading only — the dialog shows this before anything runs, so the user sees
+    "compose project gitea on casaos, two commands" rather than a black box.
+    """
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    image = (request.args.get('image') or '').strip()
+    container = (request.args.get('container') or '').strip()
+    if not image and not container:
+        return _error('an image or a container name is required', status=400)
+    try:
+        return jsonify({'success': True, 'plan': duflow.plan(host_key, image, container)})
+    except Exception as exc:                      # noqa: BLE001 - surfaced in the dialog
+        return jsonify({'success': False, 'error': str(exc) or exc.__class__.__name__}), 502
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/update', methods=['POST'])
+def api_update_run(host_key):
+    """Start the update for the containers a pane row refers to.
+
+    Scoped by design: the body carries the image (or one container name) the row
+    was about, so the same endpoint cannot be pointed at a whole host.
+    """
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    body = request.get_json(silent=True) or {}
+    image = str(body.get('image') or '').strip()
+    container = str(body.get('container') or '').strip()
+    if not image and not container:
+        return _error('an image or a container name is required', status=400)
+    if not body.get('confirm'):
+        return _error('confirmation is required: the dialog must show the commands first',
+                      status=400)
+    if duflow.mode() == 'off':
+        return _error('updates are disabled on this server (AILOG_ALLOW_UPDATES=off)',
+                      status=403)
+    app = current_app._get_current_object()
+    started = duflow.start(app, host_key, image, container)
+    return jsonify({'success': True, 'job': started})
+
+
+@docker_bp.route('/api/docker/update/jobs/<job_id>')
+def api_update_job(job_id):
+    """Live progress for one update: the step, the command, the output tail."""
+    found = duflow.job(job_id)
+    if not found:
+        return _error(f"Unknown update job '{job_id}'", status=404)
+    return jsonify({'success': True, 'job': found})
 
 
 def _says_no_docker(message: str) -> bool:

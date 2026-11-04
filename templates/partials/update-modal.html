@@ -1,0 +1,35 @@
+<!-- The in-app container update. "update" on a row in Container updates opens
+     this, scoped to the containers behind that row: the dialog shows how the
+     container gets its new image (compose service, swarm service, or why
+     neither is possible), the exact commands, then runs them and streams the
+     output. Nothing else on the host is addressed.
+
+     Before this, the row handed off to the homelab wizard, whose update path is
+     a wizard.yaml tag bump - so a CasaOS compose project fell through to the
+     wizard's add-a-service journey. -->
+<div id="updateModal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-lg">
+    <div class="app-modal-head">
+      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-amber-300"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v10m0 0l-3-3m3 3l3-3M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        <span id="updateModalTitle" class="truncate">Update container</span>
+        <span id="updateModalSub" class="app-modal-sub truncate"></span>
+      </div>
+      <button id="updateModalClose" type="button" class="app-modal-close" data-modal-close>Close</button>
+    </div>
+    <div class="app-modal-body">
+      <div class="space-y-3">
+        <div id="updateModalSummary" class="text-xs termix-muted">Reading the host…</div>
+        <div id="updateModalTargets" class="space-y-2"></div>
+        <div class="flex items-center gap-3 flex-wrap">
+          <button id="updateModalRun" type="button" disabled
+                  class="text-sm px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium disabled:opacity-40 disabled:cursor-not-allowed">Update now</button>
+          <button id="updateModalAgain" type="button" hidden
+                  class="text-sm px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 termix-text">Re-check</button>
+          <span id="updateModalState" class="text-xs termix-muted" role="status" aria-live="polite"></span>
+        </div>
+        <div id="updateModalSteps" class="space-y-1"></div>
+        <pre id="updateModalLog" class="text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words max-h-64 overflow-auto p-3 rounded-lg bg-black/40 border border-white/10 termix-text" hidden></pre>
+      </div>
+    </div>
+  </div>
+</div>
