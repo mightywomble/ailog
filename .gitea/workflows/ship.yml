@@ -96,6 +96,8 @@ jobs:
     runs-on: deploy
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # the deploy job diffs the merge itself
 
       - name: Log in to zot
         run: echo "${{ secrets.ZOT_PASSWORD }}" | docker login "${{ secrets.ZOT_URL }}" -u "${{ secrets.ZOT_USER }}" --password-stdin
@@ -104,9 +106,17 @@ jobs:
         env:
           ZOT_URL: ${{ secrets.ZOT_URL }}
           IMAGE_TAG: ${{ needs.release.outputs.tag }}
-          STACKS: ${{ needs.release.outputs.stacks }}
         run: |
           set -e
+          # multi-line job outputs are unreliable across Gitea runners, so the
+          # changed set is recomputed here rather than passed from release
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            APPS=$(git diff --name-only HEAD~1 HEAD | grep '^apps/' | cut -d/ -f2 | sort -u || true)
+            STACKS=$(git diff --name-only HEAD~1 HEAD | grep '^stacks/' | cut -d/ -f2 | sort -u || true)
+          else
+            APPS=$(ls apps 2>/dev/null || true)
+            STACKS=$(ls stacks 2>/dev/null || true)
+          fi
           if [ -z "$STACKS" ]; then
             # an app was rebuilt but no stack file changed: redeploy exactly the
             # stacks that reference that image (ailog-mcp lives in stacks/ailog)
