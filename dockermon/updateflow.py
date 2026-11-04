@@ -12,11 +12,17 @@ Three shapes exist in this estate and they need different commands:
     ``up -d --no-deps <service>``.  ``--no-deps`` is the whole point: updating
     gitea must not bounce its database or a sidecar that shares the project.
 
+``estate``
+    a service in a stack the estate owns (``wizard.yaml``).  The running image
+    has to stay the image git says it is, so this does not touch docker at all:
+    it bumps the version in ``wizard.yaml`` + the stack file + the mirror entry,
+    pushes ``dev``, opens the PR to ``main`` and lets ``ship.yml`` deploy.  See
+    :mod:`estate`.
+
 ``swarm``
-    a service in a stack (ailog itself, everything wizard.yaml renders).
-    ``docker service update --image <ref> --force --with-registry-auth`` on a
-    manager.  It is addressed at one service, so the rest of the stack is
-    untouched.
+    a stack service the estate does not know about.  ``docker service update
+    --image <ref> --force --with-registry-auth`` on a manager, for when there is
+    no pin to move.  Still one service, never the stack.
 
 ``container``
     ``docker run`` with no compose labels and no swarm service.  There is no
@@ -165,6 +171,8 @@ def group_targets(rows) -> list[dict]:
 
 
 def unsupported_reason(target: dict) -> str:
+    if target['kind'] == 'estate':
+        return ''
     if target['kind'] == 'container':
         return ('no compose project and no swarm service: docker has no record of '
                 'how this container was created, so it cannot be recreated safely')
@@ -209,6 +217,8 @@ def commands_for(target: dict) -> list[str]:
         return compose_commands(target)
     if target['kind'] == 'swarm':
         return swarm_commands(target)
+    # estate: the work happens in CI, so there is no command to show - the
+    # dialog shows the plan's steps instead (target['estate']['steps']).
     return []
 
 
@@ -309,6 +319,45 @@ def manager_for(host_key: str, run=None) -> str:
     return ''
 
 
+def estate_target(target: dict) -> dict:
+    """Turn a swarm target into an estate update when the stack is managed there.
+
+    The stack a container belongs to is the estate's service name (both are the
+    ``com.docker.stack.namespace`` label), so a row's swarm service resolves to a
+    ``wizard.yaml`` entry without any guessing.  Falls back to the direct
+    ``service update`` when the estate is off, unknown, or says the service is
+    build-kind - a monitoring app must not be the reason an update cannot happen.
+    """
+    stack = (target.get('project') or '').strip()
+    if not stack:
+        return target
+    try:
+        from estate import settings as estatesettings
+        from estate import update as estupdate
+        if not estatesettings.enabled():
+            target['note'] = (target.get('note') or '') + \
+                ' (the estate pipeline is off: AILOG_ALLOW_ESTATE=off)'
+            return target
+        estate_plan = estupdate.plan(stack)
+    except Exception as exc:                       # noqa: BLE001 - shown as a note
+        target['note'] = f'estate: could not plan {stack} ({exc}) - using a direct service update'
+        return target
+
+    target['estate'] = estate_plan
+    if not estate_plan.get('supported'):
+        target['note'] = estate_plan.get('reason') or 'the estate does not manage this service'
+        return target
+    target['kind'] = 'estate'
+    target['service'] = estate_plan.get('name') or stack
+    target['estate_service'] = estate_plan.get('name') or stack
+    target['commands'] = []
+    target['runs_on'] = 'CI'
+    target['note'] = (f'moves the image in git ({estate_plan.get("current")} -> '
+                      f'{estate_plan.get("target")}) and lets CI deploy it, so the '
+                      f'running image stays the one the estate pins')
+    return target
+
+
 def plan(host_key: str, image: str = '', container: str = '') -> dict:
     """What would be run, for the containers a pane row refers to."""
     image = (image or '').strip()
@@ -328,14 +377,25 @@ def plan(host_key: str, image: str = '', container: str = '') -> dict:
     inspected = _inspect(run, wanted)
     targets = group_targets(inspected)
 
+    # The estate decides before the manager probe: an estate update never runs
+    # `docker service update`, so paying an SSH round trip per host to find a
+    # manager it will not use would be a slow lie.
+    for target in targets:
+        if target['kind'] == 'swarm':
+            estate_target(target)
+
     manager = ''
     if any(t['kind'] == 'swarm' and not t['reason'] for t in targets):
         manager = manager_for(host_key, run)
+
     for target in targets:
         if target['kind'] == 'swarm':
             target['runs_on'] = manager or host_key
-            target['note'] = ('rolls this service onto whatever the registry serves for '
-                              f'{target["image"]} now; the tag pinned in homelab-ops is unchanged')
+            target['note'] = (f'rolls this service onto whatever the registry serves for '
+                              f'{target["image"]} now; the tag pinned in homelab-ops is unchanged'
+                              + (f'. {target["note"]}' if target.get('note') else ''))
+        elif target['kind'] == 'estate':
+            target['runs_on'] = 'CI'
         elif target['kind'] == 'compose':
             target['runs_on'] = host_key
             target['note'] = (f'recreates only the {target["service"]} service of project '
@@ -350,7 +410,8 @@ def plan(host_key: str, image: str = '', container: str = '') -> dict:
         'image': image,
         'container': container,
         'targets': targets,
-        'supported': bool(targets) and all(t['commands'] for t in targets),
+        'supported': bool(targets) and all(
+            (t['kind'] == 'estate') or bool(t['commands']) for t in targets),
         'mode': mode(),
         'ts': time.time(),
     }
@@ -395,6 +456,13 @@ def _job_step(job_id: str, label: str, ok=None, detail: str = '') -> None:
         job['label'] = label
 
 
+def _job_progress(job_id: str, pct: float) -> None:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is not None:
+            job['progress'] = max(0.0, min(100.0, round(float(pct), 1)))
+
+
 def _job_log(job_id: str, text: str) -> None:
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -427,8 +495,41 @@ def _prune() -> None:
             _jobs.pop(key, None)
 
 
+def _execute_estate(job_id: str, target: dict) -> bool:
+    """Hand the update to the estate pipeline and mirror its progress here.
+
+    Same job dict, so the dialog does not care that the work moved from a shell
+    command to a commit, a PR and two CI runs.
+    """
+    from estate import update as estupdate
+
+    estate_plan = target.get('estate') or {}
+    name = target.get('estate_service') or estate_plan.get('name') or target.get('service')
+    sink = estupdate.LinkedSink(
+        step=lambda label, ok=None, detail='': _job_step(job_id, label, ok=ok, detail=detail),
+        log=lambda text: _job_log(job_id, text),
+        progress=lambda pct: _job_progress(job_id, pct),
+    )
+    try:
+        result = estupdate.perform(name, sink)
+    except Exception as exc:                      # noqa: BLE001 - shown in the dialog
+        _job_step(job_id, 'estate update', ok=False, detail=str(exc)[:300])
+        _job_update(job_id, error=str(exc))
+        return False
+    if result.get('up_to_date'):
+        _job_step(job_id, 'already newest', ok=True, detail=str(result.get('current')))
+        return True
+    if result.get('dry_run'):
+        return True
+    _job_step(job_id, 'deployed by CI', ok=True,
+              detail=f"PR #{result.get('pr')} · run {result.get('run')}")
+    return True
+
+
 def _execute(job_id: str, host_key: str, target: dict, dry: bool) -> bool:
     """Run one target's commands. Returns True when everything exited 0."""
+    if target.get('kind') == 'estate':
+        return _execute_estate(job_id, target)
     runs_on = target.get('runs_on') or host_key
     _info, run = _runner(runs_on)
     release_session()
@@ -494,6 +595,7 @@ def start(app, host_key: str, image: str = '', container: str = '') -> dict:
             'container': container,
             'status': 'running',
             'label': 'queued',
+            'progress': 0.0,
             'steps': [],
             'output': [],
             'plan': None,

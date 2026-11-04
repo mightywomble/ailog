@@ -1,9 +1,11 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client \
+    && apt-get install -y --no-install-recommends openssh-client git \
     && rm -rf /var/lib/apt/lists/*
 
+# git is for the estate checkout (estate/git.py): the app commits a version bump
+# to homelab-ops and lets CI deploy it, so it needs a real git, not a wrapper.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     AILOG_BIND=0.0.0.0 \
