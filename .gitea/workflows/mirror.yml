@@ -13,6 +13,8 @@ name: Mirror upstream images to zot
 on:
   push:
     branches: [build, dev]
+    paths:
+      - mirror-images.json
   workflow_dispatch:
 
 jobs:
