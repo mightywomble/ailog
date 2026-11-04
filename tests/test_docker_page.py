@@ -190,7 +190,9 @@ def test_updates_refresh_queues_a_scan(client, fake_host, monkeypatch):
     host, _ = fake_host
     seen = []
     monkeypatch.setattr(dupdates, 'stale', lambda key, max_age=0: True)
-    monkeypatch.setattr(dupdates, 'scan_host', lambda app, key: seen.append(key))
+    # refresh must go through the queue, not a thread of its own: that is what
+    # bounds the scan concurrency (and feeds the activity strip)
+    monkeypatch.setattr(dupdates, 'scan_async', lambda app, keys: seen.extend(keys) or list(keys))
     res = client.post(f'/api/docker/hosts/{host}/updates/refresh')
     assert res.status_code == 200
     assert res.get_json()['success'] is True

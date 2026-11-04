@@ -603,9 +603,11 @@ def api_updates_refresh(host_key):
     app = current_app._get_current_object()
     if not dupdates.stale(host_key, max_age=1):
         return jsonify({'success': True, 'pending': host_key})
-    threading.Thread(target=dupdates.scan_host, args=(app, host_key),
-                     name=f'docker-scan-{host_key}', daemon=True).start()
-    return jsonify({'success': True, 'started': host_key})
+    # Through scan_async, not a thread of its own: one queue keeps the scan
+    # concurrency (and therefore the connections it can pin) bounded, and it is
+    # what the activity strip reads its progress from.
+    started = dupdates.scan_async(app, [host_key])
+    return jsonify({'success': True, 'started': started[0] if started else None})
 
 
 def _says_no_docker(message: str) -> bool:
