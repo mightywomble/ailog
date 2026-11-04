@@ -39,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.14.2'
+APP_VERSION = '3.15.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -66,6 +66,13 @@ def _configure_sqlite(app: Flask) -> None:
     connect_args = dict(options.get('connect_args') or {})
     connect_args.setdefault('timeout', 30)
     options['connect_args'] = connect_args
+    # Fail a starved pool in ten seconds instead of thirty: the caller can show
+    # an error and retry, where half a minute of silent waiting looks like the
+    # whole app is down. The real fix for a starved pool is not to pin
+    # connections across network I/O (database.release_session), and to keep
+    # background fan-out bounded (dockermon.updates.SCAN_THREADS).
+    options.setdefault('pool_timeout', 10)
+    options.setdefault('pool_recycle', 1800)
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = options
 
 

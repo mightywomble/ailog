@@ -85,6 +85,9 @@
         if (data.type === 'deployed' && typeof window.onWizardDeployed === 'function') {
             window.onWizardDeployed(data);
         }
+        // The wizard's own red X: it cannot reach out of its frame, so it asks
+        // here and the dialog closes exactly as if Exit had been pressed.
+        if (data.type === 'close') window.closeWizardModal();
     });
 
     window.openReportsModal = function (hostKey, label, query) {

@@ -1,0 +1,26 @@
+<!-- What the app is doing right now.
+     A cold start collects metrics from every host over SSH, and opening a host's
+     Docker view rescans its images against their registries; both take long
+     enough that the UI looks frozen. This strip says what is happening, on which
+     host, and how far through it is. It hides itself when nothing is running,
+     and never blocks on a request (the endpoint behind it reads two dicts). -->
+<div id="activity-strip" class="activity-strip hidden" role="status" aria-live="polite">
+  <div class="activity-row" data-activity="metrics" hidden>
+    <div class="activity-head">
+      <span class="activity-spinner" aria-hidden="true"></span>
+      <span class="activity-title">Collecting host metrics</span>
+      <span class="activity-count" data-count></span>
+    </div>
+    <div class="activity-bar"><span class="activity-fill" data-fill></span></div>
+    <div class="activity-detail" data-detail></div>
+  </div>
+  <div class="activity-row" data-activity="docker" hidden>
+    <div class="activity-head">
+      <span class="activity-spinner" aria-hidden="true"></span>
+      <span class="activity-title">Scanning containers for updates</span>
+      <span class="activity-count" data-count></span>
+    </div>
+    <div class="activity-bar"><span class="activity-fill" data-fill></span></div>
+    <div class="activity-detail" data-detail></div>
+  </div>
+</div>

@@ -19,6 +19,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
+from database import release_session
 from flask import Blueprint, current_app, jsonify, render_template, request
 
 from . import collect
@@ -159,6 +160,10 @@ def _probe_one(app_obj: Any, host: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if app_obj is None:
         return collect.docker_facts(host)
     with app_obj.app_context():
+        # The probe is an SSH round: release the connection the session took
+        # when this thread's context was pushed, rather than holding it for the
+        # whole probe (that pattern starved the pool - see database.release_session)
+        release_session()
         return collect.docker_facts(host)
 
 
@@ -348,6 +353,44 @@ def _netdata_round(hosts: List[Dict[str, Any]]):
     return matched, extra, meta
 
 
+# --------------------------------------------------------------------------
+# progress (what the collection round is doing, for the activity strip)
+# --------------------------------------------------------------------------
+
+_progress_lock = threading.Lock()
+_progress: Dict[str, Any] = {'active': False, 'done': 0, 'total': 0,
+                             'current': '', 'started': 0.0}
+
+
+def activity() -> Optional[Dict[str, Any]]:
+    """The round in flight, or None. Never blocks and never touches the DB."""
+    with _progress_lock:
+        if not _progress['active']:
+            return None
+        row = dict(_progress)
+    row['elapsed'] = round(time.time() - row['started'], 1)
+    return row
+
+
+def _progress_begin(total: int) -> None:
+    with _progress_lock:
+        _progress.update(active=True, done=0, total=total,
+                         current='', started=time.time())
+
+
+def _progress_step(label: str = '', finished: bool = False) -> None:
+    with _progress_lock:
+        if label:
+            _progress['current'] = label
+        if finished:
+            _progress['done'] += 1
+
+
+def _progress_end() -> None:
+    with _progress_lock:
+        _progress.update(active=False, current='', done=0, total=0)
+
+
 def collect_servers() -> Dict[str, Any]:
     """One round: Netdata for the fleet, SSH only for what it cannot see."""
     hosts = _host_list()
@@ -387,8 +430,20 @@ def collect_servers() -> Dict[str, Any]:
         return snap
 
     if hosts:
-        with ThreadPoolExecutor(max_workers=min(SNAPSHOT_WORKERS, len(hosts))) as pool:
-            results = list(pool.map(one, hosts))
+        # The strip in the UI reads this: which host is being contacted, and how
+        # many of how many are done. It is a dict update, not a database write.
+        _progress_begin(len(hosts))
+        def tracked(host):
+            _progress_step(str(host.get('name') or host.get('key') or ''))
+            try:
+                return one(host)
+            finally:
+                _progress_step('', finished=True)
+        try:
+            with ThreadPoolExecutor(max_workers=min(SNAPSHOT_WORKERS, len(hosts))) as pool:
+                results = list(pool.map(tracked, hosts))
+        finally:
+            _progress_end()
     results.extend(extra)
 
     # Read last_seen before recording this round, so an offline host shows the
@@ -465,6 +520,18 @@ def servers_payload(force: bool = False) -> Dict[str, Any]:
 def metrics_page():
     embedded = request.args.get('embed') == '1'
     return render_template('metrics.html', embedded=embedded)
+
+
+@metrics_bp.get('/api/activity')
+def api_activity():
+    """What the app is doing right now: metric collection and docker scans.
+
+    Cheap by construction -- two dicts, no SSH, no database -- because the
+    activity strip polls it every couple of seconds.
+    """
+    from dockermon import updates as dupdates
+    return jsonify({'success': True, 'metrics': activity(),
+                    'docker': dupdates.activity(), 'ts': time.time()})
 
 
 @metrics_bp.get('/api/metrics/servers')

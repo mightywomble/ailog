@@ -24,6 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from database import release_session
 from . import sshstats
 
 DOCKER_HOSTS = {
@@ -422,7 +423,12 @@ def scan_host(app, host_key: str) -> dict:
         from . import routes as droutes
         with app.app_context():
             info, _transport, _client = droutes._transport_for(host_key)
+            # One pinned database connection per scanning thread is exactly what
+            # exhausted the pool: the SSH round and every registry manifest
+            # lookup happen below, and neither needs the database.
+            release_session()
             snap = droutes.host_snapshot(host_key)
+            release_session()
             containers = snap.get('containers') or []
             result = updates_for(host_key, containers,
                                  runner_for(info), refresh=False)
@@ -454,17 +460,73 @@ def runner_for(info: dict):
     return run
 
 
+SCAN_THREADS = 3
+
+# One coordinator, a queue it drains, and the numbers the activity strip shows.
+_scan_queue: list[str] = []
+_scan_queue_lock = threading.Lock()
+_scan_progress = {'active': False, 'done': 0, 'total': 0, 'started': 0.0,
+                  'host': ''}
+
+
+def activity() -> dict | None:
+    """The scan round in flight, or None. No SSH, no database, no lock contention."""
+    with _scan_queue_lock:
+        if not _scan_progress['active']:
+            return None
+        row = dict(_scan_progress)
+    row['elapsed'] = round(time.time() - row['started'], 1)
+    return row
+
+
+def _scan_worker(app) -> None:
+    """Drain the queue, SCAN_THREADS hosts at a time."""
+    while True:
+        with _scan_queue_lock:
+            if not _scan_queue:
+                _scan_progress.update(active=False, done=0, total=0, host='')
+                return
+            batch = _scan_queue[:SCAN_THREADS]
+            del _scan_queue[:SCAN_THREADS]
+            _scan_progress['host'] = batch[0]
+        threads = [threading.Thread(target=scan_host, args=(app, key),
+                                    name=f'docker-scan-{key}', daemon=True)
+                   for key in batch]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        with _scan_queue_lock:
+            _scan_progress['done'] += len(batch)
+            _scan_progress['host'] = ''
+
+
 def scan_async(app, host_keys) -> list[str]:
-    """Kick a scan for each stale host; returns the keys that were started."""
-    started = []
+    """Queue a scan for every stale host; returns the keys that were queued.
+
+    One thread per host was the first version, which on a 17-host estate meant
+    17 simultaneous SSH rounds -- and 17 database connections held across them.
+    A single coordinator now runs them three at a time: slow for nobody (the
+    activity strip shows progress) and survivable for the connection pool.
+    """
+    due = []
     for host_key in host_keys or []:
-        if host_key in started or not stale(host_key):
+        if host_key in due or not stale(host_key):
             continue
-        thread = threading.Thread(target=scan_host, args=(app, host_key),
-                                  name=f'docker-scan-{host_key}', daemon=True)
-        thread.start()
-        started.append(host_key)
-    return started
+        due.append(host_key)
+    if not due:
+        return []
+    with _scan_queue_lock:
+        start = not _scan_progress['active']
+        _scan_queue.extend(key for key in due if key not in _scan_queue)
+        _scan_progress['total'] += len(due)
+        if start:
+            _scan_progress.update(active=True, done=0, started=time.time(),
+                                  host=due[0])
+    if start:
+        threading.Thread(target=_scan_worker, args=(app,),
+                         name='docker-scan-batch', daemon=True).start()
+    return due
 
 
 def clear(host_key: str | None = None) -> None:
@@ -479,3 +541,9 @@ def clear(host_key: str | None = None) -> None:
                 _digest_cache.pop(key, None)
         else:
             _digest_cache.clear()
+    if not host_key:
+        # A full clear is also "forget any scan round", so a test (or a config
+        # reload) starts from a clean queue and a blank progress strip.
+        with _scan_queue_lock:
+            _scan_queue.clear()
+            _scan_progress.update(active=False, done=0, total=0, started=0.0, host='')

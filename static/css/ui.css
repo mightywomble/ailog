@@ -1403,3 +1403,81 @@ body.mh-sheet-open { overflow: hidden; }
 .ov-nd-metrics.is-warn { color: var(--warn); }
 .ov-nd-metrics.is-bad { color: var(--bad); }
 .ov-nd-anom { color: var(--accent); font-weight: 650; }
+
+/* ---------------------------------------------------------- activity strip --
+   Bottom-left, above the phone tab bar. Two rows at most: metric collection
+   and the docker update scan. It is the only thing on screen that says the app
+   is working, so it must not look like a dialog: small, quiet, self-hiding. */
+.activity-strip {
+    position: fixed;
+    left: 1rem;
+    bottom: 1rem;
+    z-index: 45;
+    width: min(22rem, calc(100vw - 2rem));
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    padding: .7rem .8rem;
+    border-radius: .75rem;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+    backdrop-filter: blur(6px);
+    font-size: .75rem;
+    color: var(--text);
+}
+.activity-strip.hidden { display: none; }
+
+.activity-row[hidden] { display: none; }
+.activity-row { display: flex; flex-direction: column; gap: .35rem; }
+
+.activity-head { display: flex; align-items: center; gap: .45rem; }
+.activity-title { font-weight: 600; }
+.activity-count { margin-left: auto; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.activity-bar {
+    position: relative;
+    height: .35rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+.activity-fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: var(--focus, var(--ok));
+    transition: width .35s ease;
+}
+/* No total to divide by yet: a moving stripe rather than a fake percentage. */
+.activity-fill[data-indeterminate] {
+    background-image: linear-gradient(90deg,
+        transparent 0%, color-mix(in srgb, var(--ok) 70%, transparent) 50%, transparent 100%);
+    animation: activity-sweep 1.3s linear infinite;
+}
+@keyframes activity-sweep {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+}
+
+.activity-detail { color: var(--faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.activity-spinner {
+    width: .7rem;
+    height: .7rem;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--text) 20%, transparent);
+    border-top-color: var(--ok);
+    animation: activity-spin .8s linear infinite;
+}
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 640px) {
+    .activity-strip { bottom: 4.6rem; left: .6rem; right: .6rem; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .activity-fill[data-indeterminate] { animation: none; }
+    .activity-spinner { animation: none; }
+}

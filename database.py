@@ -10,6 +10,24 @@ import json
 db = SQLAlchemy()
 
 
+def release_session():
+    """Give this thread's database connection back to the pool.
+
+    Anything that spends real time away from the database -- an SSH round, a
+    registry manifest lookup, a Docker SDK call -- must call this first. The
+    scoped session is thread-local and keeps its connection until the app
+    context ends, so a background thread that queries a host and then talks SSH
+    for 20 seconds holds a pooled connection for those 20 seconds. Seventeen
+    of those (one scan thread per host) exhausted a 5+10 pool and every other
+    request died with "QueuePool limit ... connection timed out".
+    """
+    try:
+        db.session.remove()
+    except Exception:
+        pass
+
+
+
 class AppSetting(db.Model):
     '''Key/value application settings stored in the database.'''
     __tablename__ = 'app_settings'

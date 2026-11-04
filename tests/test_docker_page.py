@@ -252,3 +252,74 @@ def test_a_swarm_service_with_no_running_task_is_still_attention(monkeypatch):
     ]
     out = dupdates.updates_for('h', containers, lambda command: (True, ''))
     assert [a['name'] for a in out['attention_only']] == ['web_web.1.old']
+
+
+# --------------------------------------- background scans and the DB pool ----
+
+def test_a_scan_round_does_not_start_one_thread_per_host(monkeypatch):
+    """17 hosts used to mean 17 simultaneous SSH rounds (and 17 pinned database
+    connections). One coordinator now runs them a few at a time."""
+    import types
+    import dockermon.updates as dupdates
+    monkeypatch.setattr(dupdates, 'stale', lambda key, max_age=0: True)
+    started = []
+    monkeypatch.setattr(dupdates.threading, 'Thread',
+                        lambda *a, **k: types.SimpleNamespace(start=lambda: started.append(k.get('name'))))
+    dupdates.clear()
+    keys = [f'db-{i}' for i in range(17)]
+    queued = dupdates.scan_async(None, keys)
+    assert queued == keys
+    assert started == ['docker-scan-batch']
+    assert dupdates.activity()['total'] == 17          # the strip has something to show
+    dupdates.clear()
+
+
+def test_scanning_a_host_does_not_hold_a_database_connection(monkeypatch):
+    """The SSH round and every registry lookup happen with no connection held:
+    that pinning is what exhausted the pool."""
+    import contextlib
+    import dockermon.updates as dupdates
+    import dockermon.routes as routes
+
+    order = []
+    monkeypatch.setattr(dupdates, 'release_session', lambda: order.append('release'))
+    monkeypatch.setattr(routes, '_transport_for',
+                        lambda key: ({'user': 'root', 'ip': '10.0.0.9'}, 'ssh', None))
+    monkeypatch.setattr(routes, 'host_snapshot',
+                        lambda key, **kw: order.append('ssh') or {'containers': []})
+    monkeypatch.setattr(dupdates, 'updates_for', lambda *a, **k: {
+        'updates': [], 'attention': [], 'attention_only': [], 'containers': [],
+        'containers_checked': 0, 'images_checked': 0})
+
+    class FakeApp:
+        def app_context(self):
+            return contextlib.nullcontext()
+
+    dupdates.clear('h')
+    dupdates.scan_host(FakeApp(), 'h')
+    assert order[:2] == ['release', 'ssh']
+
+
+def test_endpoint_rows_are_cached_between_polls(monkeypatch):
+    """Transport resolution is on every stats poll; the rows must not be a
+    database query each time."""
+    import dockermon.routes as routes
+
+    class FakeQuery:
+        def __init__(self):
+            self.calls = 0
+
+        def all(self):
+            self.calls += 1
+            return []
+
+    query = FakeQuery()
+    model = type('Model', (), {'query': property(lambda self, q=query: q)})()
+    monkeypatch.setattr(routes, '_endpoint_model', lambda: model)
+    routes._forget_endpoint_cache()
+    routes._known_endpoints()
+    routes._known_endpoints()
+    assert query.calls == 1
+    routes._forget_endpoint_cache()          # a discovery result invalidates it
+    routes._known_endpoints()
+    assert query.calls == 2
