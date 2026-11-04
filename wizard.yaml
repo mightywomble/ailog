@@ -1,0 +1,380 @@
+# wizard.yaml - the source of truth for this repo.
+# stacks/<name>/stack.yml, the mirror-images.json entry and the nginx
+# proxy host are rendered from here by homelab-wizard. Plain yaml: hand
+# edits are fine and are what the wizard commits.
+#
+# kind: build  -> apps/<repo>/ is built by this repo (tag comes from the run)
+#       mirror -> upstream image cached into zot by mirror.yml
+#       image  -> plain upstream image, used as-is
+version: 1
+about: Intent file for the homelab swarm. stacks/<name>/stack.yml, the mirror-images.json entry and the
+  nginx proxy host are rendered from this file by homelab-wizard. It is plain yaml - edit it by hand too.
+defaults:
+  registry: zot.safehomelan.com
+  domain_suffix: safehomelan.com
+  cert: npm-1
+  data_root: /opt/docker/data
+  port_bands:
+    data:
+    - 3000
+    - 3499
+    api:
+    - 5000
+    - 5099
+    web:
+    - 8000
+    - 8199
+    tailnet:
+    - 8200
+    - 8999
+reserved_ports:
+  '8089': retired metamcp_router (tombstone)
+  '5001': ailog
+services:
+- name: ailog
+  kind: mirror
+  service: ailog
+  image: zot.safehomelan.com/ailog:latest
+  repo: ailog
+  version: latest
+  source: docker.io/mightywomble/ailog:latest
+  ports:
+  - host: 5001
+    container: 5001
+    mode: ingress
+  url: ailog.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/ailog
+    container: /var/lib/ailog
+  env_count: 4
+  companions:
+  - ailog-mcp
+- name: anchor
+  kind: mirror
+  service: anchor
+  image: zot.safehomelan.com/anchor:0.9.1
+  repo: anchor
+  version: 0.9.1
+  source: ghcr.io/zhfahim/anchor:0.9.1
+  ports:
+  - host: 3001
+    container: 3000
+    mode: ingress
+  url: ''
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/anchor
+    container: /data
+  env_count: 0
+  companions: []
+- name: anythingllm
+  kind: mirror
+  service: anythingllm
+  image: zot.safehomelan.com/anythingllm:1.18.0
+  repo: anythingllm
+  version: 1.18.0
+  source: docker.io/mintplexlabs/anythingllm:1.18.0
+  ports:
+  - host: 3005
+    container: 3001
+    mode: ingress
+  url: anything.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/anythingllm/storage
+    container: /app/server/storage
+  - host: /opt/docker/data/anythingllm/storage/.env
+    container: /app/server/.env
+  env_count: 2
+  companions: []
+- name: cloudflared
+  kind: mirror
+  service: cloudflared
+  image: cloudflare/cloudflared:2026.10.4
+  repo: cloudflared
+  version: 2026.10.4
+  source: docker.io/cloudflare/cloudflared:2026.10.4
+  ports: []
+  url: ''
+  replicas: 2
+  volumes: []
+  env_count: 0
+  companions: []
+- name: dozzle
+  kind: mirror
+  service: dozzle
+  image: zot.safehomelan.com/dozzle:v11.4.0
+  repo: dozzle
+  version: v11.4.0
+  source: docker.io/amir20/dozzle:v11.4.0
+  ports:
+  - host: 8083
+    container: 8080
+    mode: host
+  url: 
+  replicas: 1
+  volumes:
+  - host: /var/run/docker.sock
+    container: /var/run/docker.sock
+  - host: dozzle-data
+    container: /data
+  env_count: 2
+  companions: []
+- name: freshrss
+  kind: mirror
+  service: freshrss
+  image: zot.safehomelan.com/freshrss:1.30.4
+  repo: freshrss
+  version: 1.30.4
+  source: docker.io/freshrss/freshrss:1.30.4
+  ports:
+  - host: 8090
+    container: 80
+    mode: ingress
+  url: news.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/freshrss/data
+    container: /var/www/FreshRSS/data
+  - host: /opt/docker/data/freshrss/extensions
+    container: /var/www/FreshRSS/extensions
+  env_count: 6
+  companions: []
+- name: goodbye
+  kind: build
+  service: goodbye
+  image: zot.safehomelan.com/goodbye:${IMAGE_TAG:-latest}
+  repo: goodbye
+  version: latest
+  source: ''
+  ports:
+  - host: 8081
+    container: 8081
+    mode: ingress
+  url: borg.safehomelan.com
+  replicas: 2
+  volumes: []
+  env_count: 0
+  companions: []
+- name: grammarcheck
+  kind: mirror
+  service: grammarcheck
+  image: zot.safehomelan.com/grammarcheck:1.0
+  repo: grammarcheck
+  version: '1.0'
+  source: docker.io/mightywomble/grammarcheck:1.0
+  ports:
+  - host: 8001
+    container: 8000
+    mode: ingress
+  url: grammar.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/grammarcheck
+    container: /data
+  env_count: 2
+  companions: []
+- name: hello
+  kind: build
+  service: hello
+  image: zot.safehomelan.com/hello:${IMAGE_TAG:-build-7}
+  repo: hello
+  version: build-7
+  source: ''
+  ports:
+  - host: 8080
+    container: 8080
+    mode: ingress
+  url: ''
+  replicas: 2
+  volumes: []
+  env_count: 0
+  companions: []
+- name: huntly
+  kind: mirror
+  service: huntly
+  image: zot.safehomelan.com/huntly:0.6.6
+  repo: huntly
+  version: 0.6.6
+  source: docker.io/lcomplete/huntly:0.6.6
+  ports:
+  - host: 8088
+    container: 80
+    mode: ingress
+  url: ''
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/huntly
+    container: /data
+  env_count: 2
+  companions: []
+- name: ingest
+  kind: build
+  service: ingest
+  image: zot.safehomelan.com/ingest:${IMAGE_TAG:-build-120}
+  repo: ingest
+  version: build-120
+  source: ''
+  ports:
+  - host: 8093
+    container: 8080
+    mode: ingress
+  url: ingest.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/ingest
+    container: /data
+  env_count: 15
+  companions: []
+- name: langlearn
+  kind: mirror
+  service: langlearn
+  image: zot.safehomelan.com/langlearn:1.0
+  repo: langlearn
+  version: '1.0'
+  source: docker.io/mightywomble/langlearn:1.0
+  ports:
+  - host: 8199
+    container: 8000
+    mode: ingress
+  url: langlearn.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/langlearn
+    container: /data
+  env_count: 3
+  companions: []
+- name: metamcp
+  kind: build
+  service: app
+  image: zot.safehomelan.com/metamcp:${IMAGE_TAG:-build-111}
+  repo: metamcp
+  version: build-111
+  source: ghcr.io/metatool-ai/metamcp:2.4.22
+  ports:
+  - host: 8091
+    container: 12008
+    mode: ingress
+  url: mcp.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/metamcp/npm
+    container: /root/.npm
+  - host: /opt/docker/data/metamcp/uv
+    container: /root/.cache/uv
+  env_count: 16
+  companions:
+  - postgres
+- name: ollamaadmin
+  kind: mirror
+  service: ollama-admin
+  image: zot.safehomelan.com/ollama-admin:0.15.6
+  repo: ollama-admin
+  version: 0.15.6
+  source: ghcr.io/ollama-admin/ollama-admin:0.15.6
+  ports:
+  - host: 8084
+    container: 8000
+    mode: host
+  url: ''
+  replicas: 1
+  volumes: []
+  env_count: 0
+  companions: []
+- name: patchmon
+  kind: mirror
+  service: server
+  image: zot.safehomelan.com/patchmon-server:2.1.6
+  repo: patchmon-server
+  version: 2.1.6
+  source: ghcr.io/patchmon/patchmon-server:latest
+  ports:
+  - host: 3000
+    container: 3000
+    mode: ingress
+  url: patchmon.safehomelan.com
+  replicas: 1
+  volumes: []
+  env_count: 17
+  companions:
+  - database
+  - guacd
+  - redis
+- name: status
+  kind: build
+  service: status
+  image: zot.safehomelan.com/status:${IMAGE_TAG:-build-128}
+  repo: status
+  version: build-128
+  source: ''
+  ports:
+  - host: 8094
+    container: 8080
+    mode: ingress
+  url: status.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/status
+    container: /data
+  env_count: 8
+  companions: []
+- name: termix
+  kind: mirror
+  service: termix
+  image: zot.safehomelan.com/termix:26.10.3
+  repo: termix
+  version: 26.10.3
+  source: ghcr.io/termix-ssh/termix:26.10.3
+  ports:
+  - host: 8080
+    container: 8080
+    mode: ingress
+  url: ''
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/termix
+    container: /app/data
+  env_count: 1
+  companions:
+  - guacd
+- name: vikunja
+  kind: mirror
+  service: vikunja
+  image: zot.safehomelan.com/vikunja:2.7.1
+  repo: vikunja
+  version: 2.7.1
+  source: docker.io/vikunja/vikunja:2.7.1
+  ports:
+  - host: 3456
+    container: 3456
+    mode: ingress
+  url: tasks.safehomelan.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/vikunja/files
+    container: /app/vikunja/files
+  env_count: 11
+  companions:
+  - db
+- name: wordpress
+  kind: mirror
+  service: wordpress
+  image: zot.safehomelan.com/wordpress:7.1.3
+  repo: wordpress
+  version: 7.1.3
+  source: docker.io/library/wordpress:latest
+  ports:
+  - host: 8082
+    container: 80
+    mode: ingress
+  url: www.daveknowstech.com
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/wordpress/html
+    container: /var/www/html
+  - host: /opt/docker/data/wordpress/uploads.ini
+    container: /usr/local/etc/php/conf.d/zz-uploads.ini
+  env_count: 4
+  companions:
+  - mysql

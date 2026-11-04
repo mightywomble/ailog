@@ -1,0 +1,40 @@
+# Huntly (self-hosted AI-powered information hub / read-later / RSS) on the
+# swarm.
+# Upstream: https://huntly.codelc.com/download  (image lcomplete/huntly)
+# Image mirrored into zot by homelab_docker_build's "Mirror upstream images to
+# zot" workflow (huntly 0.6.6).
+#
+# Swarm adaptations vs the upstream compose:
+#  - the container serves HTTP on :80; published as 8088, the next free port
+#    (in use on every node: 3000, 3001, 3005, 3456, 4822, 5001, 8000, 8001,
+#    8080, 8082, 8199, 9000, 9443; 8083 is also held by a local listener)
+#  - /data (SQLite database + Lucene index + cached page content) is bind
+#    mounted to the shared NFS at /opt/docker/data/huntly, so the task can
+#    reschedule to any node and keep its data
+#  - the image defaults VM_ARGS to GMT+08; pin it to the homelab timezone
+#
+# Access:
+#   http://<any swarm node Tailscale IP>:8088, e.g. http://100.79.189.118:8088
+#   (routing mesh: every node answers 8088)
+#
+# First login: the first account registered becomes the administrator. Open the
+# site, register, and use that account. No default password ships with Huntly.
+services:
+  huntly:
+    image: zot.safehomelan.com/huntly:0.6.6
+    environment:
+      TZ: "Europe/London"
+      VM_ARGS: "-Duser.timezone=Europe/London"
+    volumes:
+      - type: bind
+        source: /opt/docker/data/huntly
+        target: /data
+    ports:
+      - "8088:80"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 10s
+      update_config:
+        order: stop-first

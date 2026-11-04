@@ -1,0 +1,39 @@
+# homelab-wizard — the pipeline UI for this repo.
+# Serves https://wizard.safehomelan.com: wizard.yaml -> stack.yml -> commit ->
+# build.yml -> PR -> ship.yml -> nginx proxy host -> tests, with every long
+# action streamed to the browser over SSE.
+#
+# - /data holds settings.json (mode 600) and the repo clone; /data/ssh holds the
+#   key whose public half is in authorized_keys on all five nodes + casaos.
+# - The git token can write david/homelab-ops. Rotate it from the Settings panel.
+services:
+  wizard:
+    image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-1}
+    environment:
+      TZ: "Europe/London"
+      WIZ_SETTINGS: "/data/settings.json"
+      WIZ_SSH_KEY: "/data/ssh/id_ed25519"
+      WIZ_SSH_USER: "david"
+      GIT_API_KEY: "<redacted>"
+      ZOT_USER: "david"
+      ZOT_PASSWORD: "<redacted>"
+      OPENROUTER_API_KEY: "<redacted>"
+      OPENROUTER_MODEL: "anthropic/claude-sonnet-4.5"
+    volumes:
+      - type: bind
+        source: /opt/docker/data/homelab-wizard
+        target: /data
+    ports:
+      - "8095:8080"
+    dns:
+      - 100.122.246.45
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure

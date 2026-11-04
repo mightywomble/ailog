@@ -1,0 +1,24 @@
+# cloudflared (Cloudflare Tunnel connector) on the swarm.
+# NOTE: pulls directly from Docker Hub (docker.io/cloudflare/cloudflared:2026.10.1)
+# NOT via the zot mirror - zot is currently rejecting every manifest PUT with
+# 415 MANIFEST_INVALID (blob uploads fine, cause TBD; see the homelab_docker_build
+# "revert cloudflared mirror entry" commit). Switch back to
+# zot.safehomelan.com/cloudflared:<tag> once zot accepts pushes again.
+# - runs the remotely-managed "homelab-swarm" tunnel; all routing config lives
+#   in the Cloudflare Zero Trust dashboard (Public Hostnames + Access apps),
+#   the token below identifies the tunnel
+# - stateless: no volumes, no published ports; 2 replicas = HA (a
+#   remote-managed tunnel accepts multiple connectors on the same token; both
+#   show up as connectors in the dashboard)
+# - public hostnames point at the swarm routing mesh via swarm1's LAN IP
+#   (192.168.4.42, keep it a DHCP reservation): www.daveknowstech.com ->
+#   :8082 (wordpress), langlearn.daveknowstech.com -> :8199,
+#   grammar.daveknowstech.com -> :8001
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.4
+    command: tunnel --no-autoupdate run --token eyJhIjoiM2Q5NjBmODMzNDJlZTI1NjhhNDYyMTI0OTJhZTBkMzMiLCJ0IjoiZWU5OTE0YzYtMTNkOS00ZGQwLWE0MzUtNDc5YWYxNWU5MWEyIiwicyI6Ik1ESmxabVZtWkdVdFlqbG1NQzAwWWpnMkxXSTRPRGd0TXpBMVlUaGpOekF3WldRMiJ9
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure

@@ -1,0 +1,316 @@
+{
+ "apps": [
+  {
+   "name": "casaos",
+   "host": "casaos.safehomelan.com",
+   "group": "infra",
+   "url": "https://casaos.safehomelan.com",
+   "forward_host": "100.122.246.45",
+   "forward_port": 8083
+  },
+  {
+   "name": "proxy",
+   "host": "proxy.safehomelan.com",
+   "group": "infra",
+   "url": "https://proxy.safehomelan.com",
+   "forward_host": "100.122.246.45",
+   "forward_port": 81
+  },
+  {
+   "name": "git",
+   "host": "git.safehomelan.com",
+   "group": "infra",
+   "url": "https://git.safehomelan.com",
+   "forward_host": "100.122.246.45",
+   "forward_port": 3002
+  },
+  {
+   "name": "managelm",
+   "host": "managelm.safehomelan.com",
+   "group": "infra",
+   "url": "https://managelm.safehomelan.com",
+   "forward_host": "100.122.246.45",
+   "forward_port": 3000
+  },
+  {
+   "name": "netdata",
+   "host": "netdata.safehomelan.com",
+   "group": "infra",
+   "url": "https://netdata.safehomelan.com",
+   "forward_host": "100.118.98.26",
+   "forward_port": 19999
+  },
+  {
+   "name": "portainer",
+   "host": "portainer.safehomelan.com",
+   "group": "infra",
+   "url": "https://portainer.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 9443
+  },
+  {
+   "name": "zot",
+   "host": "zot.safehomelan.com",
+   "group": "infra",
+   "url": "https://zot.safehomelan.com",
+   "forward_host": "100.74.62.78",
+   "forward_port": 5000
+  },
+  {
+   "name": "ssh",
+   "host": "ssh.safehomelan.com",
+   "group": "infra",
+   "url": "https://ssh.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 8080
+  },
+  {
+   "name": "patchmon",
+   "host": "patchmon.safehomelan.com",
+   "group": "infra",
+   "url": "https://patchmon.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 3000
+  },
+  {
+   "name": "patchlan",
+   "host": "patchlan.safehomelan.com",
+   "group": "infra",
+   "url": "https://patchlan.safehomelan.com",
+   "forward_host": "192.168.4.61",
+   "forward_port": 3000
+  },
+  {
+   "name": "ailog",
+   "host": "ailog.safehomelan.com",
+   "group": "infra",
+   "url": "https://ailog.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 5001
+  },
+  {
+   "name": "homelab",
+   "host": "homelab.safehomelan.com",
+   "group": "infra",
+   "url": "https://homelab.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 5001
+  },
+  {
+   "name": "mcp",
+   "host": "mcp.safehomelan.com",
+   "group": "infra",
+   "url": "https://mcp.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 8091
+  },
+  {
+   "name": "anything",
+   "host": "anything.safehomelan.com",
+   "group": "ai",
+   "url": "https://anything.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 3005
+  },
+  {
+   "name": "ollama",
+   "host": "ollama.safehomelan.com",
+   "group": "ai",
+   "url": "https://ollama.safehomelan.com",
+   "forward_host": "100.90.139.34",
+   "forward_port": 11434
+  },
+  {
+   "name": "langlearn",
+   "host": "langlearn.safehomelan.com",
+   "group": "ai",
+   "url": "https://langlearn.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 8199
+  },
+  {
+   "name": "grammar",
+   "host": "grammar.safehomelan.com",
+   "group": "ai",
+   "url": "https://grammar.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 8001
+  },
+  {
+   "name": "chatbot",
+   "host": "chatbot.safehomelan.com",
+   "group": "ai",
+   "url": "https://chatbot.safehomelan.com",
+   "forward_host": "100.124.7.39",
+   "forward_port": 11435
+  },
+  {
+   "name": "deploy",
+   "host": "deploy.safehomelan.com",
+   "group": "ai",
+   "url": "https://deploy.safehomelan.com",
+   "forward_host": "100.124.7.39",
+   "forward_port": 8787
+  },
+  {
+   "name": "dockervision",
+   "host": "dockervision.safehomelan.com",
+   "group": "ai",
+   "url": "https://dockervision.safehomelan.com",
+   "forward_host": "100.124.7.39",
+   "forward_port": 8790
+  },
+  {
+   "name": "ingest",
+   "host": "ingest.safehomelan.com",
+   "group": "ai",
+   "url": "https://ingest.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 8093
+  },
+  {
+   "name": "chat",
+   "host": "chat.safehomelan.com",
+   "group": "home",
+   "url": "https://chat.safehomelan.com",
+   "forward_host": "100.122.246.45",
+   "forward_port": 8089
+  },
+  {
+   "name": "notes",
+   "host": "notes.safehomelan.com",
+   "group": "home",
+   "url": "https://notes.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 3001
+  },
+  {
+   "name": "tasks",
+   "host": "tasks.safehomelan.com",
+   "group": "home",
+   "url": "https://tasks.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 3456
+  },
+  {
+   "name": "news",
+   "host": "news.safehomelan.com",
+   "group": "home",
+   "url": "https://news.safehomelan.com",
+   "forward_host": "100.79.189.118",
+   "forward_port": 8090
+  },
+  {
+   "name": "files",
+   "host": "files.safehomelan.com",
+   "group": "home",
+   "url": "https://files.safehomelan.com",
+   "forward_host": "100.68.173.37",
+   "forward_port": 443
+  },
+  {
+   "name": "photos",
+   "host": "photos.safehomelan.com",
+   "group": "home",
+   "url": "https://photos.safehomelan.com",
+   "forward_host": "100.64.49.47",
+   "forward_port": 2283
+  },
+  {
+   "name": "matrix",
+   "host": "matrix.safehomelan.com",
+   "group": "home",
+   "url": "https://matrix.safehomelan.com",
+   "forward_host": "100.77.224.41",
+   "forward_port": 8088
+  },
+  {
+   "name": "call",
+   "host": "call.safehomelan.com",
+   "group": "home",
+   "url": "https://call.safehomelan.com",
+   "forward_host": "100.77.224.41",
+   "forward_port": 8089
+  },
+  {
+   "name": "matrixadmin",
+   "host": "matrixadmin.safehomelan.com",
+   "group": "home",
+   "url": "https://matrixadmin.safehomelan.com",
+   "forward_host": "100.77.224.41",
+   "forward_port": 8090
+  },
+  {
+   "name": "hermes",
+   "host": "hermes.safehomelan.com",
+   "group": "home",
+   "url": "https://hermes.safehomelan.com",
+   "forward_host": "100.77.224.41",
+   "forward_port": 8648
+  },
+  {
+   "name": "watch",
+   "host": "watch.safehomelan.com",
+   "group": "media",
+   "url": "https://watch.safehomelan.com",
+   "forward_host": "100.90.139.34",
+   "forward_port": 32400
+  },
+  {
+   "name": "emby",
+   "host": "emby.safehomelan.com",
+   "group": "media",
+   "url": "https://emby.safehomelan.com",
+   "forward_host": "100.90.139.34",
+   "forward_port": 8096
+  },
+  {
+   "name": "sonarr",
+   "host": "sonarr.safehomelan.com",
+   "group": "media",
+   "url": "https://sonarr.safehomelan.com",
+   "forward_host": "100.90.139.34",
+   "forward_port": 8989
+  },
+  {
+   "name": "radarr",
+   "host": "radarr.safehomelan.com",
+   "group": "media",
+   "url": "https://radarr.safehomelan.com",
+   "forward_host": "100.90.139.34",
+   "forward_port": 7878
+  },
+  {
+   "name": "download",
+   "host": "download.safehomelan.com",
+   "group": "media",
+   "url": "https://download.safehomelan.com",
+   "forward_host": "100.90.139.34",
+   "forward_port": 8080
+  },
+  {
+   "name": "blog",
+   "host": "www.daveknowstech.com",
+   "group": "home",
+   "url": "https://www.daveknowstech.com",
+   "forward_host": "192.168.4.42",
+   "forward_port": 8082
+  },
+  {
+   "name": "mgmt",
+   "host": "mgmt.safehomelan.com",
+   "group": "infra",
+   "url": "https://mgmt.safehomelan.com",
+   "forward_host": "192.168.5.99",
+   "forward_port": 8006
+  },
+  {
+   "name": "rancher",
+   "host": "rancher.safehomelan.com",
+   "group": "infra",
+   "url": "https://rancher.safehomelan.com",
+   "forward_host": "192.168.4.49",
+   "forward_port": 443
+  }
+ ]
+}
