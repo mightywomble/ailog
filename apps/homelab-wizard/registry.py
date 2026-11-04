@@ -65,7 +65,9 @@ def _ghcr_token(repo, timeout=20):
 def _challenge_token(resp, timeout=20):
     """Fall back to whatever the registry's 401 challenge asks for."""
     head = resp.headers.get("www-authenticate", "")
-    if "realm=" not in head:
+    # zot answers Basic realm="zot" - treating "zot" as a realm URL is how you
+    # get "TLSV1_UNRECOGNIZED_NAME: tlsv1 unrecognized name"
+    if "realm=" not in head or "bearer" not in head.lower():
         return None
     realm = re.search(r'realm="([^"]+)"', head)
     service = re.search(r'service="([^"]+)"', head)
@@ -135,7 +137,8 @@ def list_tags(image, limit=80, timeout=25):
             headers["Authorization"] = "Bearer " + fresh
             r = httpx.get(url, params={"n": page}, headers=headers, timeout=timeout)
 
-    if r.status_code in (401, 403) and host.endswith("safehomelan.com"):
+    if r.status_code in (401, 403) and (host.endswith("safehomelan.com")
+                                        or "basic" in r.headers.get("www-authenticate", "").lower()):
         # our own zot wants the estate credentials; they are in the settings
         user, pwd = settings.get("zot_user"), settings.get("zot_password")
         if user and pwd:
