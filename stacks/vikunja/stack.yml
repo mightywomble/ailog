@@ -1,0 +1,81 @@
+# Vikunja (self-hosted todo / project management) on the swarm.
+# Upstream guide: https://vikunja.io/install/#linux/docker
+# Images mirrored into zot by homelab_docker_build's "Mirror upstream images to
+# zot" workflow (vikunja 2.7.1; postgres 17-alpine was already mirrored).
+#
+# Swarm adaptations (docker stack deploy vs the upstream compose):
+#  - env_file and depends_on conditions are ignored; the app's own retries plus
+#    on-failure restarts cover the wait for postgres, and the db has a healthcheck
+#  - both services keep state on the shared NFS (/opt/docker/data/vikunja), so
+#    the task can reschedule to any node and keep its data
+#  - postgres 17 (not 18): on 17 the data dir is /var/lib/postgresql/data; 18
+#    moved it to /var/lib/postgresql/18/docker
+#
+# Published port 3456 was free on every node (in use: 3000, 3001, 3005, 4822,
+# 5001, 8000, 8001, 8080, 8081, 8082, 8199, 9000, 9443).
+# Access:
+#   https://tasks.safehomelan.com          (NPM proxy host, websockets ON)
+#   http://<any swarm node Tailscale IP>:3456, e.g. http://100.79.189.118:3456
+# (routing mesh: every node answers 3456).
+# VIKUNJA_SERVICE_PUBLICURL must match the URL the browser uses: the frontend
+# reads it and calls the API there, so an http value on an https page fails
+# every request with a NetworkError (mixed content). Keep both origins in
+# VIKUNJA_SERVICE_CORSORIGINS when you want direct tailnet access too.
+#
+# First login: the first account created becomes the admin. An admin account is
+# provisioned below via `vikunja user create` (see the repo README notes); if you
+# prefer to sign up yourself, registration is enabled by default.
+services:
+  vikunja:
+    image: zot.safehomelan.com/vikunja:2.7.1
+    environment:
+      VIKUNJA_SERVICE_PUBLICURL: "https://tasks.safehomelan.com/"
+      VIKUNJA_SERVICE_SECRET: "625c8cec033ab122c845b7a0c43f031e6ffc10353d4e5ccdafb72909f74d6ca3"
+      VIKUNJA_SERVICE_TIMEZONE: "Europe/London"
+      # Every swarm node answers on 3456 through the routing mesh, so allow each
+      # node's Tailscale origin as well as the PUBLICURL above.
+      VIKUNJA_SERVICE_CORSORIGINS: "https://tasks.safehomelan.com,http://100.79.189.118:3456,http://100.109.38.8:3456,http://100.86.172.63:3456,http://100.65.120.72:3456,http://100.106.96.24:3456"
+      VIKUNJA_DATABASE_TYPE: "postgres"
+      VIKUNJA_DATABASE_HOST: "db"
+      VIKUNJA_DATABASE_DATABASE: "vikunja"
+      VIKUNJA_DATABASE_USER: "vikunja"
+      VIKUNJA_DATABASE_PASSWORD: "<redacted>"
+      VIKUNJA_DATABASE_SSLMODE: "disable"
+      TZ: "Europe/London"
+    volumes:
+      - type: bind
+        source: /opt/docker/data/vikunja/files
+        target: /app/vikunja/files
+    ports:
+      - "3456:3456"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 10s
+      update_config:
+        order: stop-first
+
+  db:
+    image: zot.safehomelan.com/postgres:17-alpine
+    environment:
+      POSTGRES_USER: "vikunja"
+      POSTGRES_PASSWORD: "<redacted>"
+      POSTGRES_DB: "vikunja"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+      TZ: "Europe/London"
+    volumes:
+      - type: bind
+        source: /opt/docker/data/vikunja/db
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vikunja -d vikunja"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: stop-first

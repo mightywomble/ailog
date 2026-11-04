@@ -1,0 +1,62 @@
+# ingest — homelab knowledge ingest for AnythingLLM.
+# Moves WordPress posts (markdown), Gitea READMEs and LAN inventory (gathered
+# through MetaMCP tools) into the AnythingLLM workspace "my-workspace", keeps a
+# SQLite manifest of what landed and when, and serves a small dashboard at
+# https://ingest.safehomelan.com showing exactly that.
+#
+# - single container; SQLite manifest on the shared NFS so the service can
+#   reschedule to any node
+# - joins the anythingllm stack's overlay network as an external network so it
+#   talks to the AnythingLLM API directly (http://anythingllm:3001) without
+#   going out through the ingress
+# - ALL writes are explicit: the dashboard defaults to dry-run and the goose
+#   summary endpoint is the only path that adds documents without a click
+# Access: https://ingest.safehomelan.com (NPM -> <node>:8093)
+services:
+  ingest:
+    image: zot.safehomelan.com/ingest:${IMAGE_TAG:-build-120}
+    environment:
+      TZ: "Europe/London"
+      # SQLite manifest (documents + runs)
+      INGEST_DB: "/data/ingest.db"
+      # AnythingLLM
+      ANYTHINGLLM_URL: "http://anythingllm:3001"
+      ANYTHINGLLM_API_KEY: "<redacted>"
+      ANYTHINGLLM_WORKSPACE: "my-workspace"
+      # WordPress (Application Password, spaces are stripped by the app)
+      WP_URL: "https://www.daveknowstech.com"
+      WP_USER: "david"
+      WP_APP_PASSWORD: "<redacted>"
+      # Gitea
+      GITEA_URL: "https://git.safehomelan.com"
+      GITEA_TOKEN: "<redacted>"
+      GITEA_OWNER: "david"
+      # MetaMCP public endpoint used by the LAN collectors
+      METAMCP_URL: "https://mcp.safehomelan.com/metamcp/homelab/mcp"
+      METAMCP_API_KEY: "<redacted>"
+      GOOSE_FOLDER: "goose-runs"
+      INGEST_MAX_DOC_BYTES: "400000"
+    volumes:
+      - type: bind
+        source: /opt/docker/data/ingest
+        target: /data
+    ports:
+      - "8093:8080"
+    networks:
+      - default
+      - anythingllm
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+networks:
+  anythingllm:
+    external: true
+    name: anythingllm_default

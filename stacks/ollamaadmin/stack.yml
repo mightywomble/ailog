@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  ollama-admin:
+    image: zot.safehomelan.com/ollama-admin:0.15.6
+    deploy:
+      replicas: 1
+    ports:
+      - target: 8000
+        published: 8084
+        protocol: tcp
+        mode: host
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'

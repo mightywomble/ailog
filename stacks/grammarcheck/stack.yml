@@ -1,0 +1,30 @@
+# GrammarCheck (British English grammar checking and rewriting) on the
+# swarm, image mirrored into zot by repo1's "Mirror upstream images to zot"
+# workflow.
+# Upstream: https://git.safehomelan.com/david/localcode_dell (vibecoded app
+# under grammarcheck/; image docker.io/mightywomble/grammarcheck:1.0)
+# - single container (Flask + gunicorn); only the provider/model selection is
+#   persisted (JSON in /data, bind-mounted to the shared NFS at
+#   /opt/docker/data/grammarcheck) - no submitted text or history is stored
+# - NO LOGIN; pick provider + model in the app's Settings (gear icon):
+#   Ollama at https://ollama.safehomelan.com is the default provider, or
+#   paste an OpenRouter API key there instead
+# - the image ships its own healthcheck (/api/health)
+# Access: http://<any swarm node LAN IP>:8001 or http://<any node Tailscale
+# IP>:8001 (routing mesh; 8000 is portainer's)
+services:
+  grammarcheck:
+    image: zot.safehomelan.com/grammarcheck:1.0
+    environment:
+      OLLAMA_BASE_URL: "https://ollama.safehomelan.com"
+      SETTINGS_DB_PATH: "/data/settings.json"
+    volumes:
+      - type: bind
+        source: /opt/docker/data/grammarcheck
+        target: /data
+    ports:
+      - "8001:8000"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
