@@ -52,11 +52,12 @@ def _reports() -> Dict[str, Any]:
 
 
 def _version_label(value: Any) -> str:
-    """``0.9.1`` -> ``v0.9.1``, and ``v11.4.0`` stays as it is (no ``vv``)."""
+    """``0.9.1`` -> ``v0.9.1``; ``v11.4.0`` is left alone (no ``vv``); ``latest``
+    is left alone too (no ``vlatest``): only a number gets the prefix."""
     text = str(value or '').strip()
     if not text:
         return ''
-    return text if text[:1] in ('v', 'V') else f'v{text}'
+    return f'v{text}' if text[0].isdigit() else text
 
 
 def _docker_updates() -> Dict[str, Any]:
@@ -82,7 +83,7 @@ def _docker_updates() -> Dict[str, Any]:
     from flask import current_app
     from dockermon import endpoints as dep
     from dockermon import updates as dupdates
-    from estate import drift
+    from estate import drift, tags
 
     cached = dupdates.all_state()
     rows = []
@@ -95,8 +96,11 @@ def _docker_updates() -> Dict[str, Any]:
         info = dep.resolve_host(host_key) or {}
         name = info.get('friendly_name') or host_key
         for row in (state or {}).get('containers') or []:
-            ref = str(row.get('image') or '').split('@', 1)[0].rsplit('/', 1)[-1]
-            repo = ref.split(':', 1)[0].lower()
+            # "repo:tag@sha256:..." - the digest is not part of either.
+            ref = str(row.get('image') or '').split('@', 1)[0]
+            tail = ref.rsplit('/', 1)[-1]
+            repo = tail.split(':', 1)[0].lower()
+            tag = tail.rsplit(':', 1)[-1] if ':' in tail else 'latest'
             if not repo:
                 continue
             state_text = str(row.get('state') or row.get('status') or '').lower()
@@ -105,7 +109,7 @@ def _docker_updates() -> Dict[str, Any]:
             if seen and (seen['live'] or not live):
                 continue
             running[repo] = {'host_key': host_key, 'host': name, 'live': live,
-                             'container': row.get('name') or ''}
+                             'tag': tag, 'container': row.get('name') or ''}
 
     # A sweep per fifteen minutes, started on the first poll after it expires;
     # the card fills in on a later poll rather than waiting on nineteen
@@ -117,17 +121,44 @@ def _docker_updates() -> Dict[str, Any]:
     estate_state = drift.state()
     for row in estate_state.get('rows') or []:
         where = running.get(str(row.get('repo') or '').lower()) or {}
-        rows.append({
+        pin = str(row.get('current') or '')
+        target = str(row.get('target') or '')
+        live_tag = str(where.get('tag') or '')
+        base = {
             'host_key': where.get('host_key') or '',
             'host': where.get('host') or 'estate',
             'container': where.get('container') or row.get('service') or row.get('name') or '',
             'service': row.get('name') or '',
             'image': row.get('image') or '',
-            'from': _version_label(row.get('current')),
-            'to': _version_label(row.get('target')),
             'containers': 1,
             'kind': 'estate',
-        })
+        }
+        if live_tag:
+            # The card must answer "does what is *running* need an update?", not
+            # "is git's pin behind upstream?" - anchor was moved to :latest by the
+            # old wizard while wizard.yaml still said 0.9.1, and the card kept
+            # offering an update that had already happened.
+            running_ver = tags.version_of(live_tag)
+            target_ver = tags.version_of(target)
+            # An empty version (``:latest``, a digest) cannot be compared, and in
+            # Python () < (0, 18, 0) is true - so it is excluded by hand.
+            behind = bool(running_ver) and bool(target_ver) and running_ver < target_ver
+            if behind:
+                rows.append({**base, 'from': _version_label(live_tag),
+                             'to': _version_label(target)})
+                continue
+            if live_tag != pin:
+                # The estate and the host disagree and neither is behind: the pin
+                # is what CI would deploy, so a redeploy would move this service
+                # to something else. That is a finding, not an update.
+                rows.append({**base, 'kind': 'drift', 'from': live_tag,
+                             'to': pin, 'note': 'running, git pins'})
+            continue
+        # Nothing running to compare against (no container, or the host was
+        # never scanned): fall back to the pin, which is the best we know.
+        rows.append({**base,
+                     'from': _version_label(pin),
+                     'to': _version_label(target)})
     estate_count = len(rows)
 
     for host_key, state in cached.items():
@@ -181,7 +212,8 @@ def _docker_updates() -> Dict[str, Any]:
     return {
         'count': len(rows),
         'hosts': len({r['host_key'] for r in rows if r['host_key']}),
-        'estate': len(estate_rows),
+        'estate': sum(1 for r in estate_rows if r['kind'] == 'estate'),
+        'drift': sum(1 for r in estate_rows if r['kind'] == 'drift'),
         'rows': shown,
         'more': max(0, len(rows) - len(shown)),
         'pending': sorted(started),

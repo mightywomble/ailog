@@ -188,6 +188,57 @@ def test_a_running_container_wins_over_a_shutdown_one_on_another_node(ctx, monke
     assert row['container'] == 'anchor_anchor.1.new'
 
 
+def _card_with(ctx, monkeypatch, running_image, pin='0.9.1', target='0.18.0'):
+    from dockermon import updates as dupdates
+    from overview import routes as overview_routes
+
+    monkeypatch.setattr(dupdates, 'all_state', lambda: {
+        'db-15': {'ts': 0, 'updates': [], 'containers': [
+            {'name': 'anchor_anchor.1.x', 'image': running_image, 'state': 'running'}]},
+    })
+    monkeypatch.setattr('dockermon.endpoints.all_host_keys', lambda: [])
+    monkeypatch.setattr('dockermon.endpoints.resolve_host', lambda key: {'friendly_name': key})
+    monkeypatch.setattr(drift, 'refresh_async', lambda app, force=False: False)
+    monkeypatch.setattr(drift, 'state', lambda: {'rows': [{
+        'name': 'anchor', 'service': 'anchor', 'current': pin, 'target': target,
+        'image': f'zot.safehomelan.com/anchor:{pin}', 'repo': 'anchor'}], 'error': ''})
+    return overview_routes._docker_updates()
+
+
+def test_a_container_already_on_the_newest_release_is_not_an_update(ctx, monkeypatch):
+    """Updated by the old wizard to :latest (= 0.18.0) while git still pinned 0.9.1:
+    the card kept offering an update that had already happened."""
+    out = _card_with(ctx, monkeypatch, 'zot.safehomelan.com/anchor:latest@sha256:abc')
+
+    assert out['estate'] == 0
+    kinds = [r['kind'] for r in out['rows']]
+    assert kinds == ['drift']           # still worth saying, but not as an update
+    row = out['rows'][0]
+    assert (row['from'], row['to']) == ('latest', '0.9.1')
+    assert row['note'] == 'running, git pins'
+
+
+def test_a_container_on_the_target_version_is_silent_when_git_agrees(ctx, monkeypatch):
+    out = _card_with(ctx, monkeypatch, 'zot.safehomelan.com/anchor:0.18.0',
+                     pin='0.18.0', target='0.18.0')
+    assert out['rows'] == []
+    assert out['count'] == 0
+
+
+def test_a_container_behind_reports_what_it_actually_runs(ctx, monkeypatch):
+    out = _card_with(ctx, monkeypatch, 'zot.safehomelan.com/anchor:0.9.1')
+    assert [r['kind'] for r in out['rows']] == ['estate']
+    assert (out['rows'][0]['from'], out['rows'][0]['to']) == ('v0.9.1', 'v0.18.0')
+
+
+def test_the_running_tag_is_compared_not_the_pin(ctx, monkeypatch):
+    """git pins 0.9.1, the host runs 0.17.0, upstream has 0.18.0: the card must say
+    0.17.0 -> 0.18.0, because that is what would actually change."""
+    out = _card_with(ctx, monkeypatch, 'zot.safehomelan.com/anchor:0.17.0')
+    row = out['rows'][0]
+    assert (row['kind'], row['from'], row['to']) == ('estate', 'v0.17.0', 'v0.18.0')
+
+
 def test_a_version_that_already_says_v_does_not_say_vv(ctx, monkeypatch):
     from dockermon import updates as dupdates
     from overview import routes as overview_routes
@@ -219,6 +270,24 @@ def test_an_estate_service_running_nowhere_still_appears(ctx, monkeypatch):
     assert row['host_key'] == ''           # the card sends this one to /estate
     assert row['host'] == 'estate'
     assert row['container'] == 'vikunja'
+
+
+def test_check_now_resweeps_the_estate_as_well_as_the_hosts(client, monkeypatch):
+    """"Check all hosts" has to doubt both answers, or the cached one keeps winning."""
+    from estate import drift as drift_mod
+
+    forced = {}
+
+    def refresh(app, force=False):
+        forced['force'] = force
+        return True
+
+    monkeypatch.setattr(drift_mod, 'refresh_async', refresh)
+    res = client.post('/api/docker/updates/refresh')
+
+    assert res.status_code == 200
+    assert res.get_json()['estate'] is True
+    assert forced['force'] is True
 
 
 def test_the_card_labels_the_two_kinds_of_update():

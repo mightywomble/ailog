@@ -122,12 +122,16 @@ def sweep(app=None) -> List[Dict[str, Any]]:
     return rows
 
 
-def refresh_async(app) -> bool:
-    """Start a sweep if the cache is stale. Returns True when one was started."""
+def refresh_async(app, force: bool = False) -> bool:
+    """Start a sweep if the cache is stale. Returns True when one was started.
+
+    ``force`` is what a person pressing "check now" means: they are asking
+    precisely because the cached answer is the one they doubt.
+    """
     with _lock:
         if _state['running']:
             return False
-        if (time.time() - float(_state['ts'] or 0)) <= TTL:
+        if not force and (time.time() - float(_state['ts'] or 0)) <= TTL:
             return False
         _state['running'] = True
 

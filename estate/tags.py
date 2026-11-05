@@ -210,6 +210,15 @@ def _ver(tag: str) -> tuple:
     return tuple(int(n) for n in re.split(r'[._]', m.group(1)))
 
 
+def version_of(tag: str) -> tuple:
+    """The leading version of a tag as comparable numbers; ``()`` if it has none.
+
+    Public form of :func:`_ver`, for the callers that need to ask "is what is
+    running older than what is published?" rather than "what is the newest tag?".
+    """
+    return _ver(tag)
+
+
 def _major(tag: str) -> str:
     m = re.search(r'\d+', tag or '')
     return m.group(0) if m else ''
