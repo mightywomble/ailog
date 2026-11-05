@@ -8,7 +8,7 @@
 # https://www.digitalocean.com/community/tutorials/how-to-install-wordpress-with-docker-compose
 services:
   wordpress:
-    image: zot.safehomelan.com/wordpress:7.1.3
+    image: zot.safehomelan.com/wordpress:7.1.4
     environment:
       WORDPRESS_DB_HOST: mysql:3306
       WORDPRESS_DB_USER: wpuser
