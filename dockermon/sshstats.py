@@ -51,7 +51,9 @@ PS_FORMAT = (
     '{{.Label "com.docker.stack.namespace"}}\t'
     '{{.Label "com.docker.swarm.service.name"}}\t'
     '{{.Label "com.docker.swarm.task.id"}}\t'
-    '{{.Label "com.docker.swarm.node.id"}}'
+    '{{.Label "com.docker.swarm.node.id"}}\t'
+    '{{.Label "com.docker.compose.project"}}\t'
+    '{{.Label "com.docker.compose.service"}}'
 )
 
 NODE_FORMAT = (
@@ -259,6 +261,12 @@ def _container_row(parsed: dict, usage: dict) -> dict:
         'service': parsed.get('service') or None,
         'task_id': parsed.get('task') or None,
         'node_id': parsed.get('node_id') or None,
+        # Kept as labels because that is what they are: a project label with no
+        # service label means something else in that project owns the container.
+        'labels': {key: value for key, value in (
+            ('com.docker.compose.project', parsed.get('compose_project')),
+            ('com.docker.compose.service', parsed.get('compose_service')),
+        ) if value},
         'size_rw': size_rw,
         'size_rootfs': size_virtual,
         'created': None,

@@ -91,13 +91,14 @@ def parse_stats_line(obj):
     }
 
 
-PS_FIELDS = 10
+PS_FIELDS = 12
 
 
 def parse_ps_line(line):
     """TSV row from `docker ps --size --no-trunc --format ...`.
 
-    id, name, image, state, status, size, stack, service, task, node
+    id, name, image, state, status, size, stack, service, task, node,
+    compose project, compose service
     """
     f = line.split("\t")
     while len(f) < PS_FIELDS:
@@ -115,6 +116,10 @@ def parse_ps_line(line):
         "service": f[7].strip() or None,
         "task_id": f[8].strip() or None,
         "node_id": f[9].strip() or None,
+        # Compose labels, but only to work out who owns a container that compose
+        # did not create (a project label with no service label).
+        "compose_project": f[10].strip() or None,
+        "compose_service": f[11].strip() or None,
     }
 
 
