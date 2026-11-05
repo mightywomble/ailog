@@ -35,7 +35,17 @@ upstream images keep literal tags and ignore the variable.
 Nextcloud AIO runs outside the swarm on the `files` host, behind the NPM ingress
 on CasaOS. It needed its own shape (plain HTTP on a private port, TLS at the
 edge) because its domain is tailnet-only and AIO's built-in ACME can never
-succeed for it: see [docs/nextcloud-aio.md](docs/nextcloud-aio.md).
+succeed for it: see [docs/nextcloud-aio.md](docs/nextcloud-aio.md). Because the
+mastercontainer recreates its own containers, AIO also owns its own updates -
+AILog refuses them by name rather than undoing them.
+
+## The rest of the fleet
+
+`wizard.yaml` is not the whole homelab. The CasaOS apps on `casaos`, immich on
+`photos` and matrix are plain compose projects; the swarm services AILog does not
+pin are plain swarm services. Which shape each host uses, and why the button is
+greyed out on the ones that are neither, is in
+[docs/fleet.md](docs/fleet.md).
 
 ## Wizard
 
