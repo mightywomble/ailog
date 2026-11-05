@@ -51,6 +51,14 @@ def _reports() -> Dict[str, Any]:
     return {'reports': [r.to_dict() for r in reports]}
 
 
+def _version_label(value: Any) -> str:
+    """``0.9.1`` -> ``v0.9.1``, and ``v11.4.0`` stays as it is (no ``vv``)."""
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    return text if text[:1] in ('v', 'V') else f'v{text}'
+
+
 def _docker_updates() -> Dict[str, Any]:
     """Containers the registry has moved on from, across every scanned host.
 
@@ -80,6 +88,8 @@ def _docker_updates() -> Dict[str, Any]:
     rows = []
     # Where each image actually runs, so an estate row can be clicked through to
     # the host that carries it: repo name -> (host_key, friendly name, container).
+    # A swarm task leaves shutdown containers behind on the node it used to run
+    # on, so a *running* one wins over whatever answered first.
     running: Dict[str, Dict[str, Any]] = {}
     for host_key, state in cached.items():
         info = dep.resolve_host(host_key) or {}
@@ -87,9 +97,15 @@ def _docker_updates() -> Dict[str, Any]:
         for row in (state or {}).get('containers') or []:
             ref = str(row.get('image') or '').split('@', 1)[0].rsplit('/', 1)[-1]
             repo = ref.split(':', 1)[0].lower()
-            if repo and repo not in running:
-                running[repo] = {'host_key': host_key, 'host': name,
-                                 'container': row.get('name') or ''}
+            if not repo:
+                continue
+            state_text = str(row.get('state') or row.get('status') or '').lower()
+            live = state_text.startswith('running') or state_text.startswith('up')
+            seen = running.get(repo)
+            if seen and (seen['live'] or not live):
+                continue
+            running[repo] = {'host_key': host_key, 'host': name, 'live': live,
+                             'container': row.get('name') or ''}
 
     # A sweep per fifteen minutes, started on the first poll after it expires;
     # the card fills in on a later poll rather than waiting on nineteen
@@ -107,8 +123,8 @@ def _docker_updates() -> Dict[str, Any]:
             'container': where.get('container') or row.get('service') or row.get('name') or '',
             'service': row.get('name') or '',
             'image': row.get('image') or '',
-            'from': f"v{row['current']}" if row.get('current') else '',
-            'to': f"v{row['target']}" if row.get('target') else '',
+            'from': _version_label(row.get('current')),
+            'to': _version_label(row.get('target')),
             'containers': 1,
             'kind': 'estate',
         })

@@ -165,6 +165,45 @@ def test_the_card_puts_estate_drift_first_and_resolves_its_host(ctx, monkeypatch
     assert out['rows'][1]['kind'] == 'digest'
 
 
+def test_a_running_container_wins_over_a_shutdown_one_on_another_node(ctx, monkeypatch):
+    """A swarm task leaves shutdown siblings behind; the row must point at the live one."""
+    from dockermon import updates as dupdates
+    from overview import routes as overview_routes
+
+    monkeypatch.setattr(dupdates, 'all_state', lambda: {
+        'db-14': {'ts': 0, 'updates': [], 'containers': [
+            {'name': 'anchor_anchor.1.old', 'image': 'zot.safehomelan.com/anchor:0.9.1', 'state': 'shutdown'}]},
+        'db-15': {'ts': 0, 'updates': [], 'containers': [
+            {'name': 'anchor_anchor.1.new', 'image': 'zot.safehomelan.com/anchor:0.9.1', 'state': 'running'}]},
+    })
+    monkeypatch.setattr('dockermon.endpoints.all_host_keys', lambda: [])
+    monkeypatch.setattr('dockermon.endpoints.resolve_host', lambda key: {'friendly_name': key})
+    monkeypatch.setattr(drift, 'refresh_async', lambda app: False)
+    monkeypatch.setattr(drift, 'state', lambda: {'rows': [{
+        'name': 'anchor', 'service': 'anchor', 'current': '0.9.1', 'target': '0.18.0',
+        'image': 'zot.safehomelan.com/anchor:0.9.1', 'repo': 'anchor'}], 'error': ''})
+
+    row = overview_routes._docker_updates()['rows'][0]
+    assert row['host_key'] == 'db-15'
+    assert row['container'] == 'anchor_anchor.1.new'
+
+
+def test_a_version_that_already_says_v_does_not_say_vv(ctx, monkeypatch):
+    from dockermon import updates as dupdates
+    from overview import routes as overview_routes
+
+    monkeypatch.setattr(dupdates, 'all_state', lambda: {})
+    monkeypatch.setattr('dockermon.endpoints.all_host_keys', lambda: [])
+    monkeypatch.setattr(drift, 'refresh_async', lambda app: False)
+    monkeypatch.setattr(drift, 'state', lambda: {'rows': [{
+        'name': 'dozzle', 'service': 'dozzle', 'current': 'v11.4.0', 'target': 'v11.4.1',
+        'image': 'zot.safehomelan.com/dozzle:v11.4.1', 'repo': 'dozzle'}], 'error': ''})
+
+    row = overview_routes._docker_updates()['rows'][0]
+    assert row['from'] == 'v11.4.0'
+    assert row['to'] == 'v11.4.1'
+
+
 def test_an_estate_service_running_nowhere_still_appears(ctx, monkeypatch):
     from dockermon import updates as dupdates
     from overview import routes as overview_routes
