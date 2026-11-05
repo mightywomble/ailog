@@ -103,3 +103,27 @@ docker exec nginxproxymanager tail -5 /data/logs/proxy-host-53_error.log
 `overwrite.cli.url` stay as AIO sets them, so Nextcloud still emits https URLs.
 The AIO management interface is still reached directly on
 `https://files.safehomelan.com:8443` (or `:8080`), not through NPM.
+
+## Updates belong to AIO, not to the estate
+
+Every container in `nextcloud-aio` except the mastercontainer is created by the
+mastercontainer itself, through the docker API, and recreated by it whenever the
+AIO configuration changes. That is why AILog refuses to update one of them: the
+recreate that follows would undo it within minutes.
+
+The label that gives this away is the one that is *missing*. AIO containers carry
+`com.docker.compose.project=nextcloud-aio` but no
+`com.docker.compose.service` - compose did not create them, so compose has no
+intent to replay. The images say the same thing in the other direction by opting
+out of every update watcher (`diun.enable=false`, `wud.watch=false`,
+`com.centurylinklabs.watchtower.enable=false`, `dockhand.update=false`).
+
+So Nextcloud is updated one way only:
+
+1. open `https://files.safehomelan.com:8443` and log in as the AIO admin,
+2. follow the update prompt for the mastercontainer / the AIO containers,
+3. the mastercontainer pulls the new images and recreates its siblings itself.
+
+`nextcloud-aio-mastercontainer` itself is a `docker run` container as well
+(see the command at the top of this file), so it is not in the swarm, not in
+`wizard.yaml`, and not something the estate page will ever offer.
