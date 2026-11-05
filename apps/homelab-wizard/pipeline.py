@@ -333,96 +333,29 @@ def pin_versions(tags):
     return bumped
 
 
-def _settle(stack, timeout=120):
-    """Wait for the new image to be running before anyone tests it."""
-    settings = core.load()
-    deadline = time.time() + timeout
-    last = ""
-    while time.time() < deadline:
-        rows = swarmio.service_replicas(settings, stack)
-        last = " ".join(r["replicas"] for r in rows) or "no services"
-        if rows and all(r["replicas"].split("/")[0] == r["replicas"].split("/")[-1] for r in rows):
-            return last
-        time.sleep(5)
-    return last
-
-
 def update(job, name, run_tests=True):
-    """The version bump, end to end.
+    """Retired: wizard.yaml has one writer now, and it is not this process.
 
-    Bumping a version is not the same job as adding a service: resolve what
-    upstream actually has, write that one field, let the workflow that owns the
-    image move it into zot (mirror.yml for a mirrored image, build.yml for a
-    source build), then ship and deploy it.
+    This was the second implementation of "move a service to a newer image".
+    It resolved the newest tag itself, wrote wizard.yaml, pushed, dispatched the
+    mirror/build workflow, merged the PR and waited for the deploy - and AILog's
+    estate does the same, better informed: it knows whether a build app has a
+    version at all, it folds a publisher's set together, and it reports a
+    conflict instead of quietly abandoning the pull request. Two writers meant
+    two answers to "what is pinned", and the loser was whichever ran second.
+
+    So this refuses, and says where the button went. The new-service and
+    compose-to-stack journeys are untouched: they still create, render and ship.
     """
-    settings = core.load()
-    if not os.path.isdir(os.path.join(settings["repo_dir"], ".git")):
-        core.ensure(settings)
-    gh = forge.Gitea(settings)
     svc = find_service(name)
     if not svc:
         raise RuntimeError(f"{name} is not in wizard.yaml - use the new-service flow")
-    image = svc.get("source") or svc.get("image") or ""
-    kind = svc.get("kind") or "mirror"
-
-    if kind == "build":
-        # nothing upstream to resolve: the newest version is whatever this repo
-        # builds from its own source, and ship.yml hands out the build-N tag
-        job.step("upstream", "ok", "built from source in apps/" + (svc.get("repo") or name))
-        out = {"name": name, "kind": kind, "tag": None}
-        job.step("commit", "running")
-        sha = publish(job, f"wizard: rebuild {name}").get("sha")
-        run = _wait_run(job, gh, BUILD_WF, sha=sha)
-        job.step(BUILD_WF, "running")
-        _tail_run(job, gh, run["id"], BUILD_WF + " ")
-        job.step(BUILD_WF, "ok")
-        out["ship"] = ship(job, f"{name}: rebuild from source")
-        tags = released_tags(gh, out["ship"]["run"])
-        out["pinned"] = pin_versions(tags)
-        job.step("replicas", "running")
-        job.step("replicas", "ok", _settle(name))
-        if run_tests:
-            out["tests"] = test_stack(job, name, svc.get("url") or None,
-                                      (svc.get("ports") or [{}])[0].get("host") or None)
-        return out
-
-    job.step("upstream", "running", image)
-    pick = registry.newest_tag(image)
-    job.log(f"{pick['host']}/{pick['repo']}: now {pick['current'] or 'unknown'}, "
-            f"newest {pick['best']} (looked at {', '.join(pick['candidates'][:6])})")
-    if pick.get("up_to_date"):
-        job.step("upstream", "ok", f"already on {pick['tag']}")
-        job.log(f"{name} is already on the newest version-like tag - nothing to do")
-        return {"name": name, "up_to_date": True, "tag": pick["tag"], "deployed": False}
-    tag = pick["best"]
-    job.step("upstream", "ok", f"{pick['current'] or '?'} -> {tag}")
-
-    job.step("wizard.yaml", "running")
-    _entry, changed_files = apply_version(name, tag)
-    job.step("wizard.yaml", "ok", f"{name} {tag}")
-    job.log("changed: " + ", ".join(changed_files))
-
-    job.step("commit", "running")
-    sha = publish(job, f"wizard: {name} {pick['current'] or ''} -> {tag}".replace("  ", " ")).get("sha")
-
-    # the image has to exist in zot before the swarm is asked to run it
-    wf = MIRROR_WF if kind == "mirror" else BUILD_WF
-    run = _wait_run(job, gh, wf, sha=sha, timeout=90, dispatch=True,
-                    branch=settings.get("work_branch", "dev"))
-    job.step(wf, "running")
-    _tail_run(job, gh, run["id"], wf + " ")
-    job.step(wf, "ok")
-
-    out = {"name": name, "from": pick["current"], "tag": tag, "kind": kind}
-    out["ship"] = ship(job, f"{name}: {pick['current'] or '?'} -> {tag}")
-    if kind == "build":                     # (mirrors keep their literal tag)
-        out["pinned"] = pin_versions(released_tags(gh, out["ship"]["run"]))
-    job.step("replicas", "running")
-    job.step("replicas", "ok", _settle(name))
-    if run_tests:
-        out["tests"] = test_stack(job, name, svc.get("url") or None,
-                                  (svc.get("ports") or [{}])[0].get("host") or None)
-    return out
+    raise RuntimeError(
+        f"{name} is updated by the estate in AILog now, not from here: the wizard "
+        "no longer writes wizard.yaml for an existing service. Open that host's "
+        "Docker pane - or The estate in the same view - and press update on "
+        f"{name}; it commits the bump, waits for CI and follows the deploy. "
+        "(The new-service and compose-to-stack journeys still run from here.)")
 
 
 def pull_image(job, image, node=None):
