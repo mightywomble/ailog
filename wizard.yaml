@@ -330,8 +330,8 @@ services:
   service: vikunja
   image: zot.safehomelan.com/vikunja:2.7.1
   repo: vikunja
-  version: 2.7.1
-  source: docker.io/vikunja/vikunja:2.7.1
+  version: 2.8.0
+  source: docker.io/vikunja/vikunja:2.8.0
   ports:
   - host: 3456
     container: 3456

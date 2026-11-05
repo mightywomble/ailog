@@ -59,7 +59,7 @@
     },
     {
       "name": "vikunja",
-      "source": "docker.io/vikunja/vikunja:2.7.1"
+      "source": "docker.io/vikunja/vikunja:2.8.0"
     },
     {
       "name": "huntly",
