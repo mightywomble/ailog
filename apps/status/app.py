@@ -44,11 +44,29 @@ def load_apps() -> list[dict]:
         return []
 
 
+def secret(name: str, env: str = "") -> str:
+    """A credential, preferring the Docker secret over the environment.
+
+    ``/run/secrets/<name>`` is where swarm mounts it, so the stack file can stop
+    carrying the value. The environment is still read last: a container started
+    by hand (the smoke test, a debugging run) has no secrets and must not crash.
+    """
+    for path in (f"/run/secrets/{name}",):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read().strip()
+            if text:
+                return text
+        except OSError:
+            pass
+    return os.environ.get(env or name.upper(), "")
+
+
 CFG = {
     "pve_url": os.environ.get("PVE_URL", "https://pve:8006"),
-    "pve_token": os.environ.get("PVE_TOKEN", ""),
+    "pve_token": secret("status_pve_token", "PVE_TOKEN"),
     "mcp_url": os.environ.get("METAMCP_URL", ""),
-    "mcp_key": os.environ.get("METAMCP_API_KEY", ""),
+    "mcp_key": secret("metamcp_api_key", "METAMCP_API_KEY"),
     "apps": load_apps(),
 }
 POLL_SECONDS = int(os.environ.get("STATUS_POLL_SECONDS", "60"))
