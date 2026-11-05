@@ -37,20 +37,39 @@ from fastapi.templating import Jinja2Templates
 # ---------------------------------------------------------------------------
 # configuration
 # ---------------------------------------------------------------------------
+
+def secret(name: str, env: str = "") -> str:
+    """A credential, preferring the Docker secret over the environment.
+
+    Swarm mounts secrets at ``/run/secrets/<name>``, so the stack file (which is
+    in git, and which ``docker service inspect`` prints back) no longer carries
+    the value. The environment is read last so a container started by hand - the
+    smoke test, a debugging run - still works.
+    """
+    try:
+        with open(f"/run/secrets/{name}", encoding="utf-8") as handle:
+            text = handle.read().strip()
+        if text:
+            return text
+    except OSError:
+        pass
+    return os.environ.get(env or name.upper(), "")
+
+
 ANY = os.environ.get("ANYTHINGLLM_URL", "http://anythingllm:3001").rstrip("/")
-ANY_KEY = os.environ.get("ANYTHINGLLM_API_KEY", "")
+ANY_KEY = secret("anythingllm_api_key", "ANYTHINGLLM_API_KEY")
 WORKSPACE = os.environ.get("ANYTHINGLLM_WORKSPACE", "my-workspace")
 
 WP_URL = os.environ.get("WP_URL", "https://www.daveknowstech.com").rstrip("/")
 WP_USER = os.environ.get("WP_USER", "")
-WP_APP_PASSWORD = os.environ.get("WP_APP_PASSWORD", "").replace(" ", "")
+WP_APP_PASSWORD = secret("wp_app_password", "WP_APP_PASSWORD").replace(" ", "")
 
 GITEA_URL = os.environ.get("GITEA_URL", "https://git.safehomelan.com").rstrip("/")
-GITEA_TOKEN = os.environ.get("GITEA_TOKEN", "")
+GITEA_TOKEN = secret("gitea_token", "GITEA_TOKEN")
 GITEA_OWNER = os.environ.get("GITEA_OWNER", "david")
 
 MCP_URL = os.environ.get("METAMCP_URL", "").rstrip("/")
-MCP_KEY = os.environ.get("METAMCP_API_KEY", "")
+MCP_KEY = secret("metamcp_api_key", "METAMCP_API_KEY")
 
 DB_PATH = os.environ.get("INGEST_DB", "/data/ingest.db")
 MAX_DOC_BYTES = int(os.environ.get("INGEST_MAX_DOC_BYTES", "400000"))
