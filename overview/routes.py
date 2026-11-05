@@ -26,6 +26,7 @@ overview_bp = Blueprint('overview', __name__)
 
 REPORT_LIMIT = 5
 EVENT_LIMIT = 8
+UPDATE_ROW_LIMIT = 12
 
 
 def _fleet() -> Dict[str, Any]:
@@ -50,6 +51,61 @@ def _reports() -> Dict[str, Any]:
     return {'reports': [r.to_dict() for r in reports]}
 
 
+def _docker_updates() -> Dict[str, Any]:
+    """Containers the registry has moved on from, across every scanned host.
+
+    The dashboard asks this every six seconds, so it reads the background scan
+    cache and nothing else - one SSH round per host here would make the whole
+    page wait on the slowest machine in the estate. A host that has never been
+    scanned is *queued* and answered on a later poll, which is why the card can
+    be empty for a moment at boot.
+
+    ``self_managed`` rows are left out on purpose: a container whose own compose
+    project recreates it (Nextcloud AIO) would otherwise fill the card with
+    fifteen entries that nobody should press.
+    """
+    from flask import current_app
+    from dockermon import endpoints as dep
+    from dockermon import updates as dupdates
+
+    cached = dupdates.all_state()
+    rows = []
+    per_host: Dict[str, int] = {}
+    for host_key, state in cached.items():
+        info = dep.resolve_host(host_key) or {}
+        name = info.get('friendly_name') or host_key
+        for row in (state or {}).get('updates') or []:
+            if row.get('self_managed'):
+                continue
+            rows.append({
+                'host_key': host_key,
+                'host': name,
+                'container': row.get('name') or '',
+                'image': row.get('image') or '',
+                'from': row.get('local_digest') or '',
+                'to': row.get('remote_digest') or '',
+                'containers': row.get('containers') or 1,
+            })
+            per_host[host_key] = per_host.get(host_key, 0) + 1
+
+    rows.sort(key=lambda r: (r['host'].lower(), r['container'].lower()))
+
+    # The card fills itself: anything never scanned is queued, once.
+    to_scan = [key for key in dep.all_host_keys() if key not in cached]
+    try:
+        started = dupdates.scan_async(current_app._get_current_object(), to_scan) if to_scan else []
+    except Exception:                     # noqa: BLE001 - a scan must not break the card
+        started = []
+
+    return {
+        'count': len(rows),
+        'hosts': len(per_host),
+        'rows': rows[:UPDATE_ROW_LIMIT],
+        'more': max(0, len(rows) - UPDATE_ROW_LIMIT),
+        'pending': sorted(started),
+    }
+
+
 def _safe(fn) -> Any:
     try:
         return fn()
@@ -64,12 +120,23 @@ def build_overview() -> Dict[str, Any]:
         'servers': _safe(_fleet),
         'alerts': _safe(_alerts),
         'reports': _safe(_reports),
+        'docker_updates': _safe(_docker_updates),
     }
+
+
+# Keys that report the progress of a scan rather than what the dashboard says.
+# A scan *landing* must refresh the card; "a host is being scanned" must not,
+# or an idle dashboard would repaint every time a round starts and stops.
+VOLATILE = {('docker_updates', 'pending')}
 
 
 def _etag_for(payload: Dict[str, Any]) -> str:
     # ``ts`` must not defeat the ETag, otherwise every poll looks changed.
     stable = {k: v for k, v in payload.items() if k != 'ts'}
+    for section, key in VOLATILE:
+        block = stable.get(section)
+        if isinstance(block, dict) and key in block:
+            stable[section] = {k: v for k, v in block.items() if k != key}
     body = json.dumps(stable, sort_keys=True, default=str)
     return hashlib.sha256(body.encode('utf-8')).hexdigest()[:32]
 

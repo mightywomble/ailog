@@ -3340,7 +3340,7 @@ const showHostInfoMain = async () => {
                     ? `<button type="button" class="text-xs px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium" data-update-image="${escapeHtml(row.image || '')}" data-update-container="${escapeHtml(row.name || '')}" data-update-label="${escapeHtml(row.name || row.image || '')}" title="Pull the newer image and recreate only this service">update</button>`
                     : '';
                 return `
-                    <div class="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
+                    <div class="flex items-center gap-3 py-2 border-b border-white/5 last:border-0" data-docker-row="${escapeHtml(row.name || '')}">
                         <div class="min-w-0 flex-1">
                             <div class="text-sm termix-text truncate">${escapeHtml(row.name || '(unnamed)')}${row.containers > 1 ? ` <span class="termix-muted">×${row.containers}</span>` : ''}</div>
                             <div class="text-[11px] termix-muted font-mono truncate" title="${escapeHtml(row.image || '')}">${escapeHtml(row.image || '')}</div>
@@ -3351,6 +3351,22 @@ const showHostInfoMain = async () => {
                     </div>
                 `;
             }).join('');
+
+            // Arrived from the dashboard's Docker updates card: the row you
+            // clicked is a few scrollfuls down a list of forty containers, so
+            // scroll to it and flash it rather than making you find it.
+            const focus = window.__ovFocusContainer;
+            const focusFresh = Date.now() - Number(window.__ovFocusAt || 0) < 15000;
+            if (focus && focusFresh) {
+                window.__ovFocusContainer = null;
+                const target = Array.from(list.querySelectorAll('[data-docker-row]'))
+                    .find((el) => el.dataset.dockerRow === focus);
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    target.classList.add('rounded-lg', 'bg-amber-400/10', 'ring-2', 'ring-amber-400/60');
+                    setTimeout(() => target.classList.remove('rounded-lg', 'bg-amber-400/10', 'ring-2', 'ring-amber-400/60'), 2600);
+                }
+            }
         };
 
         const renderDockerLog = () => {
@@ -6641,6 +6657,8 @@ aiAnalyseBtn.addEventListener('click', () => runAiAnalysis({
         window.showToast = showToast;
         window.showDashboard = showDashboard;
         window.showLogs = showLogs;
+        // The dashboard's Docker updates card lands on a host through these two.
+        window.selectHost = selectHost;
         window.showMobileHosts = showMobileHosts;
         window.showMobileLogs = showMobileLogs;
         window.isMobileLayout = isMobileLayout;

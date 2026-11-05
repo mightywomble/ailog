@@ -614,6 +614,20 @@ def api_updates_refresh(host_key):
     return jsonify({'success': True, 'started': started[0] if started else None})
 
 
+@docker_bp.route('/api/docker/updates/refresh', methods=['POST'])
+def api_updates_refresh_all():
+    """Queue a fresh scan for every host that could run Docker.
+
+    The dashboard card's "check all hosts": one button, one queue, and the
+    answers arrive through the normal poll as each scan lands. Bounded by the
+    scan coordinator, so pressing it twice does not open 17 SSH rounds twice.
+    """
+    app = current_app._get_current_object()
+    started = dupdates.scan_async(app, ep.all_host_keys(), force=True)
+    return jsonify({'success': True, 'started': started,
+                    'progress': dupdates.activity()})
+
+
 @docker_bp.route('/api/docker/hosts/<path:host_key>/update/plan')
 def api_update_plan(host_key):
     """How *this* container would be updated: the kind, the target, the commands.

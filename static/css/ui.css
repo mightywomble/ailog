@@ -298,6 +298,26 @@
   text-decoration: none;
 }
 a.ov-row-main:hover { text-decoration: underline; }
+
+/* A row that is a way in rather than a label (the Docker updates card): it is
+ * a button, so it must look and behave like text until it is under the pointer. */
+button.ov-row-link {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.ov-row-link:hover { text-decoration: underline; text-decoration-color: var(--accent); }
+button.ov-row-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+/* The host is the destination, so it gets fixed width and loses the flexible
+ * growth the container name needs (names are longer than host names). */
+.ov-row-host { flex: 0 1 30%; align-items: flex-end; text-align: right; }
+.ov-row-host .ov-row-main { flex: 0 0 auto; font-size: .72rem; }
+.ov-row-host .ov-row-sub { max-width: 100%; }
+
 .ov-row-meta { flex: 0 0 auto; font-size: .68rem; color: var(--faint); }
 
 .ov-sev { width: 7px; height: 7px; border-radius: 99px; background: var(--warn); flex: 0 0 auto; }
