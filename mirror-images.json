@@ -11,7 +11,7 @@
     },
     {
       "name": "wordpress",
-      "source": "docker.io/library/wordpress:latest"
+      "source": "docker.io/library/wordpress:7.1.4"
     },
     {
       "name": "mysql",
