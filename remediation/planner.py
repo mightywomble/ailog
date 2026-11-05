@@ -22,7 +22,9 @@ TOKEN_TTL = 300
 
 
 def _secret() -> bytes:
-    raw = os.getenv('AILOG_SECRET_KEY') or os.getenv('SECRET_KEY') or 'ailog-remediation-dev'
+    from utils.secretfiles import secret
+    raw = (secret('ailog_secret_key', 'AILOG_SECRET_KEY')
+           or os.getenv('SECRET_KEY') or 'ailog-remediation-dev')
     return raw.encode()
 
 
