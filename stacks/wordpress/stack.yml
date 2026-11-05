@@ -12,8 +12,12 @@ services:
     environment:
       WORDPRESS_DB_HOST: mysql:3306
       WORDPRESS_DB_USER: wpuser
-      WORDPRESS_DB_PASSWORD: <redacted>
+      # native _FILE support: the official image reads the password from the
+      # file swarm mounts, so the value is not in this (public) repository
+      WORDPRESS_DB_PASSWORD_FILE: /run/secrets/wordpress_db_password
       WORDPRESS_DB_NAME: wordpressdb
+    secrets:
+      - wordpress_db_password
     ports:
       - "8082:80"
     volumes:
@@ -31,10 +35,12 @@ services:
         condition: any
   mysql:
     image: zot.safehomelan.com/mysql:8.0
+    secrets:
+      - wordpress_db_password
     environment:
       MYSQL_DATABASE: wordpressdb
       MYSQL_USER: wpuser
-      MYSQL_PASSWORD: <redacted>
+      MYSQL_PASSWORD_FILE: /run/secrets/wordpress_db_password
       MYSQL_RANDOM_ROOT_PASSWORD: "1"
     volumes:
       - type: bind
@@ -44,3 +50,7 @@ services:
       replicas: 1
       restart_policy:
         condition: any
+
+secrets:
+  wordpress_db_password:
+    external: true
