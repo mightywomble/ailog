@@ -33,20 +33,37 @@ services:
       POSTGRES_HOST: "postgres"
       POSTGRES_PORT: "5432"
       POSTGRES_USER: "metamcp_user"
-      POSTGRES_PASSWORD: "<redacted>"
       POSTGRES_DB: "metamcp_db"
-      DATABASE_URL: "postgresql://metamcp_user:<redacted>@postgres:5432/metamcp_db"
+      # POSTGRES_PASSWORD, BETTER_AUTH_SECRET, BOOTSTRAP_USER_PASSWORD and the
+      # DATABASE_URL that embeds the password are built from swarm secrets by
+      # the command below, so none of them are in this file any more.
       APP_URL: "https://mcp.safehomelan.com"
       NEXT_PUBLIC_APP_URL: "https://mcp.safehomelan.com"
-      BETTER_AUTH_SECRET: "142b6589ca88e57468b965b047501ed923aeae4973d821bcd48d0666f55dfed7"
       # don't rewrite localhost: we point at tailnet addresses, not host.docker.internal
       TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL: "false"
       # bootstrap the admin account on first boot
       BOOTSTRAP_USER_EMAIL: "david@davidfield.co.uk"
-      BOOTSTRAP_USER_PASSWORD: "<redacted>"
+      # BOOTSTRAP_USER_PASSWORD comes from /run/secrets/metamcp_bootstrap_password
       BOOTSTRAP_USER_NAME: "david"
       BOOTSTRAP_DISABLE_REGISTRATION_UI: "true"
       TZ: "Europe/London"
+    # A Node app with its own docker-entrypoint.sh and no `_FILE` support, so the
+    # secret is read by sh and exported before the entrypoint takes over. The
+    # DATABASE_URL is rebuilt here rather than in the stack file: it embeds the
+    # password, and leaving it there would put the value straight back.
+    command:
+      - sh
+      - -c
+      - |
+        export POSTGRES_PASSWORD="$$(cat /run/secrets/metamcp_postgres_password)"
+        export BETTER_AUTH_SECRET="$$(cat /run/secrets/metamcp_auth_secret)"
+        export BOOTSTRAP_USER_PASSWORD="$$(cat /run/secrets/metamcp_bootstrap_password)"
+        export DATABASE_URL="postgresql://metamcp_user:$${POSTGRES_PASSWORD}@postgres:5432/metamcp_db"
+        exec ./docker-entrypoint.sh
+    secrets:
+      - metamcp_postgres_password
+      - metamcp_auth_secret
+      - metamcp_bootstrap_password
     volumes:
       - type: bind
         source: /opt/docker/data/metamcp/npm
@@ -72,9 +89,11 @@ services:
 
   postgres:
     image: zot.safehomelan.com/postgres16:16-alpine
+    secrets:
+      - metamcp_postgres_password
     environment:
       POSTGRES_USER: "metamcp_user"
-      POSTGRES_PASSWORD: "<redacted>"
+      POSTGRES_PASSWORD_FILE: "/run/secrets/metamcp_postgres_password"
       POSTGRES_DB: "metamcp_db"
       PGDATA: "/var/lib/postgresql/data/pgdata"
       TZ: "Europe/London"
@@ -93,3 +112,11 @@ services:
         condition: any
       update_config:
         order: stop-first
+
+secrets:
+  metamcp_postgres_password:
+    external: true
+  metamcp_auth_secret:
+    external: true
+  metamcp_bootstrap_password:
+    external: true
