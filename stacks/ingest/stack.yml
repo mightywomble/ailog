@@ -21,21 +21,25 @@ services:
       INGEST_DB: "/data/ingest.db"
       # AnythingLLM
       ANYTHINGLLM_URL: "http://anythingllm:3001"
-      ANYTHINGLLM_API_KEY: "<redacted>"
       ANYTHINGLLM_WORKSPACE: "my-workspace"
       # WordPress (Application Password, spaces are stripped by the app)
       WP_URL: "https://www.daveknowstech.com"
       WP_USER: "david"
-      WP_APP_PASSWORD: "<redacted>"
       # Gitea
       GITEA_URL: "https://git.safehomelan.com"
-      GITEA_TOKEN: "<redacted>"
       GITEA_OWNER: "david"
       # MetaMCP public endpoint used by the LAN collectors
       METAMCP_URL: "https://mcp.safehomelan.com/metamcp/homelab/mcp"
-      METAMCP_API_KEY: "<redacted>"
       GOOSE_FOLDER: "goose-runs"
       INGEST_MAX_DOC_BYTES: "400000"
+    secrets:
+      # Credentials are swarm secrets now, read from /run/secrets: the stack
+      # file is in git and these values were not the repository's to publish.
+      # metamcp_api_key is shared with status - the same MetaMCP key.
+      - anythingllm_api_key
+      - wp_app_password
+      - gitea_token
+      - metamcp_api_key
     volumes:
       - type: bind
         source: /opt/docker/data/ingest
@@ -60,3 +64,13 @@ networks:
   anythingllm:
     external: true
     name: anythingllm_default
+
+secrets:
+  anythingllm_api_key:
+    external: true
+  wp_app_password:
+    external: true
+  gitea_token:
+    external: true
+  metamcp_api_key:
+    external: true
