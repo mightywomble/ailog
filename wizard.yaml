@@ -291,7 +291,7 @@ services:
   service: status
   image: zot.safehomelan.com/status:${IMAGE_TAG:-build-128}
   repo: status
-  version: build-128
+  version: build-150
   source: ''
   ports:
   - host: 8094
