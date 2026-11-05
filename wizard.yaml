@@ -56,8 +56,8 @@ services:
   service: anchor
   image: zot.safehomelan.com/anchor:0.9.1
   repo: anchor
-  version: 0.9.1
-  source: ghcr.io/zhfahim/anchor:0.9.1
+  version: latest
+  source: ghcr.io/zhfahim/anchor:latest
   ports:
   - host: 3001
     container: 3000
@@ -69,6 +69,8 @@ services:
     container: /data
   env_count: 0
   companions: []
+  env: {}
+  healthcheck: ''
 - name: anythingllm
   kind: mirror
   service: anythingllm

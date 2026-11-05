@@ -1,21 +1,15 @@
-# Anchor (offline-first, self-hosted notes app) on the swarm, image mirrored
-# into zot by repo1's "Mirror upstream images to zot" workflow.
-# Upstream: https://github.com/ZhFahim/anchor
-# - single container; embedded Postgres + uploads all live under /data, which
-#   is bind-mounted to the shared NFS so the service can reschedule to any node
-# - defaults work out of the box (JWT secret auto-generated, stored in /data);
-#   set APP_URL / CORS_ORIGINS here if fronting it with an NPM domain later
-# Access: http://<any swarm node LAN IP>:3001 or http://<any node Tailscale
-# IP>:3001 (routing mesh)
+# anchor - rendered from wizard.yaml by homelab-wizard.
+# Owned by the wizard: image tag, published ports, replicas, volumes.
+# Everything else here is hand-maintained and survives a re-render.
 services:
   anchor:
-    image: zot.safehomelan.com/anchor:0.9.1
+    image: zot.safehomelan.com/anchor:latest
     volumes:
-      - type: bind
-        source: /opt/docker/data/anchor
-        target: /data
+    - type: bind
+      source: /opt/docker/data/anchor
+      target: /data
     ports:
-      - "3001:3000"
+    - 3001:3000
     deploy:
       replicas: 1
       restart_policy:
