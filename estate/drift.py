@@ -21,6 +21,8 @@ import threading
 import time
 from typing import Any, Dict, List
 
+import yaml
+
 from . import render, settings, tags
 from .git import GitError, Repo
 
@@ -31,7 +33,7 @@ TTL = 15 * 60
 _lock = threading.Lock()
 _state: Dict[str, Any] = {
     'ts': 0.0,          # when the sweep last finished
-    'rows': [],         # services whose pin is behind their upstream
+    'services': [],     # every mirror/image service: pin, deployed tag, newest
     'checked': 0,       # services the sweep could resolve a version for
     'error': '',
     'running': False,
@@ -41,7 +43,8 @@ _state: Dict[str, Any] = {
 def state() -> Dict[str, Any]:
     with _lock:
         row = dict(_state)
-    row['rows'] = [dict(r) for r in row.get('rows') or []]
+    row['services'] = [dict(r) for r in row.get('services') or []]
+    row['rows'] = [r for r in row['services'] if r.get('behind')]
     row['age'] = round(time.time() - float(row.get('ts') or 0), 1) if row.get('ts') else None
     return row
 
@@ -55,7 +58,7 @@ def stale(max_age: float = TTL) -> bool:
 
 def clear() -> None:
     with _lock:
-        _state.update(ts=0.0, rows=[], checked=0, error='', running=False)
+        _state.update(ts=0.0, services=[], checked=0, error='', running=False)
 
 
 def oldest(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -70,12 +73,32 @@ def _image_repo(entry: dict) -> str:
     return ref.split(':', 1)[0]
 
 
+def _deployed_tag(stack_text: str, service: str) -> str:
+    """The tag CI would deploy for this service, read from its stack file."""
+    try:
+        doc = yaml.safe_load(stack_text) or {}
+    except yaml.YAMLError:
+        return ''
+    image = str(((doc.get('services') or {}).get(service) or {}).get('image') or '')
+    ref = image.split('@', 1)[0]
+    tail = ref.rsplit('/', 1)[-1]
+    return tail.rsplit(':', 1)[-1] if ':' in tail else ('latest' if tail else '')
+
+
 def sweep(app=None) -> List[Dict[str, Any]]:
-    """Ask every service's source for its newest tag. Blocking: background only."""
+    """What every service pins, deploys, runs towards and could move to.
+
+    Blocking: background only (one registry round per service). Every service is
+    reported, not just the ones that are behind, because the card has a second
+    question to ask of each of them: does the host run what the stack file says?
+    A service half-moved - anchor on `:latest` while the stack still pins 0.9.1 -
+    is invisible in any list filtered down to "behind upstream", and it is the
+    one a redeploy would quietly roll backwards.
+    """
     repo = Repo()
     if not repo.exists():
         with _lock:
-            _state.update(rows=[], checked=0, ts=time.time(),
+            _state.update(services=[], checked=0, ts=time.time(),
                           error='no estate checkout yet (the first update clones it)')
         return []
     try:
@@ -83,7 +106,7 @@ def sweep(app=None) -> List[Dict[str, Any]]:
         doc = render.load_intent(repo.read('wizard.yaml'))
     except (OSError, GitError) as exc:
         with _lock:
-            _state.update(rows=[], error=str(exc), ts=time.time())
+            _state.update(services=[], error=str(exc), ts=time.time())
         return []
 
     rows: List[Dict[str, Any]] = []
@@ -96,28 +119,37 @@ def sweep(app=None) -> List[Dict[str, Any]]:
         # the estate page offers a rebuild instead.
         if not name or kind == 'build' or not entry.get('source'):
             continue
-        current = str(entry.get('version') or '')
+        service = render.service_of(entry)
+        try:
+            deployed = _deployed_tag(repo.read(f'stacks/{name}/stack.yml'), service)
+        except OSError:
+            deployed = ''
+        row = {
+            'name': name,
+            'kind': kind,
+            'service': service,
+            'current': str(entry.get('version') or ''),
+            'deployed': deployed,
+            'target': '',
+            'behind': False,
+            'image': render.image_ref(entry, settings.registry()),
+            'repo': _image_repo(entry),
+            'source': entry.get('source') or '',
+        }
         try:
             newest = tags.newest_tag(entry['source'])
         except Exception as exc:              # noqa: BLE001 - one bad source must not blank the card
             problems.append(f'{name}: {exc}')
+            rows.append(row)
             continue
         checked += 1
-        if newest.get('up_to_date') or not newest.get('best'):
-            continue
-        rows.append({
-            'name': name,
-            'kind': kind,
-            'service': render.service_of(entry),
-            'current': current,
-            'target': str(newest['best']),
-            'image': render.image_ref(entry, settings.registry()),
-            'repo': _image_repo(entry),
-            'source': entry.get('source') or '',
-        })
+        if not newest.get('up_to_date') and newest.get('best'):
+            row['target'] = str(newest['best'])
+            row['behind'] = True
+        rows.append(row)
 
     with _lock:
-        _state.update(rows=oldest(rows), checked=checked, ts=time.time(),
+        _state.update(services=oldest(rows), checked=checked, ts=time.time(),
                       error='; '.join(problems[:3]))
     return rows
 

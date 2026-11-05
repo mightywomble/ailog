@@ -119,46 +119,46 @@ def _docker_updates() -> Dict[str, Any]:
     except Exception:                     # noqa: BLE001 - a sweep must not break the card
         pass
     estate_state = drift.state()
-    for row in estate_state.get('rows') or []:
-        where = running.get(str(row.get('repo') or '').lower()) or {}
-        pin = str(row.get('current') or '')
-        target = str(row.get('target') or '')
+    for svc in estate_state.get('services') or []:
+        where = running.get(str(svc.get('repo') or '').lower()) or {}
+        pin = str(svc.get('current') or '')
+        deployed = str(svc.get('deployed') or '')
+        target = str(svc.get('target') or '')
         live_tag = str(where.get('tag') or '')
         base = {
             'host_key': where.get('host_key') or '',
             'host': where.get('host') or 'estate',
-            'container': where.get('container') or row.get('service') or row.get('name') or '',
-            'service': row.get('name') or '',
-            'image': row.get('image') or '',
+            'container': where.get('container') or svc.get('service') or svc.get('name') or '',
+            'service': svc.get('name') or '',
+            'image': svc.get('image') or '',
             'containers': 1,
             'kind': 'estate',
         }
+        # The card answers "does what is *running* need attention?", so the host
+        # is asked first. git's pin is only the fallback for a service we cannot
+        # see running anywhere.
         if live_tag:
-            # The card must answer "does what is *running* need an update?", not
-            # "is git's pin behind upstream?" - anchor was moved to :latest by the
-            # old wizard while wizard.yaml still said 0.9.1, and the card kept
-            # offering an update that had already happened.
             running_ver = tags.version_of(live_tag)
             target_ver = tags.version_of(target)
             # An empty version (``:latest``, a digest) cannot be compared, and in
             # Python () < (0, 18, 0) is true - so it is excluded by hand.
             behind = bool(running_ver) and bool(target_ver) and running_ver < target_ver
+            if deployed and live_tag != deployed:
+                # Half-moved: the host runs one thing and the stack file - what
+                # the next deploy would install - pins another. anchor sat on
+                # :latest while the stack still said 0.9.1, so the next unrelated
+                # deploy of that stack would have rolled it back eight releases.
+                rows.append({**base, 'kind': 'drift', 'from': live_tag,
+                             'to': deployed, 'note': 'running, stack pins'})
+                continue
             if behind:
                 rows.append({**base, 'from': _version_label(live_tag),
                              'to': _version_label(target)})
-                continue
-            if live_tag != pin:
-                # The estate and the host disagree and neither is behind: the pin
-                # is what CI would deploy, so a redeploy would move this service
-                # to something else. That is a finding, not an update.
-                rows.append({**base, 'kind': 'drift', 'from': live_tag,
-                             'to': pin, 'note': 'running, git pins'})
             continue
-        # Nothing running to compare against (no container, or the host was
-        # never scanned): fall back to the pin, which is the best we know.
-        rows.append({**base,
-                     'from': _version_label(pin),
-                     'to': _version_label(target)})
+        if svc.get('behind') and (target or pin):
+            rows.append({**base,
+                         'from': _version_label(pin),
+                         'to': _version_label(target)})
     estate_count = len(rows)
 
     for host_key, state in cached.items():
