@@ -19,10 +19,12 @@ from estate import drift
 class FakeRepo:
     dir = '/tmp/estate'
     text = 'services: []'          # tests set this on the class before sweeping
+    stack_texts: dict = {}
     present = True
 
     def __init__(self, *_a, **_kw):
         self._text = self.text
+        self.stacks = self.stack_texts
 
     def exists(self):
         return self.present
@@ -33,7 +35,7 @@ class FakeRepo:
     def read(self, rel):
         if rel == 'wizard.yaml':
             return self._text
-        return ''
+        return self.stacks.get(rel, '')
 
     def head(self):
         return 'deadbee'
@@ -64,7 +66,7 @@ services:
 """
 
 
-def test_only_the_services_that_are_behind_are_reported(monkeypatch):
+def test_every_service_is_resolved_and_only_the_ones_behind_say_so(monkeypatch):
     calls = {}
 
     def newest_tag(image, limit=100):
@@ -76,16 +78,28 @@ def test_only_the_services_that_are_behind_are_reported(monkeypatch):
         raise RuntimeError('registry said 502')
 
     FakeRepo.text = WIZARD
+    FakeRepo.stack_texts = {
+        'stacks/anchor/stack.yml': 'services:\n  anchor:\n    image: zot.safehomelan.com/anchor:0.9.1\n',
+        'stacks/dozzle/stack.yml': 'services:\n  dozzle:\n    image: zot.safehomelan.com/dozzle:9.0.0\n',
+    }
     monkeypatch.setattr(drift, 'Repo', FakeRepo)
     monkeypatch.setattr(drift.tags, 'newest_tag', newest_tag)
 
     rows = drift.sweep()
+    by_name = {r['name']: r for r in rows}
 
-    assert [r['name'] for r in rows] == ['anchor']
-    assert (rows[0]['current'], rows[0]['target']) == ('0.9.1', '0.17.2')
-    assert rows[0]['repo'] == 'anchor'
+    assert by_name['anchor']['behind'] is True
+    assert (by_name['anchor']['current'], by_name['anchor']['target']) == ('0.9.1', '0.17.2')
+    assert by_name['anchor']['deployed'] == '0.9.1'
+    assert by_name['anchor']['repo'] == 'anchor'
+    # up to date: reported (the card still asks whether the host agrees) but not behind
+    assert by_name['dozzle']['behind'] is False
+    assert by_name['dozzle']['target'] == ''
     # a build app has no version to resolve - it is a rebuild, not a bump
+    assert 'ailog-mcp' not in by_name
     assert calls and not any('mcp' in str(k) for k in calls)
+    # rows (what the estate page shows as "behind") keeps only the ones that are
+    assert [r['name'] for r in drift.state()['rows']] == ['anchor']
 
 
 def test_one_unreadable_source_does_not_blank_the_card(monkeypatch):
@@ -101,7 +115,9 @@ def test_one_unreadable_source_does_not_blank_the_card(monkeypatch):
 
     rows = drift.sweep()
 
-    assert [r['name'] for r in rows] == ['anchor']
+    by_name = {r['name']: r for r in rows}
+    assert by_name['anchor']['behind'] is True
+    assert by_name['dozzle']['behind'] is False   # it gave up; it is not "newest"
     assert 'timed out' in drift.state()['error']
 
 
@@ -146,8 +162,9 @@ def test_the_card_puts_estate_drift_first_and_resolves_its_host(ctx, monkeypatch
     monkeypatch.setattr('dockermon.endpoints.resolve_host',
                         lambda key: {'friendly_name': 'swarm-worker4'} if key == 'db-15' else None)
     monkeypatch.setattr(drift, 'refresh_async', lambda app: False)
-    monkeypatch.setattr(drift, 'state', lambda: {'rows': [{
+    monkeypatch.setattr(drift, 'state', lambda: {'services': [{
         'name': 'anchor', 'service': 'anchor', 'current': '0.9.1', 'target': '0.17.2',
+        'deployed': '0.9.1', 'behind': True,
         'image': 'zot.safehomelan.com/anchor:0.9.1', 'repo': 'anchor'}], 'checked': 14, 'error': ''})
 
     out = overview_routes._docker_updates()
@@ -179,8 +196,9 @@ def test_a_running_container_wins_over_a_shutdown_one_on_another_node(ctx, monke
     monkeypatch.setattr('dockermon.endpoints.all_host_keys', lambda: [])
     monkeypatch.setattr('dockermon.endpoints.resolve_host', lambda key: {'friendly_name': key})
     monkeypatch.setattr(drift, 'refresh_async', lambda app: False)
-    monkeypatch.setattr(drift, 'state', lambda: {'rows': [{
+    monkeypatch.setattr(drift, 'state', lambda: {'services': [{
         'name': 'anchor', 'service': 'anchor', 'current': '0.9.1', 'target': '0.18.0',
+        'deployed': '0.9.1', 'behind': True,
         'image': 'zot.safehomelan.com/anchor:0.9.1', 'repo': 'anchor'}], 'error': ''})
 
     row = overview_routes._docker_updates()['rows'][0]
@@ -199,15 +217,16 @@ def _card_with(ctx, monkeypatch, running_image, pin='0.9.1', target='0.18.0'):
     monkeypatch.setattr('dockermon.endpoints.all_host_keys', lambda: [])
     monkeypatch.setattr('dockermon.endpoints.resolve_host', lambda key: {'friendly_name': key})
     monkeypatch.setattr(drift, 'refresh_async', lambda app, force=False: False)
-    monkeypatch.setattr(drift, 'state', lambda: {'rows': [{
+    monkeypatch.setattr(drift, 'state', lambda: {'services': [{
         'name': 'anchor', 'service': 'anchor', 'current': pin, 'target': target,
+        'deployed': pin, 'behind': True,
         'image': f'zot.safehomelan.com/anchor:{pin}', 'repo': 'anchor'}], 'error': ''})
     return overview_routes._docker_updates()
 
 
 def test_a_container_already_on_the_newest_release_is_not_an_update(ctx, monkeypatch):
-    """Updated by the old wizard to :latest (= 0.18.0) while git still pinned 0.9.1:
-    the card kept offering an update that had already happened."""
+    """Updated to :latest (= 0.18.0) while the stack still pinned 0.9.1: the card kept
+    offering an update that had already happened - and a redeploy would undo it."""
     out = _card_with(ctx, monkeypatch, 'zot.safehomelan.com/anchor:latest@sha256:abc')
 
     assert out['estate'] == 0
@@ -215,7 +234,7 @@ def test_a_container_already_on_the_newest_release_is_not_an_update(ctx, monkeyp
     assert kinds == ['drift']           # still worth saying, but not as an update
     row = out['rows'][0]
     assert (row['from'], row['to']) == ('latest', '0.9.1')
-    assert row['note'] == 'running, git pins'
+    assert row['note'] == 'running, stack pins'
 
 
 def test_a_container_on_the_target_version_is_silent_when_git_agrees(ctx, monkeypatch):
@@ -232,11 +251,22 @@ def test_a_container_behind_reports_what_it_actually_runs(ctx, monkeypatch):
 
 
 def test_the_running_tag_is_compared_not_the_pin(ctx, monkeypatch):
-    """git pins 0.9.1, the host runs 0.17.0, upstream has 0.18.0: the card must say
-    0.17.0 -> 0.18.0, because that is what would actually change."""
-    out = _card_with(ctx, monkeypatch, 'zot.safehomelan.com/anchor:0.17.0')
+    """The card says what would actually change: the running version, not git's pin."""
+    out = _card_with(ctx, monkeypatch, 'zot.safehomelan.com/anchor:0.17.0',
+                     pin='0.17.0', target='0.18.0')
     row = out['rows'][0]
     assert (row['kind'], row['from'], row['to']) == ('estate', 'v0.17.0', 'v0.18.0')
+
+
+def test_a_half_moved_service_is_reported_as_drift_not_as_an_update(ctx, monkeypatch):
+    """anchor ran :latest while wizard.yaml/stack pinned 0.9.1. Nothing is "newer",
+    but the next deploy of that stack would roll the service back eight releases."""
+    out = _card_with(ctx, monkeypatch, 'zot.safehomelan.com/anchor:0.17.0',
+                     pin='0.9.1', target='0.18.0')
+    row = out['rows'][0]
+    assert row['kind'] == 'drift'
+    assert (row['from'], row['to'], row['note']) == ('0.17.0', '0.9.1', 'running, stack pins')
+    assert out['estate'] == 0 and out['drift'] == 1
 
 
 def test_a_version_that_already_says_v_does_not_say_vv(ctx, monkeypatch):
@@ -246,8 +276,9 @@ def test_a_version_that_already_says_v_does_not_say_vv(ctx, monkeypatch):
     monkeypatch.setattr(dupdates, 'all_state', lambda: {})
     monkeypatch.setattr('dockermon.endpoints.all_host_keys', lambda: [])
     monkeypatch.setattr(drift, 'refresh_async', lambda app: False)
-    monkeypatch.setattr(drift, 'state', lambda: {'rows': [{
+    monkeypatch.setattr(drift, 'state', lambda: {'services': [{
         'name': 'dozzle', 'service': 'dozzle', 'current': 'v11.4.0', 'target': 'v11.4.1',
+        'deployed': 'v11.4.0', 'behind': True,
         'image': 'zot.safehomelan.com/dozzle:v11.4.1', 'repo': 'dozzle'}], 'error': ''})
 
     row = overview_routes._docker_updates()['rows'][0]
@@ -262,8 +293,9 @@ def test_an_estate_service_running_nowhere_still_appears(ctx, monkeypatch):
     monkeypatch.setattr(dupdates, 'all_state', lambda: {})
     monkeypatch.setattr('dockermon.endpoints.all_host_keys', lambda: [])
     monkeypatch.setattr(drift, 'refresh_async', lambda app: False)
-    monkeypatch.setattr(drift, 'state', lambda: {'rows': [{
+    monkeypatch.setattr(drift, 'state', lambda: {'services': [{
         'name': 'vikunja', 'service': 'vikunja', 'current': '2.7.1', 'target': '3.0.0',
+        'deployed': '2.7.1', 'behind': True,
         'image': 'zot.safehomelan.com/vikunja:2.7.1', 'repo': 'vikunja'}], 'error': ''})
 
     row = overview_routes._docker_updates()['rows'][0]
