@@ -374,13 +374,16 @@ def perform(name: str, sink: Sink, version: str = '') -> dict:
                f'Moved by ailog from the Docker view, for {name!r} only. '
                f'wizard.yaml, the stack image and the mirror entry in one commit so '
                f'mirror.yml and ship.yml see the same version.')
+    # One bullet per thing that happened: the step is opened with what it is
+    # about and closed with what it did, rather than leaving a dangling line.
     sink.step(f'commit {name} {current} -> {target}')
     result = repo.apply(edit, message)
     if not result['changed']:
         sink.step('nothing to commit', ok=True, detail='the estate already matches')
         sink.progress(100)
         return {'changed': [], 'name': name, 'target': target}
-    sink.step('commit', ok=True, detail=', '.join(result['changed']))
+    sink.step(f'commit {name} {current} -> {target}', ok=True,
+              detail=', '.join(result['changed']))
     sink.progress(30)
 
     forge = forge_mod.Forge()

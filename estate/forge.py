@@ -142,14 +142,30 @@ class Forge:
             r = self.http.post(f'{self.api}{self.path}/pulls/{index}/merge',
                                json={'Do': 'merge', 'delete_branch_after_merge': False},
                                timeout=60)
-            if r.status_code in (200, 201):
-                return {'merged': True, 'attempts': attempt + 1, 'sha': (r.json() or {}).get('merge_commit_sha', '')}
+            if r.status_code in (200, 201, 204):
+                # Gitea answers a merge with an empty body often enough that
+                # reading it as JSON raised after the merge had already landed -
+                # the run died on a successful deploy.  Ask the PR when the body
+                # says nothing.
+                body: dict = {}
+                try:
+                    body = r.json() or {}
+                except ValueError:
+                    body = {}
+                sha = str(body.get('merge_commit_sha') or '')
+                if not sha:
+                    sha = str(self.pr(index).get('merge_commit_sha') or '')
+                return {'merged': True, 'attempts': attempt + 1, 'sha': sha}
             last = f'{r.status_code} {r.text[:160]}'
-            if attempt >= 1:
-                pr = self.pr(index)
-                if pr.get('mergeable') is False:
-                    raise ForgeError(f'PR #{index} conflicts with {settings.base_branch()} '
-                                     f'- resolve it on {settings.work_branch()} and run again')
+            # A merge that Gitea reports as refused may still have happened
+            # (a retry, or a second caller): look before deciding it failed.
+            pr = self.pr(index)
+            if pr.get('merged'):
+                return {'merged': True, 'attempts': attempt + 1,
+                        'sha': str(pr.get('merge_commit_sha') or '')}
+            if attempt >= 1 and pr.get('mergeable') is False:
+                raise ForgeError(f'PR #{index} conflicts with {settings.base_branch()} '
+                                 f'- resolve it on {settings.work_branch()} and run again')
             time.sleep(delay)
             delay = min(delay * 2, 8.0)
         raise ForgeError(f'merge PR #{index} after {attempts} attempts: {last}')
