@@ -158,13 +158,30 @@ def _secret(name: str) -> str:
     return ''
 
 
+def _private_hosts() -> set[str]:
+    """The registries we hold credentials for, and only those.
+
+    Defaults to the estate's own registry.  ``AILOG_REGISTRY_HOSTS`` overrides it
+    as a comma-separated list for an install that has more than one.
+    """
+    raw = (os.environ.get('AILOG_REGISTRY_HOSTS')
+           or os.environ.get('AILOG_REGISTRY_HOST')
+           or 'zot.safehomelan.com')
+    return {part.strip().lower() for part in raw.split(',') if part.strip()}
+
+
 def _registry_credentials(host: str) -> tuple[str, str] | None:
-    """Basic credentials for a private registry.
+    """Basic credentials for *our* registry, and nobody else's.
 
     zot answers ``Basic realm="zot"``: without credentials every query looks
     like "image does not exist" (HTTP 401), and most of this estate's images
-    live in zot.
+    live in zot.  But the same credentials must never leave for another
+    registry: sending them to ghcr.io gets a 403 (which is how the Nextcloud AIO
+    images stopped being checkable) and hands a third party the zot password for
+    nothing.
     """
+    if (host or '').strip().lower() not in _private_hosts():
+        return None
     user = (_secret('AILOG_REGISTRY_USER') or _secret('ZOT_USER'))
     pwd = (_secret('AILOG_REGISTRY_PASSWORD') or _secret('ZOT_PASSWORD'))
     if user and pwd:
