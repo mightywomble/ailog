@@ -55,7 +55,7 @@
     },
     {
       "name": "dozzle",
-      "source": "docker.io/amir20/dozzle:v11.4.0"
+      "source": "docker.io/amir20/dozzle:v11.4.1"
     },
     {
       "name": "vikunja",
