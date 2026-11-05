@@ -96,6 +96,11 @@ def host_protected(host) -> bool:
 
 
 def _window_matches(window, now: datetime.datetime, host) -> bool:
+    """Minute granular, half-open: ``start <= minute < end``.
+
+    So '00:00'-'23:59' does *not* cover 23:59:30 - use '00:00'-'00:00' for the
+    whole day, which the ``start == end`` branch below treats as always matching.
+    """
     if not window.enabled:
         return False
     if window.group_id and not any(g.id == window.group_id for g in getattr(host, 'groups', []) or []):

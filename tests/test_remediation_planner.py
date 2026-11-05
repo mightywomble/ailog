@@ -144,9 +144,12 @@ def test_an_offline_host_is_never_eligible(models, db, host):
 
 def test_a_block_window_makes_the_host_ineligible(models, db, host):
     from database import RemediationWindow, db as db_handle
+    # Whole day as `start == end`.  '00:00'-'23:59' leaves the last minute of the
+    # day outside the window, and this test uses the real clock - it failed CI at
+    # 23:59:56 UTC for exactly that reason.
     db_handle.session.add(RemediationWindow(
         name='nightly', days='1,2,3,4,5,6,7', start_time='00:00',
-        end_time='23:59', timezone='UTC', mode='block', enabled=True))
+        end_time='00:00', timezone='UTC', mode='block', enabled=True))
     db_handle.session.commit()
     rows = planner.resolve(models, 's', 'host', host, None)
     assert rows[0]['eligible'] is False
@@ -157,7 +160,7 @@ def test_a_warn_window_leaves_the_host_eligible(models, db, host):
     from database import RemediationWindow, db as db_handle
     db_handle.session.add(RemediationWindow(
         name='soft', days='1,2,3,4,5,6,7', start_time='00:00',
-        end_time='23:59', timezone='UTC', mode='warn', enabled=True))
+        end_time='00:00', timezone='UTC', mode='warn', enabled=True))
     db_handle.session.commit()
     rows = planner.resolve(models, 's', 'host', host, None)
     assert rows[0]['eligible'] is True

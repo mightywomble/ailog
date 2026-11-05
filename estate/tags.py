@@ -71,15 +71,28 @@ def _bearer(repo: str, realm: str, service: str, timeout: int = 20) -> str:
 
 def _hub_tags(repo: str, limit: int, timeout: int) -> list[str]:
     """Docker Hub has a tag API sorted by last_updated; /v2/tags/list is
-    lexicographic, so 'nginx' would come back at 1.11.x."""
-    r = requests.get(f'https://hub.docker.com/v2/repositories/{repo}/tags',
-                     params={'page_size': min(limit, 100), 'ordering': 'last_updated'},
-                     timeout=timeout)
-    if r.status_code == 404:
-        raise TagError(f'{repo} is not in docker.io')
-    r.raise_for_status()
-    return [t['name'] for t in (r.json() or {}).get('results', [])
-            if t.get('name') and not t['name'].startswith('sha256-')]
+    lexicographic, so 'nginx' would come back at 1.11.x.
+
+    One page is not enough: `wordpress:7.1.4` was pushed before the 7.1.4
+    packaging variants that fill the next 100 rows by last_updated, so the plain
+    tag - the one this estate actually runs - was invisible and the newest
+    flavour won by default.  Walk a few pages instead.
+    """
+    want = max(limit, 300)
+    tags: list[str] = []
+    for page in range(1, 5):
+        r = requests.get(f'https://hub.docker.com/v2/repositories/{repo}/tags',
+                         params={'page_size': 100, 'page': page, 'ordering': 'last_updated'},
+                         timeout=timeout)
+        if r.status_code == 404:
+            raise TagError(f'{repo} is not in docker.io')
+        r.raise_for_status()
+        results = (r.json() or {}).get('results') or []
+        tags += [t['name'] for t in results
+                 if t.get('name') and not t['name'].startswith('sha256-')]
+        if len(results) < 100 or len(tags) >= want:
+            break
+    return tags[:want]
 
 
 def list_tags(image: str, limit: int = 80, timeout: int = 25) -> dict:
@@ -185,6 +198,18 @@ def _version_key(tag: str):
     return out
 
 
+def _ver(tag: str) -> tuple:
+    """The leading version as comparable numbers: '7.1.4-php8.5-fpm' -> (7, 1, 4).
+
+    Everything after it is packaging, and packaging numbers must not count as
+    version numbers - '7.1.4-php8.5-fpm' is not newer than '7.1.4'.
+    """
+    m = re.match(r'^[^\d]*(\d+(?:[._]\d+)*)', tag or '')
+    if not m:
+        return ()
+    return tuple(int(n) for n in re.split(r'[._]', m.group(1)))
+
+
 def _major(tag: str) -> str:
     m = re.search(r'\d+', tag or '')
     return m.group(0) if m else ''
@@ -228,13 +253,11 @@ def newest_tag(image: str, limit: int = 100) -> dict:
         # highest version wins; on a tie prefer the packaging already in use,
         # then the plainest tag ("1.31.8" over "1.31.8-trixie-perl").  Only the
         # leading version counts: "1.31.8-alpine3.24" is 1.31.8.
-        m = re.match(r'^[^\d]*(\d+(?:[._]\d+)*)', t)
-        ver = tuple(int(n) for n in re.split(r'[._]', m.group(1))) if m else ()
-        return (ver, 1 if _variant(t) == _variant(current) else 0, -len(t))
+        return (_ver(t), 1 if _variant(t) == _variant(current) else 0, -len(t))
 
     pool.sort(key=rank, reverse=True)
     best = pool[0]
-    up_to_date = bool(current) and is_version_tag(current) and _version_key(current) >= _version_key(best)
+    up_to_date = bool(current) and is_version_tag(current) and _ver(current) >= _ver(best)
     return {'tag': current if up_to_date else best,
             'best': best, 'current': current, 'up_to_date': up_to_date,
             'host': listed['host'], 'repo': listed['repo'],
