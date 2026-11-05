@@ -1,0 +1,22 @@
+<!-- The estate, framed. /estate is a page like /docker/<host>: it polls, it has
+     its own table and its own progress, and it is read-mostly, so it belongs in
+     the same dialog family as the Docker view rather than inlined here.
+
+     Why a page at all: the update path for a swarm service is a commit and a CI
+     run, and the interesting part is not a shell command but which tag git is
+     moving to and how far the run has got. That needs room. -->
+<!-- The estate: wizard.yaml, drift, and the update that goes through CI. It is a
+     page (/estate) framed like the Docker view, because it is the same kind of
+     thing - a document that polls, not a dialog with a form. -->
+<div id="estateModal" class="app-modal hidden">
+  <div class="app-modal-panel app-modal-xl">
+    <div class="app-modal-head">
+      <div class="app-modal-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="text-amber-300"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7l8-4 8 4v10l-8 4-8-4V7zm0 0l8 4m8-4l-8 4m0 0v10"/></svg>
+        <span id="estateModalTitle" class="truncate">The estate</span>
+      </div>
+      <button id="estateModalClose" type="button" class="app-modal-close" data-modal-close>Close</button>
+    </div>
+    <iframe id="estateModalFrame" class="flex-1 w-full"
+            src="about:blank" referrerpolicy="no-referrer" title="The estate"></iframe>
+  </div>
+</div>

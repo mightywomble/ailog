@@ -3568,7 +3568,11 @@ const showHostInfoMain = async () => {
                                     class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">
                                 Add a container…
                             </button>
-                            <p class="text-[11px] termix-muted">Updates run here, on the container you picked. New services go through the homelab wizard (wizard.yaml → build → swarm deploy).</p>
+                            <button id="docker-estate-btn" type="button"
+                                    class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">
+                                The estate…
+                            </button>
+                            <p class="text-[11px] termix-muted">Updates run here, on the container you picked. Swarm services the estate owns go through CI — open the estate to see what git pins, what is drifting, and to move one forward.</p>
                         </div>
                         <div class="xl:col-span-2 p-3 rounded-lg bg-white/5 border border-white/10" id="docker-fleet">
                             <div class="text-xs termix-muted">Loading docker fleet usage…</div>
@@ -3650,6 +3654,16 @@ const showHostInfoMain = async () => {
 
             document.getElementById('docker-add-btn')?.addEventListener('click', () => {
                 openWizard(wizardLink('new', { host: hostName, host_key: hostId }), `${hostName} · new service`);
+            });
+
+            // The estate owns the swarm's intent; the Docker pane only ever sees
+            // the result. One click from a host's pane to the whole picture.
+            document.getElementById('docker-estate-btn')?.addEventListener('click', () => {
+                if (typeof window.openEstateModal === 'function') {
+                    window.openEstateModal();
+                } else {
+                    window.open('/estate?embed=1', '_blank', 'noopener');
+                }
             });
 
             // One delegated listener: the update list is re-rendered on every poll,

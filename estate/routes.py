@@ -9,17 +9,24 @@ a request must not sit on a build for ten minutes:
     GET  /api/estate/services/<name>       one service, with ?check=1 for upstream
     POST /api/estate/update                start the bump (needs confirm)
     GET  /api/estate/jobs/<id>             steps, progress, log
+    GET  /estate                           the page that shows all of it
 """
 
 from __future__ import annotations
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 from . import render, settings
 from . import update as estupdate
 from .git import GitError, Repo
 
 estate_bp = Blueprint('estate', __name__)
+
+
+@estate_bp.get('/estate')
+def estate_page():
+    """The estate view: intent, drift, and the one click that moves a service."""
+    return render_template('estate.html')
 
 
 def _fail(exc, status: int = 502):
@@ -65,15 +72,29 @@ def api_services():
     rows = []
     for entry in doc.get('services') or []:
         stack_rel = f'stacks/{entry.get("name")}/stack.yml'
+        kind = entry.get('kind')
+        release = entry.get('release') or ''
+        if kind == 'build' and release != 'manual':
+            # a build app has no version to resolve; "supported" means the estate
+            # knows what source to rebuild (apps/<name>/Dockerfile or build.json)
+            supported = estupdate.can_rebuild(repo, entry.get('name') or '')
+            source = estupdate.build_source(repo, entry.get('name') or '')
+            action = 'rebuild'
+        else:
+            supported = kind in ('mirror', 'image') and bool(entry.get('source'))
+            source = entry.get('source') or ''
+            action = 'bump'
         rows.append({
             'name': entry.get('name'),
-            'kind': entry.get('kind'),
+            'kind': kind,
+            'release': release,
+            'action': action,
             'version': entry.get('version'),
-            'source': entry.get('source') or '',
+            'source': source,
             'image': render.image_ref(entry, settings.registry()),
             'url': entry.get('url') or '',
             'drift': render.drift(entry, repo.read(stack_rel)),
-            'supported': (entry.get('kind') in ('mirror', 'image') and bool(entry.get('source'))),
+            'supported': supported,
         })
     return jsonify({'success': True, 'services': rows, 'head': repo.head(),
                     'mode': settings.mode()})

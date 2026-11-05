@@ -310,7 +310,7 @@ def frozen(monkeypatch, tmp_path):
             self.merged = []
 
         def find_run(self, workflow, sha='', newer_than=0, timeout=120, cancel=None):
-            return {'id': 4242, 'path': workflow}
+            return {'id': 4242, 'path': workflow, 'run_number': 141}
 
         def create_pr(self, title, head, base='', body=''):
             self.created.append({'title': title, 'head': head, 'base': base, 'body': body})
@@ -372,13 +372,87 @@ def test_the_pr_is_scoped_to_the_one_service(frozen):
     assert 'only the `dozzle` stack' in pr['body']
 
 
-def test_a_build_kind_service_is_refused_rather_than_pinned_to_nothing(frozen):
+def test_a_build_app_with_nothing_to_build_is_refused(frozen):
+    """apps/ingest is not in this fake tree, so there is no source to compile."""
     sink = RecordingSink()
     with pytest.raises(frozen['update'].EstateError) as excinfo:
         frozen['update'].perform('ingest', sink)
-    assert 'built from source' in str(excinfo.value)
+    assert 'nothing the estate knows how to build' in str(excinfo.value)
     # nothing was written, and nothing was pushed
     assert frozen['tree']['wizard.yaml'] == WIZARD
+
+
+def test_a_manually_released_build_app_is_still_refused(frozen):
+    """A hand-pushed version tag has no source-to-build mapping to follow."""
+    from estate import render
+    doc = render.load_intent(frozen['tree']['wizard.yaml'])
+    entry = render.find_service(doc, 'ingest')
+    entry['release'] = 'manual'
+    frozen['tree']['wizard.yaml'] = render.dump_intent(doc)
+    with pytest.raises(frozen['update'].EstateError) as excinfo:
+        frozen['update'].perform('ingest', RecordingSink())
+    assert 'release: manual' in str(excinfo.value)
+
+
+def test_a_build_app_is_rebuilt_through_ci_and_then_pinned(frozen):
+    """Phase 2: the app is rebuilt from source, smoke tested on dev, deployed by
+    ship.yml, and the tag that run produced is pinned afterwards so a later stack
+    deploy cannot fall back to the previous build."""
+    tree = frozen['tree']
+    tree['apps/ingest/Dockerfile'] = 'FROM python:3.12-slim\n'
+    tree['stacks/ingest/stack.yml'] = (
+        'services:\n  ingest:\n    image: zot.safehomelan.com/ingest:'
+        '${IMAGE_TAG:-build-120}\n')
+    sink = RecordingSink()
+    result = frozen['update'].perform('ingest', sink)
+
+    # a request, not a version bump: the app directory is what CI watches
+    request = json.loads(tree['apps/ingest/BUILD_REQUEST.json'])
+    assert request['app'] == 'ingest' and request['requested_at']
+    assert request['replaces'] == 'build-120'
+    # it went to dev first: build.yml is the gate, and merging is what deploys
+    assert frozen['forge'].created[0]['head'] == 'dev'
+    assert frozen['forge'].created[0]['base'] == 'main'
+    assert 'rebuild from source' in frozen['forge'].created[0]['title']
+    assert frozen['forge'].merged[0] == 7
+    # the tag ship.yml reported is now what git pins
+    entry = frozen['update'].render.find_service(
+        frozen['update'].render.load_intent(tree['wizard.yaml']), 'ingest')
+    assert entry['version'] == 'build-141'
+    assert '${IMAGE_TAG:-build-141}' in tree['stacks/ingest/stack.yml']
+    assert result['tag'] == 'build-141' and result['pinned'] is True
+    # a second PR carries the pin
+    assert [pr['title'] for pr in frozen['forge'].created][1].startswith('ingest: pin build-141')
+    # and the bar runs to the end
+    assert max(sink.progress_values) == 100
+
+
+def test_a_build_plan_says_rebuild_and_names_the_source(frozen):
+    frozen['tree']['apps/ingest/Dockerfile'] = 'FROM python:3.12-slim\n'
+    plan = frozen['update'].plan('ingest')
+    assert plan['action'] == 'rebuild' and plan['supported'] is True
+    assert 'apps/ingest' in plan['upstream'] or 'ingest' in plan['upstream']
+    assert any('build.yml' in step for step in plan['steps'])
+    assert any('pin' in step for step in plan['steps'])
+
+
+def test_the_build_path_is_dry_run_safe(frozen, monkeypatch):
+    frozen['tree']['apps/ingest/Dockerfile'] = 'FROM python:3.12-slim\n'
+    monkeypatch.setenv('AILOG_ALLOW_ESTATE', 'plan')
+    sink = RecordingSink()
+    result = frozen['update'].perform('ingest', sink)
+    assert result['dry_run'] is True
+    assert 'apps/ingest/BUILD_REQUEST.json' not in frozen['tree']
+    assert frozen['forge'].created == []
+
+
+def test_a_build_app_whose_branch_build_fails_is_not_merged(frozen, monkeypatch):
+    frozen['tree']['apps/ingest/Dockerfile'] = 'FROM python:3.12-slim\n'
+    monkeypatch.setattr(frozen['update'], '_watch_run', lambda *a, **k: (False, 'failure'))
+    with pytest.raises(frozen['update'].EstateError) as excinfo:
+        frozen['update'].perform('ingest', RecordingSink())
+    assert 'nothing was merged' in str(excinfo.value)
+    assert frozen['forge'].merged == []
 
 
 def test_an_up_to_date_service_stops_before_touching_git(frozen, monkeypatch):

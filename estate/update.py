@@ -14,10 +14,19 @@ hold the zot credentials and the manager socket.  AILog's contribution is the
 judgement (which tag, which files) and the visibility (steps, progress, the
 run's own log).
 
-Build-kind services are refused on purpose: their tag comes from a CI build of
-`apps/<name>`, so a version bump with no source change would point the stack at
-an image that does not exist - the failure mode that once took a whole stack
-down with `build-37: not found`.
+Build-kind services take a different road to the same place.  Their tag is not a
+version anyone can look up - it is `build-<run>`, produced by the release job - so
+there is nothing to resolve and nothing to mirror.  What "update" means for them
+is "rebuild `apps/<name>` from its source and roll the service onto that build",
+so the pipeline writes a build request into the app directory (which is what makes
+`build.yml` and `ship.yml` see the app as changed), waits for `build.yml` to build
+and smoke test it on `dev`, merges the PR, and lets `ship.yml` build, push and
+deploy.  Only afterwards, when the new tag exists, is the pinned `build-<n>` in
+wizard.yaml and the stack corrected to it - a stale pin is how a later, unrelated
+`docker stack deploy` quietly rolls a service back to an old build.
+
+`release: manual` services are still refused: a hand-pushed version tag has no
+source-to-build mapping the estate could follow.
 """
 
 from __future__ import annotations
@@ -38,6 +47,9 @@ BUILD_WF = 'build.yml'
 
 PULL_TIMEOUT = 180
 JOB_TTL = 3600
+
+# Written into apps/<name>/ so the estate's own CI treats the app as changed.
+BUILD_MARKER = 'BUILD_REQUEST.json'
 
 
 class EstateError(RuntimeError):
@@ -144,9 +156,73 @@ def _prune() -> None:
             _jobs.pop(key, None)
 
 
+
+# --------------------------------------------------------------------------
+# build-kind apps (apps/<name> in the estate repo, built by CI)
+# --------------------------------------------------------------------------
+
+def app_dir(name: str) -> str:
+    return f'apps/{name}'
+
+
+def build_spec(repo: Repo, name: str) -> dict:
+    """apps/<name>/build.json when the app builds external source, else {}."""
+    raw = repo.read(f'{app_dir(name)}/build.json', '')
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw) or {}
+    except ValueError:
+        return {}
+
+
+def can_rebuild(repo: Repo, name: str) -> bool:
+    return bool(build_spec(repo, name) or repo.read(f'{app_dir(name)}/Dockerfile', ''))
+
+
+def build_source(repo: Repo, name: str) -> str:
+    """What a rebuild would compile: an external clone, or apps/<name> itself."""
+    spec = build_spec(repo, name)
+    if spec.get('source'):
+        return f'{spec["source"]}@{spec.get("ref") or "main"}'
+    return f'apps/{name} in {settings.owner()}/{settings.name()}'
+
+
+def build_image(entry: dict) -> str:
+    """The image the stack resolves to, with the CI tag left as a placeholder."""
+    return render.image_ref(entry, settings.registry())
+
+
 # --------------------------------------------------------------------------
 # planning (read-only, safe to call from a page render)
 # --------------------------------------------------------------------------
+
+def _plan_build(repo: Repo, entry: dict, out: dict) -> dict:
+    """A build app has no version to resolve: the update is a rebuild."""
+    name = entry.get('name') or out['name']
+    stack_rel = out['stack']
+    out['action'] = 'rebuild'
+    out['upstream'] = build_source(repo, name)
+    out['supported'] = can_rebuild(repo, name)
+    out['target'] = 'the current source'
+    out['files'] = [f'{app_dir(name)}/{BUILD_MARKER}', 'wizard.yaml', stack_rel]
+    # A build app is always "behind": its image is a snapshot of the source, and
+    # the source may have moved since.  Saying up_to_date would be a guess.
+    out['up_to_date'] = False
+    out['steps'] = [
+        f'git reset --hard origin/{settings.work_branch()} in {repo.dir}',
+        f'{app_dir(name)}/{BUILD_MARKER}: ask CI to rebuild {out["upstream"]}',
+        'git commit + push origin ' + settings.work_branch(),
+        f'wait for {BUILD_WF.split("/")[-1]} to build and smoke test the image',
+        f'open PR {settings.work_branch()} -> {settings.base_branch()} and merge it',
+        f'wait for {SHIP_WF.split("/")[-1]} to build, push and deploy the stack',
+        'pin the new build tag in wizard.yaml and the stack',
+    ]
+    if not out['supported']:
+        out['reason'] = (f'{name} has no apps/{name}/Dockerfile or build.json, so there is '
+                         f'nothing the estate knows how to build')
+    return out
+
 
 def plan(name: str, version: str = '') -> dict:
     """What an update of ``name`` would do, without touching anything."""
@@ -178,13 +254,13 @@ def plan(name: str, version: str = '') -> dict:
         'files': ['wizard.yaml', stack_rel],
         'steps': [],
     }
+    if kind == 'build' and entry.get('release') != 'manual':
+        return _plan_build(repo, entry, out)
+
     if not out['supported']:
-        if kind == 'build' and entry.get('release') == 'manual':
+        if kind == 'build':
             out['reason'] = (f'{name} is built from source and pinned by hand under a version tag '
                              f'(release: manual) - bump it deliberately rather than by a tag scan')
-        elif kind == 'build':
-            out['reason'] = (f'built from source in this repo: its tag comes from a CI build of '
-                             f'apps/{name}, so the estate path leaves it alone')
         else:
             out['reason'] = 'a mirrored service needs an upstream source in wizard.yaml'
         return out
@@ -294,13 +370,11 @@ def perform(name: str, sink: Sink, version: str = '') -> dict:
     if problems:
         raise EstateError('; '.join(problems))
     if entry.get('kind') == 'build':
-        raise EstateError(
-            f'{name} is built from source and pinned under a version tag by hand '
-            f'(release: manual): a tag scan cannot know which build to move to.'
-            if entry.get('release') == 'manual' else
-            f'{name} is built from source in this repo: its tag comes from a CI build of '
-            f'apps/{name}, so a version bump would point the stack at an image that does '
-            f'not exist. Release it by merging the app change.')
+        if entry.get('release') == 'manual':
+            raise EstateError(
+                f'{name} is built from source and pinned under a version tag by hand '
+                f'(release: manual): a tag scan cannot know which build to move to.')
+        return _perform_build(repo, entry, name, sink)
     source = entry.get('source') or ''
     if not source:
         raise EstateError(f'{name} has no upstream source in wizard.yaml')
@@ -427,6 +501,178 @@ def perform(name: str, sink: Sink, version: str = '') -> dict:
     sink.progress(100)
     return {'name': name, 'current': current, 'target': target, 'pr': pr['number'],
             'run': run.get('id'), 'sha': merged.get('sha') or ''}
+
+
+def _perform_build(repo: Repo, entry: dict, name: str, sink: Sink, version: str = '') -> dict:
+    """Rebuild apps/<name> through CI, then pin the tag CI produced.
+
+    Three CI runs' worth of work, and every one of them is a gate: `build.yml`
+    compiles and smoke tests on the branch, `ship.yml` builds, pushes and deploys
+    the stack, and the pin commit afterwards makes the estate's recorded version
+    agree with what is actually running.
+    """
+    app = app_dir(name)
+    if not can_rebuild(repo, name):
+        raise EstateError(f'{name} has no {app}/Dockerfile or build.json, so there is nothing '
+                          f'the estate knows how to build')
+    spec = build_spec(repo, name)
+    current = str(entry.get('version') or '')
+    source = build_source(repo, name)
+    sink.progress(8)
+    sink.step('rebuild from source', detail=source)
+
+    if settings.dry_run():
+        sink.step('rebuild from source', ok=True, detail='(dry run)')
+        sink.log('(dry run - AILOG_ALLOW_ESTATE is not "on")')
+        sink.log(f'would write {app}/{BUILD_MARKER} asking CI to rebuild {source}')
+        sink.log(f'would push {settings.work_branch()}, wait for {BUILD_WF}, open a PR to '
+                 f'{settings.base_branch()}, merge it and wait for {SHIP_WF}')
+        sink.log('would then pin the build tag CI produced in wizard.yaml and the stack')
+        sink.progress(100)
+        return {'dry_run': True, 'name': name, 'action': 'rebuild', 'current': current}
+
+    requested = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    payload = {
+        'requested_at': requested,
+        'requested_by': 'ailog (update from the Docker view)',
+        'app': name,
+        'source': spec.get('source') or f'apps/{name}',
+        'ref': spec.get('ref') or '',
+        'replaces': current or '',
+    }
+
+    def edit(repo: Repo):
+        """Regenerated on every lost race: same request, current tree."""
+        live_entry = render.find_service(render.load_intent(repo.read('wizard.yaml')), name)
+        if live_entry is None:
+            raise Conflict(f'{name} is no longer in wizard.yaml - re-plan it')
+        relpath = f'{app}/{BUILD_MARKER}'
+        body = json.dumps(payload, indent=2) + chr(10)
+        repo.write(relpath, body)
+        return live_entry, [relpath]
+
+    message = (f'{name}: rebuild from source\n\n'
+               f'Requested by ailog from the Docker view. {BUILD_WF} builds and smoke tests it '
+               f'on this branch; merging builds, pushes and deploys it.')
+    sink.step(f'rebuild {name}')
+    result = repo.apply(edit, message)
+    if not result['changed']:
+        sink.step(f'rebuild {name}', ok=True, detail='a request was already on the branch')
+    else:
+        sink.step(f'rebuild {name}', ok=True, detail=', '.join(result['changed']))
+    sink.progress(18)
+
+    forge = forge_mod.Forge()
+    sha = result['head']
+
+    # The gate: if it does not compile and pass its smoke test on the branch,
+    # merging it would deploy an image nobody has run.
+    sink.step(f'wait for {BUILD_WF}')
+    run = forge.find_run(BUILD_WF, sha=sha, timeout=PULL_TIMEOUT)
+    if run is None:
+        raise EstateError(f'{BUILD_WF} did not start for {sha[:8]} - the push to '
+                          f'{settings.work_branch()} may not have triggered CI')
+    ok, status = _watch_run(forge, run, sink, base=18, span=30)
+    if not ok:
+        raise EstateError(f'the build failed on {settings.work_branch()} ({status}) - nothing was '
+                          f'merged, so the running service is untouched')
+    sink.progress(50)
+
+    title = f'{name}: rebuild from source'
+    body = (f'Opened by ailog after an update was requested for `{name}` in the Docker view.\n\n'
+            f'- {app}/{BUILD_MARKER}: rebuild request\n'
+            f'- source: `{source}`\n'
+            f'- built and smoke tested by {BUILD_WF} on {settings.work_branch()}\n\n'
+            f'Merging this makes {SHIP_WF} build the image, push it to the registry and deploy '
+            f'only the `{name}` stack with the tag it just built.')
+    pr = forge.create_pr(title, head=settings.work_branch(),
+                         base=settings.base_branch(), body=body)
+    sink.step('pull request', ok=True, detail=f'#{pr.get("number")} {summary_title(pr)}')
+    sink.progress(54)
+
+    merged = forge.merge_pr(pr['number'])
+    sink.step('merged', ok=True, detail=f'PR #{pr["number"]}')
+    sink.progress(58)
+
+    ship = forge.find_run(SHIP_WF, sha=merged.get('sha') or '', timeout=PULL_TIMEOUT)
+    if ship is None:
+        raise EstateError(f'the merge landed but {SHIP_WF} did not start for '
+                          f'{(merged.get("sha") or "")[:8]} - check the run list in Gitea')
+    ok, status = _watch_run(forge, ship, sink, base=58, span=30)
+    if not ok:
+        raise EstateError(f'the release run failed ({status}) - see the log above')
+
+    # The deploy used the tag this run produced.  The pin in git still names the
+    # previous build, and a pin is what any later stack deploy falls back to, so
+    # leaving it would make the next unrelated deploy roll this service back.
+    tag = f'build-{ship.get("run_number") or ""}'.rstrip('-')
+    result_out = {'name': name, 'action': 'rebuild', 'current': current,
+                  'pr': pr.get('number'), 'run': ship.get('id'),
+                  'sha': merged.get('sha') or '', 'tag': tag}
+    if not ship.get('run_number'):
+        sink.step('pin the build tag', ok=False, detail='the run did not report its number')
+        sink.progress(100)
+        return result_out
+    pinned = _pin_build(repo, name, tag, sink)
+    result_out['pinned'] = pinned
+    sink.progress(100)
+    return result_out
+
+
+def _pin_build(repo: Repo, name: str, tag: str, sink: Sink) -> bool:
+    """Point wizard.yaml and the stack at the build that just shipped."""
+    sink.step('pin the build tag', detail=tag)
+
+    def edit(repo: Repo):
+        live_text = repo.read('wizard.yaml')
+        live_entry = render.find_service(render.load_intent(live_text), name)
+        if live_entry is None:
+            raise Conflict(f'{name} is no longer in wizard.yaml')
+        live_version = str(live_entry.get('version') or '')
+        if live_version == tag:
+            return live_entry, {}
+        new_text, new_entry = render.bump_intent(live_text, name, tag)
+        files = {'wizard.yaml': new_text}
+        stack_rel = f'stacks/{name}/stack.yml'
+        stack_text = repo.read(stack_rel)
+        if stack_text:
+            image = build_image(new_entry)
+            bumped, changed = render.bump_image(stack_text, render.service_of(new_entry), image)
+            if changed:
+                files[stack_rel] = bumped
+        for relpath, text in files.items():
+            repo.write(relpath, text)
+        return new_entry, list(files)
+
+    try:
+        result = repo.apply(edit, f'{name}: pin {tag}\n\n'
+                                 f'The tag {SHIP_WF} built and deployed, recorded in git so a '
+                                 f'later stack deploy does not fall back to the previous build.')
+        if not result['changed']:
+            sink.step('pin the build tag', ok=True, detail=f'{tag} was already pinned')
+            return True
+        sink.step('pin the build tag', ok=True, detail=', '.join(result['changed']))
+    except (Conflict, GitError) as exc:
+        # The service is already updated; a stale pin is a follow-up, not a
+        # failure of the update the person asked for.
+        sink.step('pin the build tag', ok=False, detail=str(exc)[:200])
+        return False
+
+    forge = forge_mod.Forge()
+    pr = forge.create_pr(f'{name}: pin {tag}', head=settings.work_branch(),
+                         base=settings.base_branch(),
+                         body=f'The build tag {SHIP_WF} produced for `{name}`, pinned in '
+                              f'wizard.yaml and the stack so a later deploy cannot fall back '
+                              f'to the previous build.')
+    sink.step('pin pull request', ok=True, detail=f'#{pr.get("number")} {summary_title(pr)}')
+    merged = forge.merge_pr(pr['number'])
+    sink.step('pin merged', ok=True, detail=f'PR #{pr["number"]}')
+    run = forge.find_run(SHIP_WF, sha=merged.get('sha') or '', timeout=PULL_TIMEOUT)
+    if run is not None:
+        ok, status = _watch_run(forge, run, sink, base=94, span=6)
+        if not ok:
+            sink.step('pin deploy', ok=False, detail=status)
+    return True
 
 
 def summary_title(pr: dict) -> str:

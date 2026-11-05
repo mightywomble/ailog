@@ -352,9 +352,14 @@ def estate_target(target: dict) -> dict:
     target['estate_service'] = estate_plan.get('name') or stack
     target['commands'] = []
     target['runs_on'] = 'CI'
-    target['note'] = (f'moves the image in git ({estate_plan.get("current")} -> '
-                      f'{estate_plan.get("target")}) and lets CI deploy it, so the '
-                      f'running image stays the one the estate pins')
+    if estate_plan.get('action') == 'rebuild':
+        target['note'] = (f'rebuilds {estate_plan.get("name")} from its source and lets CI '
+                          f'build, push and deploy it, so the running image is a build of '
+                          f'the committed source rather than whatever the tag points at')
+    else:
+        target['note'] = (f'moves the image in git ({estate_plan.get("current")} -> '
+                          f'{estate_plan.get("target")}) and lets CI deploy it, so the '
+                          f'running image stays the one the estate pins')
     return target
 
 
