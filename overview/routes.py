@@ -90,6 +90,23 @@ def _docker_updates() -> Dict[str, Any]:
 
     rows.sort(key=lambda r: (r['host'].lower(), r['container'].lower()))
 
+    # Twelve alphabetical rows is not a summary of the estate: the noisiest host
+    # (nine `:latest` containers on one box) fills the card and the one update
+    # you were looking for - a version pin on a swarm manager - ends up behind
+    # "and 6 more". Take one row per host at a time instead, so every host that
+    # has something to update is visible before any host gets a second row.
+    buckets: Dict[str, list] = {}
+    for row in rows:
+        buckets.setdefault(row['host'].lower(), []).append(row)
+    shown = []
+    while buckets and len(shown) < UPDATE_ROW_LIMIT:
+        for key in list(buckets):
+            shown.append(buckets[key].pop(0))
+            if not buckets[key]:
+                del buckets[key]
+            if len(shown) >= UPDATE_ROW_LIMIT:
+                break
+
     # The card fills itself: anything never scanned is queued, once.
     to_scan = [key for key in dep.all_host_keys() if key not in cached]
     try:
@@ -100,8 +117,8 @@ def _docker_updates() -> Dict[str, Any]:
     return {
         'count': len(rows),
         'hosts': len(per_host),
-        'rows': rows[:UPDATE_ROW_LIMIT],
-        'more': max(0, len(rows) - UPDATE_ROW_LIMIT),
+        'rows': shown,
+        'more': max(0, len(rows) - len(shown)),
         'pending': sorted(started),
     }
 
