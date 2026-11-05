@@ -51,7 +51,13 @@ except Exception:  # pragma: no cover
     db = None
 
 AILOG_URL = os.environ.get("AILOG_URL", "http://127.0.0.1:5001").rstrip("/")
-TOKEN = os.environ.get("AILOG_MCP_TOKEN", "")
+# The bearer token this endpoint demands. Read from the swarm secret first so
+# the stack file (which is in git) carries a secret name instead of the value.
+try:
+    from utils.secretfiles import secret as _secret
+    TOKEN = _secret("ailog_mcp_token", "AILOG_MCP_TOKEN")
+except Exception:                                    # older image layout
+    TOKEN = os.environ.get("AILOG_MCP_TOKEN", "")
 LOG_DIR = os.environ.get("AILOG_LOG_DIR", "/var/log")
 ALLOW_RAW = os.environ.get("AILOG_MCP_ALLOW_RAW", "0") == "1"
 MAX_OUTPUT = int(os.environ.get("AILOG_MCP_MAX_OUTPUT", "200000"))  # chars
