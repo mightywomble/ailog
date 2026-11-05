@@ -864,9 +864,9 @@ by the `stacks/ailog/stack.yml` stack file.
 - SSH keys for monitored hosts are uploaded in the app UI and stored in its db;
   outbound SSH to LAN/tailnet hosts works via node networking
 
-**Current production image** (as of 2026-11-04): `zot.safehomelan.com/ailog:v3.16.1`
+**Current production image** (as of 2026-11-04): `zot.safehomelan.com/ailog:v3.17.4`
 (`:latest` points at the same manifest), digest
-`sha256:cb2d6d68491b7becf89578ab2dfde849f8663f4497450dfdcf20afcf24e27647`, running as
+`sha256:98a091eafbb8c4b53220ab944d3094d51f42536d7a26342593a6cedce37b920b`, running as
 `ailog_ailog.1` on `swarm-worker4`. Production runs remediation in **`dry_run`**
 (`AILOG_ALLOW_REMEDIATION=dry_run`), and container updates for real
 (`AILOG_ALLOW_UPDATES=on`) because that button exists to be pressed), so plans can be made and applied but every
