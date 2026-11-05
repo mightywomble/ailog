@@ -105,6 +105,91 @@ def test_an_unmanaged_container_is_refused_with_a_reason(updateflow):
     assert 'no compose project and no swarm service' in target['reason']
 
 
+def test_a_container_its_own_project_owns_is_refused_by_name(updateflow):
+    """Nextcloud AIO keeps its siblings in a project it never made with compose.
+
+    The mastercontainer creates them through the docker API and writes the
+    project label but no compose service label, so replaying a compose command
+    would be inventing an intent that was never recorded - and the recreate that
+    follows would undo it anyway.  The refusal has to say whose they are.
+    """
+    labels = {'com.docker.compose.project': 'nextcloud-aio'}
+    target = updateflow.group_targets(
+        [_inspect('nextcloud-aio-nextcloud', 'ghcr.io/nextcloud-releases/aio-nextcloud:latest', labels)])[0]
+    assert target['kind'] == 'container'
+    assert updateflow.commands_for(target) == []
+    assert 'nextcloud-aio' in target['reason']
+    assert 'owns it and recreates it' in target['reason']
+
+
+def test_a_publishers_set_is_updated_as_one(updateflow):
+    """immich-server and immich-machine-learning must not drift apart.
+
+    The server refuses to talk to a machine-learning container from a different
+    release, so a per-service update would break the app while reporting success.
+    """
+    labels = {
+        'com.docker.compose.project': 'immich',
+        'com.docker.compose.project.config_files': '/home/david/code/immich/docker-compose.yaml',
+    }
+    rows = [
+        _inspect('immich_server', 'ghcr.io/immich-app/immich-server:v3.3.1',
+                 dict(labels, **{'com.docker.compose.service': 'immich-server'})),
+        _inspect('immich_machine_learning', 'ghcr.io/immich-app/immich-machine-learning:v3.3.1',
+                 dict(labels, **{'com.docker.compose.service': 'immich-machine-learning'})),
+    ]
+    targets = updateflow.group_targets(rows)
+    assert len(targets) == 1
+    assert targets[0]['services'] == ['immich-server', 'immich-machine-learning']
+    commands = updateflow.commands_for(targets[0])
+    assert 'pull immich-server immich-machine-learning' in commands[0]
+    assert 'up -d --no-deps immich-server immich-machine-learning' in commands[1]
+
+
+def test_different_versions_in_one_project_are_not_a_set(updateflow):
+    """matrix-server is four services, three of which only share the word matrix.
+
+    Folding those into one target would bounce postgres and redis to update
+    synapse, which is the opposite of what the user clicked.
+    """
+    labels = {
+        'com.docker.compose.project': 'matrix-server',
+        'com.docker.compose.project.config_files': '/home/david/code/matrix-server/docker-compose.yml',
+    }
+    rows = [
+        _inspect('matrix-synapse', 'ghcr.io/element-hq/synapse:v1.152.0',
+                 dict(labels, **{'com.docker.compose.service': 'synapse'})),
+        _inspect('matrix-postgres', 'postgres:16',
+                 dict(labels, **{'com.docker.compose.service': 'postgres'})),
+        _inspect('matrix-redis', 'redis:8-alpine',
+                 dict(labels, **{'com.docker.compose.service': 'redis'})),
+    ]
+    targets = updateflow.group_targets(rows)
+    assert len(targets) == 3
+    for target in targets:
+        assert updateflow.target_services(target) == [target['service']]
+
+
+def test_the_siblings_of_a_compose_service_are_found_from_ps(updateflow):
+    rows = [
+        {'name': 'immich_server', 'image': 'ghcr.io/immich-app/immich-server:v3.3.1',
+         'project': 'immich', 'service': 'immich-server'},
+        {'name': 'immich_machine_learning',
+         'image': 'ghcr.io/immich-app/immich-machine-learning:v3.3.1',
+         'project': 'immich', 'service': 'immich-machine-learning'},
+        {'name': 'immich_redis', 'image': 'valkey/valkey:9',
+         'project': 'immich', 'service': 'redis'},
+        {'name': 'gitea', 'image': 'gitea/gitea:latest', 'project': 'gitea', 'service': 'gitea'},
+    ]
+    target = updateflow.target_of(
+        _inspect('immich_server', 'ghcr.io/immich-app/immich-server:v3.3.1', {
+            'com.docker.compose.project': 'immich',
+            'com.docker.compose.service': 'immich-server',
+            'com.docker.compose.project.config_files': '/srv/immich/docker-compose.yaml',
+        }))
+    assert updateflow.siblings(rows, target) == ['immich_server', 'immich_machine_learning']
+
+
 def test_an_old_compose_project_without_a_config_files_label_still_works(updateflow):
     labels = {
         'com.docker.compose.project': 'managelm',

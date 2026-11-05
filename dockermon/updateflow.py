@@ -27,7 +27,16 @@ Three shapes exist in this estate and they need different commands:
 ``container``
     ``docker run`` with no compose labels and no swarm service.  There is no
     recorded intent to replay (ports, mounts, env, restart policy), so this is
-    refused with the reason rather than guessed at.
+    refused with the reason rather than guessed at.  A container that sits in a
+    compose project *without* a compose service label was created by another
+    program working inside that project - Nextcloud AIO's mastercontainer is the
+    case that exists here - and the refusal says so, because "update it and let
+    its owner recreate it five minutes later" is not an update.
+
+One compose target may cover several services.  Publishers that ship a set
+(``immich-server`` + ``immich-machine-learning``, same release, same version)
+break if the set is split, so the services a project publishes at one version
+are pulled and recreated together.
 
 The old hand-off framed the whole homelab wizard for any of these, and the
 wizard's update path is a ``wizard.yaml`` tag bump - which a CasaOS compose
@@ -142,9 +151,19 @@ def target_of(inspect_row: dict) -> dict:
         'service': '',
         'image': image,
         'containers': [name],
-        'project': '',
+        # A project with no service is the fingerprint of "someone else created
+        # this inside that project": AIO's mastercontainer keeps its siblings in
+        # ``nextcloud-aio`` but never writes a compose service label.
+        'project': project,
         'file': '',
     }
+
+
+def image_family(image: str) -> str:
+    """The name a publisher uses for a set: ``immich-machine-learning`` -> immich."""
+    ref = (image or '').split('@', 1)[0]
+    name = ref.rsplit('/', 1)[-1].split(':', 1)[0]
+    return name.split('-', 1)[0].lower()
 
 
 def group_targets(rows) -> list[dict]:
@@ -167,12 +186,34 @@ def group_targets(rows) -> list[dict]:
     for target in out:
         target['reason'] = unsupported_reason(target)
         target['commands'] = commands_for(target)
-    return out
+    return coalesce(out)
+
+
+def siblings(rows, target: dict) -> list[str]:
+    """The rest of a publisher's set, as container names, from ``ps`` alone."""
+    if target['kind'] != 'compose' or not target.get('project'):
+        return []
+    tag = (target.get('image') or '').rsplit(':', 1)[-1] if ':' in (target.get('image') or '') else ''
+    family = image_family(target.get('image') or '')
+    names = []
+    for row in rows or []:
+        if row.get('project') != target['project'] or not row.get('image'):
+            continue
+        row_tag = row['image'].rsplit(':', 1)[-1] if ':' in row['image'] else ''
+        if image_family(row['image']) != family or row_tag != tag:
+            continue
+        if row['name'] not in names:
+            names.append(row['name'])
+    return names
 
 
 def unsupported_reason(target: dict) -> str:
     if target['kind'] == 'estate':
         return ''
+    if target['kind'] == 'container' and target.get('project'):
+        return (f'it was created inside compose project {target["project"]} without a compose '
+                f'service label, so something in that project owns it and recreates it - '
+                f'updating it here would be undone the next time its owner restarts it')
     if target['kind'] == 'container':
         return ('no compose project and no swarm service: docker has no record of '
                 'how this container was created, so it cannot be recreated safely')
@@ -183,16 +224,62 @@ def unsupported_reason(target: dict) -> str:
     return ''
 
 
+def target_services(target: dict) -> list[str]:
+    """Every compose service this target moves, primary first."""
+    services = [s for s in (target.get('services') or []) if s]
+    if not services and target.get('service'):
+        services = [target['service']]
+    return services
+
+
 def compose_commands(target: dict) -> list[str]:
     files = target.get('files') or ([target['file']] if target.get('file') else [])
-    if not files:
+    services = target_services(target)
+    if not files or not services:
         return []
     flags = ' '.join(f'-f {shlex.quote(path)}' for path in files)
-    service = shlex.quote(target['service'])
+    wanted = ' '.join(shlex.quote(name) for name in services)
     return [
-        PRELUDE + f'$DC {flags} pull {service}',
-        PRELUDE + f'$DC {flags} up -d --no-deps {service}',
+        PRELUDE + f'$DC {flags} pull {wanted}',
+        PRELUDE + f'$DC {flags} up -d --no-deps {wanted}',
     ]
+
+
+def coalesce(targets: list[dict]) -> list[dict]:
+    """Fold a publisher's set back into one target.
+
+    ``immich-server`` and ``immich-machine-learning`` are the same product at the
+    same version - the server refuses to run against a machine-learning
+    container from a different release - so they are pulled and recreated in one
+    go.  The test for "one set" is deliberately narrow: same compose project,
+    same image family, *and* the identical tag.  matrix-server has four services
+    whose names start with ``matrix``, and folding those together would bounce
+    postgres and redis to update synapse.
+    """
+    out: list[dict] = []
+    sets: dict[tuple, dict] = {}
+    for target in targets:
+        if target['kind'] != 'compose' or target.get('reason'):
+            out.append(target)
+            continue
+        tag = (target.get('image') or '').rsplit(':', 1)[-1] if ':' in (target.get('image') or '') else ''
+        key = (target.get('project') or '', image_family(target.get('image') or ''), tag)
+        held = sets.get(key)
+        if held is None:
+            target['services'] = [target['service']]
+            sets[key] = target
+            out.append(target)
+            continue
+        if target['service'] and target['service'] not in held['services']:
+            held['services'].append(target['service'])
+        for name in target['containers']:
+            if name not in held['containers']:
+                held['containers'].append(name)
+    for target in out:
+        if target['kind'] == 'compose':
+            target['reason'] = unsupported_reason(target)
+            target['commands'] = commands_for(target)
+    return out
 
 
 def swarm_commands(target: dict) -> list[str]:
@@ -242,14 +329,28 @@ def _runner(host_key: str):
 
 
 def _ps_rows(run) -> list[dict]:
-    ok, out = run(PRELUDE + "docker ps -a --format '{{.Names}}\t{{.Image}}'", timeout=25)
+    """Every container on the host, with the labels that say who owns it.
+
+    The project/service labels come from ``ps`` rather than ``inspect`` so that
+    finding the rest of a compose project - the siblings that must move with the
+    service someone clicked - costs no extra round trip.
+    """
+    ok, out = run(PRELUDE + 'docker ps -a --format '
+                  '\'{{.Names}}\t{{.Image}}\t{{.Label "com.docker.compose.project"}}'
+                  '\t{{.Label "com.docker.compose.service"}}\'', timeout=25)
     if not ok:
         raise RuntimeError((out or 'docker ps failed').strip()[:300])
     rows = []
     for line in (out or '').splitlines():
-        name, _, image = line.partition('\t')
-        if name.strip():
-            rows.append({'name': name.strip(), 'image': image.strip()})
+        parts = line.split('\t')
+        if not parts[0].strip():
+            continue
+        rows.append({
+            'name': parts[0].strip(),
+            'image': (parts[1] if len(parts) > 1 else '').strip(),
+            'project': (parts[2] if len(parts) > 2 else '').strip(),
+            'service': (parts[3] if len(parts) > 3 else '').strip(),
+        })
     return rows
 
 
@@ -380,6 +481,18 @@ def plan(host_key: str, image: str = '', container: str = '') -> dict:
         wanted = [container]
     release_session()
     inspected = _inspect(run, wanted)
+
+    # A clicked row is one container, but the thing that has to move may be the
+    # publisher's whole set (immich-server + immich-machine-learning).  Add the
+    # siblings from the same project before planning, so the plan that gets
+    # shown is the plan that runs.
+    if inspected:
+        extra = set()
+        for probe in group_targets(inspected):
+            extra.update(siblings(rows, probe))
+        extra.difference_update(wanted)
+        if extra:
+            inspected = inspected + _inspect(run, sorted(extra))
     targets = group_targets(inspected)
 
     # The estate decides before the manager probe: an estate update never runs
@@ -403,8 +516,14 @@ def plan(host_key: str, image: str = '', container: str = '') -> dict:
             target['runs_on'] = 'CI'
         elif target['kind'] == 'compose':
             target['runs_on'] = host_key
-            target['note'] = (f'recreates only the {target["service"]} service of project '
-                              f'{target["project"] or "?"} — no other container in it is touched')
+            services = target_services(target)
+            if len(services) > 1:
+                target['note'] = (f'recreates {", ".join(services)} together — they are '
+                                  f'published as one version, so moving only one of them would '
+                                  f'leave project {target["project"] or "?"} on two releases')
+            else:
+                target['note'] = (f'recreates only the {target["service"]} service of project '
+                                  f'{target["project"] or "?"} — no other container in it is touched')
         else:
             target['runs_on'] = host_key
             target['note'] = ''
