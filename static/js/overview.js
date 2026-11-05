@@ -236,11 +236,19 @@
                 ? `${count} update${count === 1 ? '' : 's'} available`
                 : 'all images current'}</span>`,
             count && hosts ? `<span class="ov-chip">${hosts} host${hosts === 1 ? '' : 's'}</span>` : '',
+            estate ? `<span class="ov-chip is-warn" title="Pinned in wizard.yaml behind the newest upstream release - updated through the estate, not on the host">${estate} estate</span>` : '',
             pending ? `<span class="ov-chip" title="A background scan is filling these in">checking ${pending}…</span>` : '',
         ].filter(Boolean).join(' ');
 
+        const estate = Number(data.estate || 0);
+
         const items = rows.map((row) => {
-            const digest = (row.from && row.to)
+            // Two kinds of "needs an update": a pin that is behind its upstream
+            // release (``estate``, 0.9.1 → 0.17.2) and a tag whose digest moved
+            // (``digest``, aabb → ccdd). The label says which, because they are
+            // updated in different places.
+            const label = row.kind === 'estate' ? (row.service || row.container) : row.container;
+            const move = (row.from && row.to)
                 ? `<span class="ov-row-meta font-mono" title="${esc(row.from)} → ${esc(row.to)}">${esc(String(row.from).slice(0, 12))} → ${esc(String(row.to).slice(0, 12))}</span>`
                 : '';
             return `<li class="ov-row">
@@ -248,14 +256,14 @@
                 <button type="button" class="ov-row-main ov-row-link"
                         data-ov-update="${esc(row.host_key)}"
                         data-ov-update-container="${esc(row.container)}"
-                        title="Open ${esc(row.host)}'s Docker list and update this container">
-                  ${esc(row.container || row.image || 'container')}${row.containers > 1 ? ` <span class="ov-sub">×${esc(row.containers)}</span>` : ''}
+                        title="Open ${esc(row.host)}'s Docker list and update ${esc(label || 'this container')}">
+                  ${esc(label || row.image || 'container')}${row.containers > 1 ? ` <span class="ov-sub">×${esc(row.containers)}</span>` : ''}
                 </button>
                 <span class="ov-row-stack ov-row-host">
                   <span class="ov-row-main">${esc(row.host)}</span>
                   <span class="ov-row-sub">${esc(row.image || '')}</span>
                 </span>
-                ${digest}
+                ${move}
               </li>`;
         }).join('');
 
@@ -425,7 +433,10 @@
             button.addEventListener('click', () => {
                 const hostKey = button.dataset.ovUpdate;
                 const container = button.dataset.ovUpdateContainer || '';
-                if (!hostKey) return;
+                if (!hostKey) {
+                    window.location.href = '/estate';
+                    return;
+                }
                 if (typeof window.selectHost !== 'function' || typeof window.showDockerInfoMain !== 'function') {
                     window.location.href = `/docker/${encodeURIComponent(hostKey)}`;
                     return;
