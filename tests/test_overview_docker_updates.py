@@ -138,7 +138,28 @@ def test_the_list_is_capped_and_says_how_much_it_is_hiding(ctx, scan):
     assert out['count'] == 20
     assert len(out['rows']) == overview_routes.UPDATE_ROW_LIMIT == 12
     assert out['more'] == 8
-    assert out['rows'] == sorted(out['rows'], key=lambda r: (r['host'].lower(), r['container'].lower()))
+    # one host, so the twelve are its first twelve containers in order
+    assert [r['container'] for r in out['rows']] == [f'c{n:02d}' for n in range(12)]
+
+
+def test_one_noisy_host_cannot_fill_the_card(ctx, scan):
+    """Nine `:latest` rows on one box hid a version pin on another behind "and N more" - the
+    exact container nobody could find."""
+    state, _queued = scan
+    state['db-5'] = _host_state(*[_row(f'matrix-{n:02d}') for n in range(9)])
+    state['db-11'] = _host_state(_row('anchor', image='zot.safehomelan.com/anchor:0.9.1'))
+    state['db-16'] = _host_state(_row('gitea'))
+
+    out = overview_routes._docker_updates()
+
+    shown = [r['container'] for r in out['rows']]
+    assert 'anchor' in shown
+    assert 'gitea' in shown
+    # every host is represented before any host gets a second row
+    hosts = [r['host_key'] for r in out['rows']]
+    assert hosts[:3] == sorted(hosts[:3]) or len(set(hosts[:3])) == 3
+    assert hosts[3] == 'db-5'          # db-5 has the only rows left
+    assert out['count'] == 11 and out['more'] == 0
 
 
 def test_rows_carry_what_the_card_shows(ctx, scan):
