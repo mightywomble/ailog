@@ -1,0 +1,8 @@
+{
+  "requested_at": "2026-11-05T10:23:55Z",
+  "requested_by": "ailog (update from the Docker view)",
+  "app": "status",
+  "source": "apps/status",
+  "ref": "",
+  "replaces": "build-128"
+}
