@@ -15,7 +15,7 @@
 # IP>:8081 (routing mesh)
 services:
   dozzle:
-    image: zot.safehomelan.com/dozzle:v11.4.0
+    image: zot.safehomelan.com/dozzle:v11.4.1
     environment:
       DOZZLE_MODE: swarm
       # MCP server (read-only container log tools) at /api/mcp, used by the
