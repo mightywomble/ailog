@@ -22,10 +22,15 @@ services:
       # public resolver, so bare names like "pve" resolve to the WAN address and
       # hairpin back through the ingress. Direct IPs are instant and stable.
       PVE_URL: "https://100.97.170.97:8006"
-      PVE_TOKEN: "status@pve!read=535a724f-7b82-40f4-a78d-69f19da20ea4"
+      # Credentials are swarm secrets now, read from /run/secrets: the stack file
+      # is in git and the value was not the repository's to publish.
       # MetaMCP backend on the manager (same endpoints the public hostname proxies)
       METAMCP_URL: "http://100.79.189.118:8091/metamcp/homelab/mcp"
-      METAMCP_API_KEY: "<redacted>"
+    secrets:
+      # status_pve_token: PVE_URL's API token (status@pve!read, PVEAuditor)
+      - status_pve_token
+      # metamcp_api_key: shared with ingest - the same MetaMCP key
+      - metamcp_api_key
     volumes:
       - type: bind
         source: /opt/docker/data/status
@@ -45,3 +50,9 @@ services:
       replicas: 1
       restart_policy:
         condition: any
+
+secrets:
+  status_pve_token:
+    external: true
+  metamcp_api_key:
+    external: true
