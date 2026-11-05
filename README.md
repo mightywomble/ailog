@@ -30,6 +30,13 @@ repo and no "bump the tag over there" commit. Stack files for locally built
 apps use `image: zot.safehomelan.com/<app>:${IMAGE_TAG:-<pinned>}`; mirrored and
 upstream images keep literal tags and ignore the variable.
 
+## Services that are not stacks
+
+Nextcloud AIO runs outside the swarm on the `files` host, behind the NPM ingress
+on CasaOS. It needed its own shape (plain HTTP on a private port, TLS at the
+edge) because its domain is tailnet-only and AIO's built-in ACME can never
+succeed for it: see [docs/nextcloud-aio.md](docs/nextcloud-aio.md).
+
 ## Wizard
 
 https://wizard.safehomelan.com — `apps/homelab-wizard`. Nine stages: source →
