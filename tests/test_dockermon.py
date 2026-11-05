@@ -391,3 +391,22 @@ def test_a_second_private_registry_can_be_declared(monkeypatch):
     monkeypatch.setenv('AILOG_REGISTRY_HOSTS', 'zot.safehomelan.com, registry.internal.example')
     assert dupdates._registry_credentials('registry.internal.example') == ('david', 'zot-secret')
     assert dupdates._registry_credentials('quay.io') is None
+
+
+def test_ps_rows_carry_compose_labels_but_a_short_row_still_parses():
+    """Twelve fields now; ten still parses.
+
+    The compose labels were added so a container can be checked for ownership
+    (project set, service empty) without an extra inspect per container.
+    """
+    long_row = ('abc\tweb\timg:1\trunning\tUp\t1MB (virtual 2MB)\t\t\t\t\tnc\tnc-web')
+    parsed = dparse.parse_ps_line(long_row)
+    assert parsed['compose_project'] == 'nc'
+    assert parsed['compose_service'] == 'nc-web'
+
+    short_row = '\t'.join(['abc', 'web', 'img:1', 'running', 'Up', '1MB (virtual 2MB)',
+                           '', '', '', ''])
+    parsed = dparse.parse_ps_line(short_row)
+    assert parsed['id'] == 'abc'
+    assert parsed['compose_project'] is None
+    assert parsed['compose_service'] is None
