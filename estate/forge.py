@@ -129,15 +129,21 @@ class Forge:
         r = self.http.get(f'{self.api}{self.path}/pulls/{index}', timeout=30)
         return r.json() if r.status_code == 200 else {}
 
-    def merge_pr(self, index: int, attempts: int = 8) -> dict:
+    def merge_pr(self, index: int, attempts: int = 12, conflict_after: float = 25.0) -> dict:
         """Merge, and say why when it will not.
 
-        Two different 405s used to look identical: "please try again later"
-        while another merge holds the lock (retry, it clears) and ``mergeable:
-        false``, which no retry can fix and which the UI must show as a conflict.
+        Three different refusals look alike from the merge endpoint: the lock
+        ("please try again later"), ``mergeable: false`` because Gitea has not
+        *computed* mergeability yet, and a real conflict.  Only the last one is
+        worth waking a person for, and the only way to tell it from the second is
+        time - so a conflict is reported only after the flag has stayed false for
+        ``conflict_after`` seconds.  Treating the transient false as a conflict is
+        how the status rebuild's pin PR (57) was abandoned while it was, in fact,
+        mergeable: the run failed on the last step of a successful deploy.
         """
         last = ''
         delay = 1.0
+        false_since = 0.0
         for attempt in range(attempts):
             r = self.http.post(f'{self.api}{self.path}/pulls/{index}/merge',
                                json={'Do': 'merge', 'delete_branch_after_merge': False},
@@ -163,9 +169,14 @@ class Forge:
             if pr.get('merged'):
                 return {'merged': True, 'attempts': attempt + 1,
                         'sha': str(pr.get('merge_commit_sha') or '')}
-            if attempt >= 1 and pr.get('mergeable') is False:
-                raise ForgeError(f'PR #{index} conflicts with {settings.base_branch()} '
-                                 f'- resolve it on {settings.work_branch()} and run again')
+            if pr.get('mergeable') is False:
+                false_since = false_since or time.time()
+                if time.time() - false_since >= conflict_after:
+                    raise ForgeError(f'PR #{index} conflicts with {settings.base_branch()} '
+                                     f'(still unmergeable after {int(conflict_after)}s) '
+                                     f'- resolve it on {settings.work_branch()} and run again')
+            else:
+                false_since = 0.0        # it was only being computed
             time.sleep(delay)
             delay = min(delay * 2, 8.0)
         raise ForgeError(f'merge PR #{index} after {attempts} attempts: {last}')

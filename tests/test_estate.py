@@ -741,3 +741,63 @@ def test_a_refused_merge_that_actually_happened_is_not_an_error(monkeypatch):
     f = F()
     monkeypatch.setattr(f, 'http', type('H', (), {'post': staticmethod(lambda *a, **k: Resp())})(), raising=False)
     assert f.merge_pr(10)['sha'] == 'c' * 40
+
+
+def test_a_mergeable_that_is_still_being_computed_is_not_a_conflict(monkeypatch):
+    """Gitea computes mergeable lazily. The status rebuild's pin PR (57) was
+    abandoned because the first false was read as a conflict - it merged a minute
+    later, and the job died on the last step of a successful deploy."""
+    from estate import forge as forge_mod
+    monkeypatch.setattr(forge_mod.time, 'sleep', lambda *_: None)
+
+    class Resp:
+        def __init__(self, code):
+            self.status_code = code
+            self.text = 'Please try again later'
+        def json(self):
+            return {}
+
+    class F(forge_mod.Forge):
+        def __init__(self):
+            self.api, self.path = 'https://gitea.example/api/v1/repos/o/n', ''
+            self.merges = 0
+            self.reads = 0
+        def pr(self, index):
+            self.reads += 1
+            return {'merged': False, 'mergeable': self.reads > 2}
+
+    f = F()
+
+    def post(*a, **k):
+        f.merges += 1
+        return Resp(200 if f.merges >= 3 else 405)
+
+    monkeypatch.setattr(f, 'http', type('H', (), {'post': staticmethod(post)})(), raising=False)
+    out = f.merge_pr(11, attempts=6, conflict_after=25.0)
+    assert out['merged'] is True and out['attempts'] == 3
+
+
+def test_a_conflict_that_does_not_clear_is_reported(monkeypatch):
+    from estate import forge as forge_mod
+    clock = {'now': 1000.0}
+    monkeypatch.setattr(forge_mod.time, 'sleep', lambda *_: None)
+    monkeypatch.setattr(forge_mod.time, 'time', lambda: clock['now'])
+
+    class Resp:
+        status_code = 405
+        text = 'Please try again later'
+        def json(self):
+            return {}
+
+    class F(forge_mod.Forge):
+        def __init__(self):
+            self.api, self.path = 'https://gitea.example/api/v1/repos/o/n', ''
+        def pr(self, index):
+            clock['now'] += 20.0          # every check is 20s later
+            return {'merged': False, 'mergeable': False}
+
+    f = F()
+    monkeypatch.setattr(f, 'http', type('H', (), {'post': staticmethod(lambda *a, **k: Resp())})(), raising=False)
+    with pytest.raises(forge_mod.ForgeError) as excinfo:
+        f.merge_pr(12, attempts=6, conflict_after=25.0)
+    assert 'conflicts with' in str(excinfo.value)
