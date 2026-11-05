@@ -14,7 +14,7 @@
 # IP>:5001 (routing mesh)
 services:
   ailog:
-    image: zot.safehomelan.com/ailog:v3.19.3
+    image: zot.safehomelan.com/ailog:v3.20.0
     environment:
       DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
       # Registry credentials for the update checker (dockermon/updates.py).
@@ -42,7 +42,9 @@ services:
       AILOG_ALLOW_ESTATE: "on"
       # Master key for encrypting uploaded SSH private keys at rest
       # (Fernet, PBKDF2-derived). Keep stable - changing it makes previously
-      # stored keys undecryptable.
+      # stored keys undecryptable. Also mounted as
+      # /run/secrets/ailog_sshkey_master_key, which the app prefers; this line
+      # goes away in the commit after the image that reads the secret.
       AILOG_SSHKEY_MASTER_KEY: "Bd1H9loSMdJCK0a35aFQkX2MaWtPw6oQ8cciQpMR3k8="
       # Self-healing remediation. dry_run = plan and apply are enabled, but the
       # playbook only runs with --check --diff: nothing on a host is changed.
@@ -52,10 +54,14 @@ services:
       # Signs the short-lived plan confirmation tokens (HMAC over
       # slug|hosts|dry_run|expiry). Without it the app falls back to a
       # development constant. Changing it only invalidates in-flight plans.
+      # also mounted as /run/secrets/ailog_secret_key (see utils/secretfiles.py),
+      # which the app prefers; this line goes away in the next commit
       AILOG_SECRET_KEY: "<redacted>"
     secrets:
       - zot_password
       - estate_git_token
+      - ailog_secret_key
+      - ailog_sshkey_master_key
     volumes:
       - type: bind
         source: /opt/docker/data/ailog
@@ -90,16 +96,18 @@ services:
     command: ["python3", "mcp_service.py"]
     environment:
       DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
-      # same master key as the app: needed to decrypt the stored SSH keys
-      AILOG_SSHKEY_MASTER_KEY: "Bd1H9loSMdJCK0a35aFQkX2MaWtPw6oQ8cciQpMR3k8="
+      # same master key as the app: needed to decrypt the stored SSH keys,
+      # mounted as /run/secrets/ailog_sshkey_master_key
       AILOG_URL: "http://ailog:5001"
-      AILOG_MCP_TOKEN: "<redacted>"
       AILOG_MCP_BIND: "0.0.0.0"
       AILOG_MCP_PORT: "5002"
       # 0 = read-only interrogation allow-list (ls/cat/grep/tail/journalctl/docker
       # ps|logs|inspect/systemctl status/df/free/ps/ss); 1 lifts it entirely
       AILOG_MCP_ALLOW_RAW: "0"
       TZ: "Europe/London"
+    secrets:
+      - ailog_mcp_token
+      - ailog_sshkey_master_key
     volumes:
       - type: bind
         source: /opt/docker/data/ailog
@@ -122,6 +130,12 @@ services:
 
 
 secrets:
+  ailog_secret_key:
+    external: true
+  ailog_mcp_token:
+    external: true
+  ailog_sshkey_master_key:
+    external: true
   # Shared registry credential (david's zot login). Used by the update checker
   # to read manifest digests; mounted at /run/secrets/zot_password.
   zot_password:
