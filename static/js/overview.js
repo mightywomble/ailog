@@ -209,6 +209,75 @@
           </div>`;
     }
 
+    /* Docker updates: "what can I actually update right now?".
+     *
+     * The estate has seventeen hosts and the answer used to live three clicks
+     * down - pick the host, press its Docker square, read its list. This card
+     * puts every container the registry has moved on from in one place, and a
+     * row is a link to that container's home: the host's Docker pane.
+     *
+     * The section comes from the background scan cache (see overview/routes.py),
+     * so it can lag by one scan. That is the right trade: the dashboard polls
+     * every six seconds and must never wait on the slowest SSH round. */
+    function renderDockerUpdates(section) {
+        if (!section) return skeletonCard('Docker updates');
+        if (section.error) {
+            const err = section.error;
+            return renderError('Docker updates', err.message || err.error || err);
+        }
+        const data = section.data || {};
+        const rows = data.rows || [];
+        const count = Number(data.count || 0);
+        const hosts = Number(data.hosts || 0);
+        const pending = (data.pending || []).length;
+
+        const chips = [
+            `<span class="ov-chip ${count ? 'is-warn' : 'is-ok'}">${count
+                ? `${count} update${count === 1 ? '' : 's'} available`
+                : 'all images current'}</span>`,
+            count && hosts ? `<span class="ov-chip">${hosts} host${hosts === 1 ? '' : 's'}</span>` : '',
+            pending ? `<span class="ov-chip" title="A background scan is filling these in">checking ${pending}…</span>` : '',
+        ].filter(Boolean).join(' ');
+
+        const items = rows.map((row) => {
+            const digest = (row.from && row.to)
+                ? `<span class="ov-row-meta font-mono" title="${esc(row.from)} → ${esc(row.to)}">${esc(String(row.from).slice(0, 12))} → ${esc(String(row.to).slice(0, 12))}</span>`
+                : '';
+            return `<li class="ov-row">
+                <span class="ov-sev is-warning"></span>
+                <button type="button" class="ov-row-main ov-row-link"
+                        data-ov-update="${esc(row.host_key)}"
+                        data-ov-update-container="${esc(row.container)}"
+                        title="Open ${esc(row.host)}'s Docker list and update this container">
+                  ${esc(row.container || row.image || 'container')}${row.containers > 1 ? ` <span class="ov-sub">×${esc(row.containers)}</span>` : ''}
+                </button>
+                <span class="ov-row-stack ov-row-host">
+                  <span class="ov-row-main">${esc(row.host)}</span>
+                  <span class="ov-row-sub">${esc(row.image || '')}</span>
+                </span>
+                ${digest}
+              </li>`;
+        }).join('');
+
+        return `
+          <div class="ov-card" data-ov="docker-updates">
+            <div class="ov-card-head">
+              <h3>Docker updates</h3>
+              <button type="button" class="ov-link" data-ov-check-all
+                      title="Scan every host now instead of waiting for the next round">Check all hosts</button>
+            </div>
+            <div class="ov-nd-head">${chips}</div>
+            ${rows.length
+                ? `<ul class="ov-rows" aria-label="Containers with a newer image">${items}</ul>`
+                : `<p class="ov-sub">${count
+                    ? `…and ${count} more on other hosts.`
+                    : (pending
+                        ? 'Scanning the estate for the first time — this fills in as hosts answer.'
+                        : 'Nothing to update: every scanned container is on its current image.')}</p>`}
+            ${data.more ? `<p class="ov-sub">…and ${data.more} more on other hosts.</p>` : ''}
+          </div>`;
+    }
+
     /* Netdata fleet card: the same numbers as /netdata, compressed to the
      * question a dashboard asks — "which machine is behaving unusually?".
      * Cards are already anomaly-first; here we show the top few and let the
@@ -285,7 +354,7 @@
 
     // The server aggregates all three cards into /api/overview and returns an
     // ETag, so an unchanged dashboard answers 304 and costs no payload.
-    const result = { servers: null, alerts: null, reports: null };
+    const result = { servers: null, alerts: null, reports: null, docker_updates: null };
     let painted = false;
     let etag = null;
     let failures = 0;
@@ -314,6 +383,8 @@
 
         if (result.alerts === null) cards.push(skeletonCard('Alerts'));
         else cards.push(result.alerts.error ? renderError('Alerts', result.alerts.error) : renderAlerts(result.alerts.data));
+
+        cards.push(renderDockerUpdates(result.docker_updates));
 
         if (result.reports === null) cards.push(skeletonCard('Recent reports'));
         else cards.push(result.reports.error ? renderError('Reports', result.reports.error) : renderReports(result.reports.data));
@@ -345,6 +416,46 @@
             card.classList.add('is-flash');
             card.focus({ preventScroll: true });
             setTimeout(() => card.classList.remove('is-flash'), 1600);
+        });
+
+        // A row is the whole point of the card: it takes you to that host's
+        // Docker pane, with the container you clicked already flashing so the
+        // update button is under your cursor rather than one hunt away.
+        mount.querySelectorAll('[data-ov-update]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const hostKey = button.dataset.ovUpdate;
+                const container = button.dataset.ovUpdateContainer || '';
+                if (!hostKey) return;
+                if (typeof window.selectHost !== 'function' || typeof window.showDockerInfoMain !== 'function') {
+                    window.location.href = `/docker/${encodeURIComponent(hostKey)}`;
+                    return;
+                }
+                window.__ovFocusContainer = container || null;
+                window.__ovFocusAt = Date.now();
+                window.selectHost(hostKey);
+                window.showDockerInfoMain();
+            });
+        });
+
+        mount.querySelector('[data-ov-check-all]')?.addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            const was = button.textContent;
+            button.textContent = 'checking…';
+            try {
+                await fetch('/api/docker/updates/refresh', {
+                    method: 'POST', headers: { Accept: 'application/json' },
+                });
+                // The scans land over the next few seconds; drop the ETag so the
+                // next poll is a full read rather than a 304 of the old answer.
+                etag = null;
+                await refresh();
+            } catch (error) {
+                window.showToast?.('Could not queue a scan', 'error');
+            } finally {
+                button.disabled = false;
+                button.textContent = was;
+            }
         });
 
         mount.querySelector('[data-ov-open-reports]')?.addEventListener('click', () => {
@@ -412,6 +523,7 @@
         result.servers = section(payload.servers);
         result.alerts = section(payload.alerts);
         result.reports = section(payload.reports);
+        result.docker_updates = section(payload.docker_updates);
         return true;
     }
 
@@ -421,7 +533,7 @@
 
         try {
             if (!painted) {
-                result.servers = result.alerts = result.reports = null;
+                result.servers = result.alerts = result.reports = result.docker_updates = null;
                 paint();
             }
             // Netdata is decoration on this page: never let a slow parent delay
@@ -440,7 +552,7 @@
             failures += 1;
             nextDelay = Math.min(Math.round(POLL_MS * Math.pow(1.6, failures)), 60000);
             if (!painted) {
-                result.servers = result.alerts = result.reports = { error };
+                result.servers = result.alerts = result.reports = result.docker_updates = { error };
                 paint();
             }
         } finally {

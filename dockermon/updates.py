@@ -553,17 +553,20 @@ def _scan_worker(app) -> None:
             _scan_progress['host'] = ''
 
 
-def scan_async(app, host_keys) -> list[str]:
+def scan_async(app, host_keys, force: bool = False) -> list[str]:
     """Queue a scan for every stale host; returns the keys that were queued.
 
     One thread per host was the first version, which on a 17-host estate meant
     17 simultaneous SSH rounds -- and 17 database connections held across them.
     A single coordinator now runs them three at a time: slow for nobody (the
     activity strip shows progress) and survivable for the connection pool.
+
+    ``force`` ignores the TTL. That is what a person pressing "check now"
+    means: they are asking precisely because the cached answer is old.
     """
     due = []
     for host_key in host_keys or []:
-        if host_key in due or not stale(host_key):
+        if host_key in due or (not force and not stale(host_key)):
             continue
         due.append(host_key)
     if not due:
