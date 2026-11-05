@@ -3293,9 +3293,14 @@ const showHostInfoMain = async () => {
             }
             const rows = data.containers || [];
             const updates = data.updates || [];
+            const managed = data.self_managed || {};
+            const managedCount = Object.values(managed).reduce((sum, n) => sum + n, 0);
             if (count) {
-                count.textContent = updates.length
-                    ? `${updates.length} update${updates.length === 1 ? '' : 's'} available`
+                const bits = [];
+                if (updates.length) bits.push(`${updates.length} update${updates.length === 1 ? '' : 's'} available`);
+                if (managedCount) bits.push(`${managedCount} updated by ${Object.keys(managed).join(', ')}`);
+                count.textContent = bits.length
+                    ? bits.join(' · ')
                     : `${rows.length} container${rows.length === 1 ? '' : 's'}, all images current`;
             }
             if (!rows.length) {
@@ -3314,7 +3319,9 @@ const showHostInfoMain = async () => {
                 label: row.name || row.image || 'container',
             });
             list.innerHTML = rows.map((row) => {
-                const badge = row.update_available
+                const badge = row.self_managed
+                    ? `<span class="px-2 py-0.5 rounded-full text-[11px] termix-muted border border-white/10" title="${escapeHtml(row.self_managed)} creates and recreates this container itself, so it is updated there rather than here">managed by ${escapeHtml(row.self_managed)}</span>`
+                    : row.update_available
                     ? '<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-400/20 text-amber-200 border border-amber-400/30">update</span>'
                     : (row.reasons && row.reasons.length
                         ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-500/20 text-red-200 border border-red-500/30" title="${escapeHtml(row.reasons.join(', '))}">attention</span>`
@@ -3329,7 +3336,7 @@ const showHostInfoMain = async () => {
                 // is a wizard.yaml tag bump - a CasaOS compose project is not
                 // in wizard.yaml, so the click fell through to the wizard's
                 // add-a-service journey.
-                const action = row.update_available
+                const action = (row.update_available && !row.self_managed)
                     ? `<button type="button" class="text-xs px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium" data-update-image="${escapeHtml(row.image || '')}" data-update-container="${escapeHtml(row.name || '')}" data-update-label="${escapeHtml(row.name || row.image || '')}" title="Pull the newer image and recreate only this service">update</button>`
                     : '';
                 return `
