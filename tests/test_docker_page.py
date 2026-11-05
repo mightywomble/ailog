@@ -325,3 +325,47 @@ def test_endpoint_rows_are_cached_between_polls(monkeypatch):
     routes._forget_endpoint_cache()          # a discovery result invalidates it
     routes._known_endpoints()
     assert query.calls == 2
+
+
+def test_a_container_its_project_owns_is_not_offered_as_an_update(monkeypatch):
+    """Nextcloud AIO drift is real, expected, and not ours to act on.
+
+    The mastercontainer recreates its siblings, so listing fifteen updates that
+    the next AIO restart would undo is noise at best. They are grouped under the
+    owner instead - and, crucially, they are not "attention" either, because a
+    host full of containers that are one release behind its owner is normal.
+    """
+    import dockermon.updates as dupdates
+    monkeypatch.setattr(dupdates, '_local_digests',
+                        lambda run, images: {i: 'sha256:' + 'a' * 64 for i in images})
+    monkeypatch.setattr(dupdates, 'remote_digest',
+                        lambda image, timeout=12, refresh=False: {'digest': 'sha256:' + 'b' * 64})
+    aio = {'com.docker.compose.project': 'nextcloud-aio'}
+    containers = [
+        {'name': 'nextcloud-aio-apache', 'image': 'ghcr.io/nc/aio-apache:latest',
+         'state': 'running', 'labels': aio},
+        {'name': 'nextcloud-aio-database', 'image': 'ghcr.io/nc/aio-postgresql:latest',
+         'state': 'running', 'labels': aio},
+    ]
+    out = dupdates.updates_for('files', containers, lambda command: (True, ''))
+    assert out['updates'] == []
+    assert out['self_managed'] == {'nextcloud-aio': 2}
+    assert out['attention_only'] == []
+    assert all(row.get('self_managed') == 'nextcloud-aio' for row in out['containers'])
+
+
+def test_a_compose_service_is_still_an_update(monkeypatch):
+    """The owner rule must not swallow ordinary compose projects."""
+    import dockermon.updates as dupdates
+    monkeypatch.setattr(dupdates, '_local_digests',
+                        lambda run, images: {i: 'sha256:' + 'a' * 64 for i in images})
+    monkeypatch.setattr(dupdates, 'remote_digest',
+                        lambda image, timeout=12, refresh=False: {'digest': 'sha256:' + 'b' * 64})
+    containers = [
+        {'name': 'gitea', 'image': 'gitea/gitea:latest', 'state': 'running',
+         'labels': {'com.docker.compose.project': 'gitea',
+                    'com.docker.compose.service': 'gitea'}},
+    ]
+    out = dupdates.updates_for('casaos', containers, lambda command: (True, ''))
+    assert len(out['updates']) == 1
+    assert out['self_managed'] == {}

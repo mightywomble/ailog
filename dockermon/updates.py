@@ -280,6 +280,23 @@ def remote_digest(image: str, timeout: int = 12, refresh: bool = False) -> dict:
 # per-host comparison
 # --------------------------------------------------------------------------
 
+def owner_project(container: dict) -> str:
+    """The compose project that owns a container compose did not create.
+
+    Nextcloud AIO's mastercontainer creates its siblings through the docker API:
+    they carry ``com.docker.compose.project=nextcloud-aio`` and no
+    ``com.docker.compose.service``.  Drift on those is normal and expected, and
+    offering fifteen updates that the next AIO restart would undo is worse than
+    saying who owns them.
+    """
+    labels = (container or {}).get('labels') or {}
+    project = (labels.get('com.docker.compose.project') or '').strip()
+    service = (labels.get('com.docker.compose.service') or '').strip()
+    if project and not service:
+        return project
+    return ''
+
+
 def _local_digests(run, images) -> dict:
     """``{image_ref: 'sha256:…'}`` for the images present on the host."""
     try:
@@ -351,8 +368,16 @@ def updates_for(host_key: str, containers, run, refresh: bool = False) -> dict:
         elif 'unhealthy' in status_text:
             entry['reasons'].append('unhealthy')
 
+        owner = owner_project(container)
+        if owner:
+            # Its own project recreates it, so drift here is not an action for
+            # us and must not be reported as one.
+            entry['self_managed'] = owner
+
         if info.get('error'):
             unknown.append(entry)
+        elif owner:
+            pass
         elif local_digest and remote_digest_value:
             if local_digest != remote_digest_value:
                 entry['update_available'] = True
@@ -374,6 +399,8 @@ def updates_for(host_key: str, containers, run, refresh: bool = False) -> dict:
         if key not in by_image:
             by_image[key] = dict(entry, containers=1)
         else:
+            by_image[key]['self_managed'] = (by_image[key].get('self_managed')
+                                             or entry.get('self_managed'))
             by_image[key]['containers'] += 1
             if entry['update_available']:
                 by_image[key]['update_available'] = True
@@ -388,12 +415,20 @@ def updates_for(host_key: str, containers, run, refresh: bool = False) -> dict:
                       if any(r != 'newer image upstream' for r in e['reasons'])]
 
     rows_out = sorted(by_image.values(),
-                      key=lambda r: (not r['update_available'], r['name'] or ''))
+                      key=lambda r: (not r['update_available'],
+                                     bool(r.get('self_managed')), r['name'] or ''))
     return {
         'host_key': host_key,
         'containers_checked': len(seen_containers),
         'images_checked': len(images),
         'updates': [r for r in rows_out if r['update_available']],
+        # Drift that belongs to whatever created the container, grouped by that
+        # owner, so the pane can say "15 containers are updated by nextcloud-aio"
+        # instead of listing fifteen updates nobody should press.
+        'self_managed': {
+            owner: sum(1 for r in rows_out if r.get('self_managed') == owner)
+            for owner in sorted({r['self_managed'] for r in rows_out if r.get('self_managed')})
+        },
         'attention': attention,
         'attention_only': attention_only,
         'unknown': unknown,
