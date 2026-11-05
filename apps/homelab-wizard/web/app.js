@@ -238,36 +238,23 @@ async function loadService(name) {
   $("#f_creduser").value = e.env?.[$("#f_creduserkey").value] || "";
   $("#f_credpass").value = e.env?.[$("#f_credpwkey").value] || "";
   $("#imagePreview").textContent = imageRef();
-  renderReview(); renderPath(); previewNewest();
+  renderReview(); renderPath();
 }
 
-/* Update and Next are both offered here because they are different intents:
-   one rolls the image forward, the other edits something specific. */
+/* There is no update button for an existing service any more.
+
+   The wizard used to roll an image forward itself, and so does the estate in
+   AILog - two writers to the same wizard.yaml, disagreeing about what gets
+   pinned. The estate kept the job (it knows about build apps, publisher sets and
+   merge conflicts), so this stage now only edits a service. What it shows is
+   where the button went, because "the update option disappeared" is worse than
+   the option being somewhere else. */
 function renderPath() {
   const existing = isExisting();
-  $("#btnUpdate").hidden = !existing || !$("#f_source").value.trim();
-  $("#newestNote").textContent = existing ? "this service is already in wizard.yaml" : "";
+  $("#newestNote").textContent = existing
+    ? "this service is already in wizard.yaml — updates run from AILog's Docker pane (or The estate), which commits and lets CI deploy"
+    : "";
   $("#f_name").readOnly = existing;
-}
-
-async function previewNewest() {
-  const src = $("#f_source").value.trim();
-  if (!isExisting() || !src) return;
-  $("#newestNote").textContent = "checking upstream…";
-  try {
-    const d = await api("/api/newest?image=" + encodeURIComponent(src));
-    S.newest = d;
-    $("#newestNote").textContent = d.up_to_date
-      ? `upstream ${d.host}/${d.repo}: ${d.tag} — already newest`
-      : `upstream ${d.host}/${d.repo}: ${d.current || "?"} → ${d.best}`;
-    $("#btnUpdate").textContent = d.up_to_date ? "already newest" : `update to ${d.best}`;
-    $("#btnUpdate").disabled = !!d.up_to_date;
-  } catch (err) {
-    S.newest = null;
-    $("#newestNote").textContent = "cannot read upstream tags: " + (err.message || err);
-    $("#btnUpdate").textContent = "update to newest";
-    $("#btnUpdate").disabled = true;
-  }
 }
 
 function imageRef() {
@@ -462,12 +449,6 @@ $("#btnPartsReview").onclick = () => {
   S.parts = ["source", ...chosenParts()];
   $("#updateModal").hidden = true;
   go("review");
-};
-
-$("#btnUpdate").onclick = async () => {
-  if (!S.current) return;
-  // one click: newest upstream tag -> wizard.yaml -> mirror/build -> ship -> deploy -> test
-  jobRoute("/api/update", { name: S.current, test: true }, `update ${S.current}`);
 };
 
 /* ------------------------------------------------------------ credentials */
@@ -748,7 +729,7 @@ $("#serviceList").onclick = (e) => { const li = e.target.closest("[data-name]");
 $("#filter").oninput = renderList;
 $("#btnNew").onclick = () => {
   S.current = null; S.entry = {}; S.mode = "new"; S.parts = []; S.newest = null;
-  $("#f_name").readOnly = false; $("#btnUpdate").hidden = true;
+  $("#f_name").readOnly = false;
   $("#f_creduser").value = ""; $("#f_credpass").value = ""; $("#newestNote").textContent = "";
   ["f_name", "f_source", "f_version", "f_repo", "f_port", "f_container_port", "f_health", "f_subdomain", "f_compose"]
     .forEach((id) => { $("#" + id).value = ""; });
@@ -758,7 +739,7 @@ $("#btnNew").onclick = () => {
 };
 ["f_port", "f_container_port", "f_subdomain", "f_version", "f_repo", "f_kind", "f_name"]
   .forEach((id) => { $("#" + id).oninput = () => { $("#imagePreview").textContent = imageRef(); renderPath(); }; });
-$("#f_source").onchange = () => { $("#imagePreview").textContent = imageRef(); renderPath(); previewNewest(); };
+$("#f_source").onchange = () => { $("#imagePreview").textContent = imageRef(); renderPath(); };
 
 $("#btnTheme").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
