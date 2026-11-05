@@ -624,3 +624,46 @@ def test_the_hub_listing_walks_more_than_one_page(monkeypatch):
     monkeypatch.setattr(tags.requests, 'get', fake_get)
     got = tags._hub_tags('library/wordpress', 80, 20)
     assert '7.1.4' in got and asked[:2] == [1, 2]
+
+
+def test_a_merge_that_answers_with_no_body_still_counts(monkeypatch):
+    """Gitea merged wordpress and answered empty; the run died on json() after
+    the deploy had already happened."""
+    from estate import forge as forge_mod
+
+    class Resp:
+        status_code = 200
+        text = ''
+        def json(self):
+            raise ValueError('Expecting value: line 1 column 1 (char 0)')
+
+    class F(forge_mod.Forge):
+        def __init__(self):
+            self.api, self.path = 'https://gitea.example/api/v1/repos/o/n', ''
+        def pr(self, index):
+            return {'merged': True, 'merge_commit_sha': 'b' * 40}
+
+    f = F()
+    monkeypatch.setattr(f, 'http', type('H', (), {'post': staticmethod(lambda *a, **k: Resp())})(), raising=False)
+    out = f.merge_pr(9)
+    assert out['merged'] is True and out['sha'] == 'b' * 40
+
+
+def test_a_refused_merge_that_actually_happened_is_not_an_error(monkeypatch):
+    from estate import forge as forge_mod
+
+    class Resp:
+        status_code = 405
+        text = 'Please try again later'
+        def json(self):
+            return {}
+
+    class F(forge_mod.Forge):
+        def __init__(self):
+            self.api, self.path = 'https://gitea.example/api/v1/repos/o/n', ''
+        def pr(self, index):
+            return {'merged': True, 'merge_commit_sha': 'c' * 40}
+
+    f = F()
+    monkeypatch.setattr(f, 'http', type('H', (), {'post': staticmethod(lambda *a, **k: Resp())})(), raising=False)
+    assert f.merge_pr(10)['sha'] == 'c' * 40
