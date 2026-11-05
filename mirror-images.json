@@ -35,7 +35,7 @@
     },
     {
       "name": "anchor",
-      "source": "ghcr.io/zhfahim/anchor:0.9.1"
+      "source": "ghcr.io/zhfahim/anchor:latest"
     },
     {
       "name": "anythingllm",
