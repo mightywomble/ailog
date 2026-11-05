@@ -1,6 +1,5 @@
 """SSH Key encryption/decryption utilities using a master key."""
 
-import os
 import hashlib
 import hmac
 from cryptography.fernet import Fernet
@@ -13,9 +12,20 @@ class SSHKeyCryptoError(Exception):
     pass
 
 
+def _master_key_text() -> str:
+    """The master key, from the Docker secret or the environment.
+
+    This key decrypts every stored SSH key, so it has no business being in a
+    stack file. ``AILOG_SSHKEY_MASTER_KEY`` is still read so an existing
+    deployment, a test or a hand-started container keeps working.
+    """
+    from utils.secretfiles import secret
+    return secret('ailog_sshkey_master_key', 'AILOG_SSHKEY_MASTER_KEY')
+
+
 def _get_master_key():
-    """Get the master key from environment variable."""
-    key = os.environ.get('AILOG_SSHKEY_MASTER_KEY', '').strip()
+    """Get the master key."""
+    key = _master_key_text()
     if not key:
         return None
     return key.encode() if isinstance(key, str) else key
@@ -23,7 +33,7 @@ def _get_master_key():
 
 def is_configured():
     """Check if encryption is configured (master key is set)."""
-    return bool(os.environ.get('AILOG_SSHKEY_MASTER_KEY', '').strip())
+    return bool(_master_key_text())
 
 
 def generate_master_key():
