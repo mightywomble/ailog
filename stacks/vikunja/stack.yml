@@ -27,7 +27,7 @@
 # prefer to sign up yourself, registration is enabled by default.
 services:
   vikunja:
-    image: zot.safehomelan.com/vikunja:2.7.1
+    image: zot.safehomelan.com/vikunja:2.8.0
     environment:
       VIKUNJA_SERVICE_PUBLICURL: "https://tasks.safehomelan.com/"
       VIKUNJA_SERVICE_SECRET: "625c8cec033ab122c845b7a0c43f031e6ffc10353d4e5ccdafb72909f74d6ca3"
