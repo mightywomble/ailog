@@ -20,22 +20,41 @@ services:
     image: zot.safehomelan.com/patchmon-server:2.1.7
     environment:
       CORS_ORIGIN: "https://patchmon.safehomelan.com,https://patchlan.safehomelan.com"
-      JWT_SECRET: "fd7b358b022b7431167a1b514227cc439ca842d1a0a8923c6cf56664714240173d16413936a30cd20d179a4a78f3c9566a92b6bf2af0801b6f2d8d21bc0b43c1"
-      SESSION_SECRET: "964e1204cd6fd35ee59852f34a9777ac81c285790867763dedaefcb523b51b85b415317f1000d0b7fdc49573c42b00e1cd3636809719b5f2bd3858a7c576c28a"
-      AI_ENCRYPTION_KEY: "073645c47fd25a4758dcf8f665e15c5d43b3bed7a8964b9e45a9ac3bcbdf37b2e94346bcc165ad9eb81a4b8c1647620f2de5a082aba062720f1f4710d7beae36"
+      # JWT_SECRET, SESSION_SECRET, AI_ENCRYPTION_KEY, POSTGRES_PASSWORD,
+      # REDIS_PASSWORD and the DATABASE_URL that embeds the database password
+      # are all built from swarm secrets by the entrypoint below. None of them
+      # are in this file any more.
       POSTGRES_HOST: "database"
       POSTGRES_USER: "patchmon_user"
-      POSTGRES_PASSWORD: "<redacted>"
       POSTGRES_DB: "patchmon_db"
-      DATABASE_URL: "postgresql://patchmon_user:<redacted>@database:5432/patchmon_db"
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
-      REDIS_PASSWORD: "<redacted>"
       REDIS_DB: "0"
       GUACD_ADDRESS: "guacd:4822"
       TRUST_PROXY: "true"
       TZ: "Europe/London"
       PORT: "3000"
+    # The image's ENTRYPOINT is ./entrypoint.sh with no CMD, and it has no
+    # `_FILE` support, so this reads the five secrets and execs that same
+    # entrypoint. DATABASE_URL is rebuilt here because the copy in the stack
+    # file embedded the password.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        export JWT_SECRET="$$(cat /run/secrets/patchmon_jwt_secret)"
+        export SESSION_SECRET="$$(cat /run/secrets/patchmon_session_secret)"
+        export AI_ENCRYPTION_KEY="$$(cat /run/secrets/patchmon_ai_encryption_key)"
+        export POSTGRES_PASSWORD="$$(cat /run/secrets/patchmon_postgres_password)"
+        export REDIS_PASSWORD="$$(cat /run/secrets/patchmon_redis_password)"
+        export DATABASE_URL="postgresql://patchmon_user:$${POSTGRES_PASSWORD}@database:5432/patchmon_db"
+        exec ./entrypoint.sh
+    secrets:
+      - patchmon_jwt_secret
+      - patchmon_session_secret
+      - patchmon_ai_encryption_key
+      - patchmon_postgres_password
+      - patchmon_redis_password
     ports:
       - "3000:3000"
     # Startup migrations can take ~60s on a cold/NFS-backed DB. The image
@@ -54,9 +73,11 @@ services:
 
   database:
     image: zot.safehomelan.com/postgres:17-alpine
+    secrets:
+      - patchmon_postgres_password
     environment:
       POSTGRES_USER: "patchmon_user"
-      POSTGRES_PASSWORD: "<redacted>"
+      POSTGRES_PASSWORD_FILE: "/run/secrets/patchmon_postgres_password"
       POSTGRES_DB: "patchmon_db"
     volumes:
       - type: bind
@@ -74,13 +95,19 @@ services:
 
   redis:
     image: zot.safehomelan.com/redis:7-alpine
-    command: ["redis-server", "--requirepass", "<redacted>"]
+    # the password is a secret, so it cannot sit in argv of a fixed command
+    command:
+      - sh
+      - -c
+      - exec redis-server --requirepass "$$(cat /run/secrets/patchmon_redis_password)"
+    secrets:
+      - patchmon_redis_password
     volumes:
       - type: bind
         source: /opt/docker/data/patchmon/redis
         target: /data
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "<redacted>", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$(cat /run/secrets/patchmon_redis_password)\" ping"]
       interval: 3s
       timeout: 5s
       retries: 7
@@ -103,3 +130,15 @@ services:
       replicas: 1
       restart_policy:
         condition: any
+
+secrets:
+  patchmon_jwt_secret:
+    external: true
+  patchmon_session_secret:
+    external: true
+  patchmon_ai_encryption_key:
+    external: true
+  patchmon_postgres_password:
+    external: true
+  patchmon_redis_password:
+    external: true
