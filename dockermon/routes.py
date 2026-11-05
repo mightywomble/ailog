@@ -624,7 +624,14 @@ def api_updates_refresh_all():
     """
     app = current_app._get_current_object()
     started = dupdates.scan_async(app, ep.all_host_keys(), force=True)
-    return jsonify({'success': True, 'started': started,
+    # The dashboard's "updates" are two answers now: which tags moved, and which
+    # pins are behind. A person pressing this is doubting both.
+    try:
+        from estate import drift
+        reswept = drift.refresh_async(app, force=True)
+    except Exception:                     # noqa: BLE001 - a sweep must not break the button
+        reswept = False
+    return jsonify({'success': True, 'started': started, 'estate': reswept,
                     'progress': dupdates.activity()})
 
 

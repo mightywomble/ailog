@@ -254,8 +254,8 @@ def test_the_card_lists_updates_and_links_each_row():
     assert 'function renderDockerUpdates(section)' in js
     assert '<h3>Docker updates</h3>' in js
     assert 'cards.push(renderDockerUpdates(result.docker_updates))' in js
-    assert 'data-ov-update="${esc(row.host_key)}"' in js
-    assert 'data-ov-update-container="${esc(row.container)}"' in js
+    assert 'data-ov-update="${esc(estateRow ? \'\' : row.host_key)}"' in js
+    assert 'data-ov-update-container="${esc(estateRow ? \'\' : row.container)}"' in js
     # "update available" is a count, not a secret
     assert 'update${count === 1' in js or 'update${count === 1 ?' in js
     assert 'more`' in js or 'more on other hosts' in js
@@ -281,6 +281,20 @@ def test_the_host_pane_flashes_the_container_you_came_from():
     assert 'window.selectHost = selectHost' in core
 
 
+def test_an_estate_row_does_not_open_the_host_list_that_disagrees_with_it():
+    """The host's own list judges digests, so an estate pin that is a release behind
+    reads "current" there - two answers to one question. Estate rows open the estate."""
+    js = JS.read_text()
+    assert 'data-ov-estate=' in js
+    block = js[js.index("mount.querySelectorAll('[data-ov-update]')"):]
+    block = block[:block.index("mount.querySelector('[data-ov-check-all]')")]
+    assert 'window.openEstateModal(service)' in block
+    assert '?service=' in block
+    # a drift row is shown as a warning, not as an ordinary update
+    assert "row.kind === 'drift'" in js
+    assert 'pin drift' in js
+
+
 def test_the_card_can_ask_for_a_fresh_scan():
     js = JS.read_text()
     assert 'data-ov-check-all' in js
@@ -292,7 +306,11 @@ def test_the_card_can_ask_for_a_fresh_scan():
 def test_update_rows_escape_what_the_registry_reports():
     js = JS.read_text()
     block = js[js.index('function renderDockerUpdates'):js.index('function renderNetdata')]
-    for value in ('row.host_key', 'row.container', 'row.host', 'row.image', 'row.from', 'row.to'):
+    for value in ('row.host', 'row.image', 'row.from', 'row.to'):
+        assert f'esc({value}' in block, value
+    # the estate/digest split must not put an unescaped value into a data attribute
+    for value in ("estateRow ? '' : row.host_key", "estateRow ? '' : row.container",
+                  'estateRow ? (row.service || label'):
         assert f'esc({value}' in block, value
 
 

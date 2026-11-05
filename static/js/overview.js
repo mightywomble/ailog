@@ -231,31 +231,53 @@
         const hosts = Number(data.hosts || 0);
         const pending = (data.pending || []).length;
         const estate = Number(data.estate || 0);
+        const driftCount = Number(data.drift || 0);
 
         const chips = [
+            // "update available" would be wrong for a drift row: nothing newer is
+            // necessarily published, git and the host simply disagree.
             `<span class="ov-chip ${count ? 'is-warn' : 'is-ok'}">${count
-                ? `${count} update${count === 1 ? '' : 's'} available`
+                ? (driftCount
+                    ? `${count} needing attention`
+                    : `${count} update${count === 1 ? '' : 's'} available`)
                 : 'all images current'}</span>`,
             count && hosts ? `<span class="ov-chip">${hosts} host${hosts === 1 ? '' : 's'}</span>` : '',
-            estate ? `<span class="ov-chip is-warn" title="Pinned in wizard.yaml behind the newest upstream release - updated through the estate, not on the host">${estate} estate</span>` : '',
+            estate ? `<span class="ov-chip is-warn" title="Services the estate pins that run an older release than upstream - updated by the estate, not on the host">${estate} estate</span>` : '',
+            driftCount ? `<span class="ov-chip is-warn" title="git and the host disagree about the version, so a redeploy would change it">${driftCount} pin drift</span>` : '',
             pending ? `<span class="ov-chip" title="A background scan is filling these in">checking ${pending}…</span>` : '',
         ].filter(Boolean).join(' ');
 
         const items = rows.map((row) => {
-            // Two kinds of "needs an update": a pin that is behind its upstream
-            // release (``estate``, 0.9.1 → 0.17.2) and a tag whose digest moved
-            // (``digest``, aabb → ccdd). The label says which, because they are
-            // updated in different places.
-            const label = row.kind === 'estate' ? (row.service || row.container) : row.container;
-            const move = (row.from && row.to)
-                ? `<span class="ov-row-meta font-mono" title="${esc(row.from)} → ${esc(row.to)}">${esc(String(row.from).slice(0, 12))} → ${esc(String(row.to).slice(0, 12))}</span>`
-                : '';
+            // Three things that look like "needs an update" from a distance, and
+            // they go to two different places:
+            //   estate - a service the estate pins, running an older release than
+            //            its upstream publishes. The fix is a commit, a build and
+            //            a deploy, so the row opens the estate.
+            //   drift  - git and the host disagree about which version this is
+            //            (anchor ran :latest while wizard.yaml said 0.9.1), so a
+            //            redeploy would change it. Also the estate's business.
+            //   digest - an ordinary container whose tag moved. Fixed on the host.
+            const estateRow = row.kind === 'estate' || row.kind === 'drift';
+            const label = estateRow ? (row.service || row.container) : row.container;
+            // A drift row is not an arrow: "latest -> 0.9.1" reads like an update.
+            // It is a disagreement, so it is spelled out.
+            const move = row.kind === 'drift' && row.from && row.to
+                ? `<span class="ov-row-meta" title="The service runs ${esc(row.from)} but the estate pins ${esc(row.to)}, so the next redeploy would change it">runs ${esc(String(row.from).slice(0, 12))}, git pins ${esc(String(row.to).slice(0, 12))}</span>`
+                : ((row.from && row.to)
+                    ? `<span class="ov-row-meta font-mono" title="${esc(row.from)} → ${esc(row.to)}">${esc(String(row.from).slice(0, 12))} → ${esc(String(row.to).slice(0, 12))}</span>`
+                    : '');
+            const title = row.kind === 'drift'
+                ? `${esc(label)} runs ${esc(row.from)} but the estate pins ${esc(row.to)} - a redeploy would roll it back. Opens the estate.`
+                : (estateRow
+                    ? `${esc(label)} is pinned by the estate and ${esc(row.host)} runs an older release - opens the estate, which commits the bump`
+                    : `Open ${esc(row.host)}'s Docker list and update ${esc(label || 'this container')}`);
             return `<li class="ov-row">
-                <span class="ov-sev is-warning"></span>
+                <span class="ov-sev ${row.kind === 'drift' ? 'is-critical' : 'is-warning'}"></span>
                 <button type="button" class="ov-row-main ov-row-link"
-                        data-ov-update="${esc(row.host_key)}"
-                        data-ov-update-container="${esc(row.container)}"
-                        title="Open ${esc(row.host)}'s Docker list and update ${esc(label || 'this container')}">
+                        data-ov-update="${esc(estateRow ? '' : row.host_key)}"
+                        data-ov-update-container="${esc(estateRow ? '' : row.container)}"
+                        data-ov-estate="${esc(estateRow ? (row.service || label || '') : '')}"
+                        title="${title}">
                   ${esc(label || row.image || 'container')}${row.containers > 1 ? ` <span class="ov-sub">×${esc(row.containers)}</span>` : ''}
                 </button>
                 <span class="ov-row-stack ov-row-host">
@@ -432,6 +454,18 @@
             button.addEventListener('click', () => {
                 const hostKey = button.dataset.ovUpdate;
                 const container = button.dataset.ovUpdateContainer || '';
+                const service = button.dataset.ovEstate || '';
+                if (service) {
+                    // An estate service is not updated on the host - the host's
+                    // own list would only say "current", because the tag it runs
+                    // has not moved. Take them where the work happens.
+                    if (typeof window.openEstateModal === 'function') {
+                        window.openEstateModal(service);
+                    } else {
+                        window.location.href = `/estate?service=${encodeURIComponent(service)}`;
+                    }
+                    return;
+                }
                 if (!hostKey) {
                     window.location.href = '/estate';
                     return;

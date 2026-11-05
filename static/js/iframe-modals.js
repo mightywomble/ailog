@@ -53,9 +53,14 @@
 
     // The estate: what wizard.yaml says, and the update that goes through CI.
     // A page, not a dialog form - it lists services and follows a run.
-    window.openEstateModal = function () {
+    // ``service`` deep-links the page at that row, so a click on the dashboard's
+    // Docker updates card lands on the thing it named rather than on the top of
+    // a nineteen-service list.
+    window.openEstateModal = function (service) {
+        const href = '/estate?embed=1'
+            + (service ? `&service=${encodeURIComponent(service)}` : '');
         openFrame('estateModal', 'estateModalFrame', 'estateModalTitle',
-                  '/estate?embed=1', '', 'The estate');
+                  href, '', 'The estate');
     };
     window.closeEstateModal = function () {
         closeFrame('estateModal', 'estateModalFrame');

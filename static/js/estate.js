@@ -93,7 +93,7 @@
                 : `<button type="button" class="text-[11px] px-2 py-1 rounded bg-white/10 hover:bg-white/20" data-estate-check="${esc(row.name)}">check</button>`;
         }
         return `
-            <tr class="row-hover border-b border-white/5">
+            <tr class="row-hover border-b border-white/5" data-estate-row="${esc(row.name)}">
                 <td class="py-2 px-3">
                     <div class="font-medium">${esc(row.name)}</div>
                     <div class="text-[11px] termix-muted font-mono">${esc(row.image || '')}</div>
@@ -123,6 +123,21 @@
         el('estate-count-build').textContent = String(build);
         el('estate-count-drift').textContent = String(drift);
         el('estate-count-drift').className = drift ? 'text-xl font-semibold text-amber-300' : 'text-xl font-semibold';
+        focusFromLink();
+    };
+
+    // ?service=anchor - the dashboard's Docker updates card clicks through to the
+    // row it named, instead of dropping the reader at the top of the list.
+    let focused = false;
+    const focusFromLink = () => {
+        const wanted = new URLSearchParams(window.location.search).get('service');
+        if (!wanted || focused) return;
+        const row = document.querySelector(`[data-estate-row="${wanted.replace(/"/g, '')}"]`);
+        if (!row) return;
+        focused = true;
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.add('bg-amber-400/10', 'ring-2', 'ring-amber-400/60');
+        setTimeout(() => row.classList.remove('bg-amber-400/10', 'ring-2', 'ring-amber-400/60'), 2600);
     };
 
     const load = async () => {

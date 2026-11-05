@@ -94,7 +94,7 @@ def _payload():
             {'id': 7, 'host_key': 'db-15', 'host_label': 'swarm-worker4',
              'verdict': 'healthy', 'created_at': '2026-11-05T09:30:00'}]},
         'docker_updates': {
-            'count': 2, 'hosts': 2, 'estate': 1, 'more': 0, 'pending': [],
+            'count': 3, 'hosts': 2, 'estate': 1, 'drift': 1, 'more': 0, 'pending': [],
             'rows': [
                 {'host_key': 'db-15', 'host': 'swarm-worker4', 'container': 'anchor_anchor.1.x',
                  'service': 'anchor', 'image': 'zot.safehomelan.com/anchor:0.9.1',
@@ -102,6 +102,10 @@ def _payload():
                 {'host_key': 'db-16', 'host': 'casaos', 'container': 'gitea',
                  'image': 'gitea/gitea:latest', 'from': '87a67ee09d3a', 'to': '8967bf9deaf3',
                  'containers': 1, 'kind': 'digest'},
+                {'host_key': '', 'host': 'swarm-worker4', 'container': 'vikunja_vikunja.1.y',
+                 'service': 'vikunja', 'image': 'zot.safehomelan.com/vikunja:latest@sha256:d2',
+                 'from': 'latest', 'to': '2.7.1', 'note': 'running, git pins',
+                 'containers': 1, 'kind': 'drift'},
             ],
         },
     }
@@ -131,7 +135,7 @@ def test_every_card_paints_when_the_payload_arrives(tmp_path):
 
 def test_the_docker_card_renders_one_row_per_update(tmp_path):
     result = _render(tmp_path, _payload())
-    assert result['updateRows'] == 2
+    assert result['updateRows'] == 3
 
 
 def test_the_docker_card_survives_an_empty_answer(tmp_path):
