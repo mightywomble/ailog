@@ -119,6 +119,15 @@ def audit(wizard, repo_dir):
                 key, value = m.group(1), m.group(2)
                 if not SECRET_HINT.search(key):
                     continue
+                # `POSTGRES_PASSWORD_FILE: /run/secrets/x` is the *fix*, not a
+                # finding: the value is a path to a mounted secret. Flagging it
+                # was hiding the real findings behind false ones.
+                if key.endswith("_FILE"):
+                    continue
+                # A bare path is not a credential either, whichever key it is
+                # under - someone pointing at a file has already done the work.
+                if value.strip('"').strip("'").startswith("/run/secrets/"):
+                    continue
                 if value in ("", '""', "''") or value.startswith(("$", "*")):
                     continue
                 # MYSQL_RANDOM_ROOT_PASSWORD=1 is a flag, not a credential
