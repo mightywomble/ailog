@@ -63,14 +63,57 @@ def _docker_updates() -> Dict[str, Any]:
     ``self_managed`` rows are left out on purpose: a container whose own compose
     project recreates it (Nextcloud AIO) would otherwise fill the card with
     fifteen entries that nobody should press.
+
+    Two different questions are answered here, because both look like "needs an
+    update" to the person reading the card. The scan says a tag's digest moved.
+    The estate says a *pin* is behind its upstream release - anchor on 0.9.1
+    while 0.17.2 is published, which no digest on the host can ever report
+    because :0.9.1 does not move. Estate rows come first: a whole release behind
+    is a bigger statement than a rebuilt tag.
     """
     from flask import current_app
     from dockermon import endpoints as dep
     from dockermon import updates as dupdates
+    from estate import drift
 
     cached = dupdates.all_state()
     rows = []
-    per_host: Dict[str, int] = {}
+    # Where each image actually runs, so an estate row can be clicked through to
+    # the host that carries it: repo name -> (host_key, friendly name, container).
+    running: Dict[str, Dict[str, Any]] = {}
+    for host_key, state in cached.items():
+        info = dep.resolve_host(host_key) or {}
+        name = info.get('friendly_name') or host_key
+        for row in (state or {}).get('containers') or []:
+            ref = str(row.get('image') or '').split('@', 1)[0].rsplit('/', 1)[-1]
+            repo = ref.split(':', 1)[0].lower()
+            if repo and repo not in running:
+                running[repo] = {'host_key': host_key, 'host': name,
+                                 'container': row.get('name') or ''}
+
+    # A sweep per fifteen minutes, started on the first poll after it expires;
+    # the card fills in on a later poll rather than waiting on nineteen
+    # registries inside a six-second request.
+    try:
+        drift.refresh_async(current_app._get_current_object())
+    except Exception:                     # noqa: BLE001 - a sweep must not break the card
+        pass
+    estate_state = drift.state()
+    for row in estate_state.get('rows') or []:
+        where = running.get(str(row.get('repo') or '').lower()) or {}
+        rows.append({
+            'host_key': where.get('host_key') or '',
+            'host': where.get('host') or 'estate',
+            'container': where.get('container') or row.get('service') or row.get('name') or '',
+            'service': row.get('name') or '',
+            'image': row.get('image') or '',
+            'from': f"v{row['current']}" if row.get('current') else '',
+            'to': f"v{row['target']}" if row.get('target') else '',
+            'containers': 1,
+            'kind': 'estate',
+        })
+    estate_count = len(rows)
+
     for host_key, state in cached.items():
         info = dep.resolve_host(host_key) or {}
         name = info.get('friendly_name') or host_key
@@ -85,27 +128,32 @@ def _docker_updates() -> Dict[str, Any]:
                 'from': row.get('local_digest') or '',
                 'to': row.get('remote_digest') or '',
                 'containers': row.get('containers') or 1,
+                'kind': 'digest',
             })
-            per_host[host_key] = per_host.get(host_key, 0) + 1
 
-    rows.sort(key=lambda r: (r['host'].lower(), r['container'].lower()))
+    estate_rows = rows[:estate_count]
+    digest_rows = rows[estate_count:]
+    digest_rows.sort(key=lambda r: (r['host'].lower(), r['container'].lower()))
 
     # Twelve alphabetical rows is not a summary of the estate: the noisiest host
-    # (nine `:latest` containers on one box) fills the card and the one update
-    # you were looking for - a version pin on a swarm manager - ends up behind
-    # "and 6 more". Take one row per host at a time instead, so every host that
-    # has something to update is visible before any host gets a second row.
+    # (nine `:latest` containers on one box) fills the card and everything else
+    # ends up behind "and N more". Take one row per host at a time instead, so
+    # every host that has something to update is visible before any host gets a
+    # second row.
     buckets: Dict[str, list] = {}
-    for row in rows:
+    for row in digest_rows:
         buckets.setdefault(row['host'].lower(), []).append(row)
-    shown = []
-    while buckets and len(shown) < UPDATE_ROW_LIMIT:
+    spread = []
+    while buckets and len(spread) < UPDATE_ROW_LIMIT:
         for key in list(buckets):
-            shown.append(buckets[key].pop(0))
+            spread.append(buckets[key].pop(0))
             if not buckets[key]:
                 del buckets[key]
-            if len(shown) >= UPDATE_ROW_LIMIT:
+            if len(spread) >= UPDATE_ROW_LIMIT:
                 break
+
+    # A release behind beats a rebuilt tag, so the estate's rows go first.
+    shown = (estate_rows + spread)[:UPDATE_ROW_LIMIT]
 
     # The card fills itself: anything never scanned is queued, once.
     to_scan = [key for key in dep.all_host_keys() if key not in cached]
@@ -116,7 +164,8 @@ def _docker_updates() -> Dict[str, Any]:
 
     return {
         'count': len(rows),
-        'hosts': len(per_host),
+        'hosts': len({r['host_key'] for r in rows if r['host_key']}),
+        'estate': len(estate_rows),
         'rows': shown,
         'more': max(0, len(rows) - len(shown)),
         'pending': sorted(started),
