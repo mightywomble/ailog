@@ -335,6 +335,12 @@ def newest(image: str):
 
 @app.post("/api/update")
 def update(body: UpdateBody):
+    """Retired in favour of AILog's estate, and kept only to say so.
+
+    Removing the route outright would have turned an old bookmark, or AILog
+    before v3.19, into a bare 404 with no explanation. It refuses inside the job
+    so the reason reaches the progress pane the caller is already watching.
+    """
     return {"job": hub.run("update", f"update {body.name}",
                            lambda j: pipeline.update(j, body.name, body.test),
                            meta=body.model_dump()).id}

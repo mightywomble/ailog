@@ -35,7 +35,15 @@ check / 'id="updateModal"' "update modal"
 check / 'data-stage="creds"' "credentials stage"
 check /static/app.js 'makePassword' "password generator"
 check /static/app.js 'function stages()' "stage paths"
-check /static/app.js '/api/update' "update route"
+# the update path is retired: an existing service is rolled forward by AILog's
+# estate, which is the only writer to wizard.yaml now. The served module must not
+# call the route, and it must say where the button went.
+if curl -sS -m 10 "http://localhost:$PORT/static/app.js" 2>/dev/null | grep -q '/api/update'; then
+  echo "FAIL wizard still calls /api/update"; fail=1
+else
+  echo "ok   wizard no longer calls /api/update"
+fi
+check /static/app.js 'updates run from AILog' "update pointer"
 code "/api/newest?image=" 400 20
 
 # secrets: the wizard must report what is mounted and what is still plaintext

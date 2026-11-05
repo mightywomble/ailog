@@ -14,6 +14,13 @@ answer rather than a bug report.
 | `swarm` | a swarm service the estate does not pin | `docker service update --image … --force --with-registry-auth` on a manager |
 | `container` | nothing docker recorded | refused, with the reason |
 
+There is exactly one writer to `wizard.yaml`: the estate, in AILog. The
+homelab-wizard used to roll images forward itself with its own tag resolution,
+its own commit and its own wait for CI, which meant two programs could answer
+"what is pinned" differently and whoever ran second won. That path is retired -
+the wizard's `update` now refuses and says where the button went - and it keeps
+only the jobs that create: the new-service and compose-to-stack journeys.
+
 A `compose` target can carry more than one service. When a publisher ships a set
 at one version - `immich-server` and `immich-machine-learning` are the case
 here - the services are pulled and recreated together, because the server
