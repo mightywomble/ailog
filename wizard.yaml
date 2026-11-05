@@ -37,7 +37,7 @@ services:
   service: ailog
   image: zot.safehomelan.com/ailog:v3.20.0
   repo: ailog
-  version: v3.23.0
+  version: v3.23.1
   source: ''
   ports:
   - host: 5001
