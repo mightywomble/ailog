@@ -50,17 +50,46 @@ remaining ones are being moved in, is below.
 ## Why this order
 
 A credential is only as good as its consumers. Poisoning the well from the
-outside in means each step is small and each app is verified before the next one
+outside in means each step is small, and each app is verified - a real request
+that needs the credential, not just "the container is up" - before the next one
 depends on it.
 
 | # | stack | secrets | notes |
 |---|-------|---------|-------|
-| 1 | status | `status_pve_token`, `metamcp_api_key` | ✅ done. Read-only PVE token; the MetaMCP key is shared with ingest, so it is one secret, not two. |
-| 2 | ingest | `ANYTHINGLLM_API_KEY`, `WP_APP_PASSWORD`, `GITEA_TOKEN`, `metamcp_api_key` | metamcp_api_key is already created. |
-| 3 | langlearn | `APP_PASSWORD`, `SECRET_KEY` | |
-| 4 | wordpress + postgres | `*_FILE` | postgres natively supports `POSTGRES_PASSWORD_FILE`; this is the one case with no helper needed. |
-| 5 | metamcp, vikunja, ailog | database and session secrets | |
-| 6 | patchmon | six secrets, including `POSTGRES_PASSWORD` and `REDIS_PASSWORD` | last because it has the most moving parts (api, worker, postgres, redis). |
+| 1 | status | `status_pve_token`, `metamcp_api_key` | ✅ read-only PVE token; the MetaMCP key is shared with ingest, so it is one secret, not two |
+| 2 | ingest | `anythingllm_api_key`, `wp_app_password`, `gitea_token`, `metamcp_api_key` | ✅ verified: AnythingLLM health 200 and 66 Gitea documents re-synced on the secret |
+| 3 | langlearn | `langlearn_app_password`, `langlearn_secret_key` | ✅ mirrored image with no `_FILE` support, so the stack `command` exports both from `/run/secrets` and execs the image's own CMD |
+| 4 | wordpress + mysql | `wordpress_db_password` | ✅ both images support `_FILE` natively - no wrapper. Verified with a live `mysqli` connect from the wordpress container |
+| 5 | metamcp | `metamcp_postgres_password`, `metamcp_auth_secret`, `metamcp_bootstrap_password` | ✅ `DATABASE_URL` embeds the password, so the wrapper rebuilds it - leaving it in the file would have put the value straight back |
+| 6 | ailog | `ailog_secret_key`, `ailog_mcp_token`, `ailog_sshkey_master_key` | ✅ `utils/secretfiles.py` in the app; moved in two stages so the master key was never briefly absent |
+| 7 | patchmon | five secrets | ✅ server wrapper rebuilds `DATABASE_URL`; database uses `POSTGRES_PASSWORD_FILE`; redis gets `--requirepass` from the file, healthcheck included, so the password is not in argv |
+| — | vikunja | three | ❌ **blocked - see below** |
+
+## The one that cannot be moved yet: vikunja
+
+`zot.safehomelan.com/vikunja:2.7.1` is a mirrored upstream image built from
+scratch. It has no `/bin/sh`:
+
+```
+docker run --rm --entrypoint /bin/sh .../vikunja:2.7.1 -c true
+# exec: "/bin/sh": stat /bin/sh: no such file or directory
+```
+
+and Vikunja has no `_FILE` variant of `VIKUNJA_DATABASE_PASSWORD` or
+`VIKUNJA_SERVICE_SECRET`. With no shell to read the file and no variable to
+point at it, there is nothing to hook: the three values stay in the stack file
+until one of these happens.
+
+1. upstream adds `_FILE` support (ask, do not wait),
+2. we build vikunja ourselves - an `apps/vikunja` with a `build.json` that pulls
+   the upstream release, adds a shell and a `_FILE` reader - which is a real
+   image to own and maintain,
+3. it moves to a stack we control entirely.
+
+Do not half-move it: switching only the postgres side to
+`POSTGRES_PASSWORD_FILE` while vikunja still carries the same password in its
+own environment gains nothing and hides the fact that the credential is still
+published.
 
 ## Things that must not be rotated to do this
 
