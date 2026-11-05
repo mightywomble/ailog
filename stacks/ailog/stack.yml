@@ -42,10 +42,8 @@ services:
       AILOG_ALLOW_ESTATE: "on"
       # Master key for encrypting uploaded SSH private keys at rest
       # (Fernet, PBKDF2-derived). Keep stable - changing it makes previously
-      # stored keys undecryptable. Also mounted as
-      # /run/secrets/ailog_sshkey_master_key, which the app prefers; this line
-      # goes away in the commit after the image that reads the secret.
-      AILOG_SSHKEY_MASTER_KEY: "Bd1H9loSMdJCK0a35aFQkX2MaWtPw6oQ8cciQpMR3k8="
+      # stored keys undecryptable. Mounted as
+      # /run/secrets/ailog_sshkey_master_key (see utils/secretfiles.py).
       # Self-healing remediation. dry_run = plan and apply are enabled, but the
       # playbook only runs with --check --diff: nothing on a host is changed.
       # Set to "on" to let approved plans make real changes, or "off" to hide
@@ -54,9 +52,7 @@ services:
       # Signs the short-lived plan confirmation tokens (HMAC over
       # slug|hosts|dry_run|expiry). Without it the app falls back to a
       # development constant. Changing it only invalidates in-flight plans.
-      # also mounted as /run/secrets/ailog_secret_key (see utils/secretfiles.py),
-      # which the app prefers; this line goes away in the next commit
-      AILOG_SECRET_KEY: "<redacted>"
+      # AILOG_SECRET_KEY is /run/secrets/ailog_secret_key
     secrets:
       - zot_password
       - estate_git_token
