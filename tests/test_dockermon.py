@@ -359,3 +359,35 @@ def test_ssh_container_row_splits_the_net_pair():
                                            'mem_limit': 20, 'mem_pct': 50.0,
                                            'net_bytes': (111, 222), 'pids': 3})
     assert row['net_rx'] == 111 and row['net_tx'] == 222
+
+
+# ------------------------------------------------- registry credentials --
+
+def test_our_credentials_never_leave_for_another_registry(monkeypatch):
+    """The zot password is for zot.
+
+    ``_registry_credentials`` used to ignore its host argument, so every check
+    sent zot's Basic auth to ghcr.io and Docker Hub.  ghcr answers that with 403
+    on the token endpoint - which is how the Nextcloud AIO images silently
+    stopped being checkable - and it hands a third party a password it has no
+    use for.
+    """
+    from dockermon import updates as dupdates
+    monkeypatch.setenv('AILOG_REGISTRY_USER', 'david')
+    monkeypatch.setenv('AILOG_REGISTRY_PASSWORD', 'zot-secret')
+    monkeypatch.delenv('AILOG_REGISTRY_HOSTS', raising=False)
+    monkeypatch.delenv('AILOG_REGISTRY_HOST', raising=False)
+
+    assert dupdates._registry_credentials('zot.safehomelan.com') == ('david', 'zot-secret')
+    assert dupdates._registry_credentials('ghcr.io') is None
+    assert dupdates._registry_credentials('registry-1.docker.io') is None
+    assert dupdates._registry_credentials('') is None
+
+
+def test_a_second_private_registry_can_be_declared(monkeypatch):
+    from dockermon import updates as dupdates
+    monkeypatch.setenv('AILOG_REGISTRY_USER', 'david')
+    monkeypatch.setenv('AILOG_REGISTRY_PASSWORD', 'zot-secret')
+    monkeypatch.setenv('AILOG_REGISTRY_HOSTS', 'zot.safehomelan.com, registry.internal.example')
+    assert dupdates._registry_credentials('registry.internal.example') == ('david', 'zot-secret')
+    assert dupdates._registry_credentials('quay.io') is None
