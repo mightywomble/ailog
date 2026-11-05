@@ -230,6 +230,7 @@
         const count = Number(data.count || 0);
         const hosts = Number(data.hosts || 0);
         const pending = (data.pending || []).length;
+        const estate = Number(data.estate || 0);
 
         const chips = [
             `<span class="ov-chip ${count ? 'is-warn' : 'is-ok'}">${count
@@ -239,8 +240,6 @@
             estate ? `<span class="ov-chip is-warn" title="Pinned in wizard.yaml behind the newest upstream release - updated through the estate, not on the host">${estate} estate</span>` : '',
             pending ? `<span class="ov-chip" title="A background scan is filling these in">checking ${pending}…</span>` : '',
         ].filter(Boolean).join(' ');
-
-        const estate = Number(data.estate || 0);
 
         const items = rows.map((row) => {
             // Two kinds of "needs an update": a pin that is behind its upstream
