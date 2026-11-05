@@ -51,6 +51,16 @@
             : false;
     };
 
+    // The estate: what wizard.yaml says, and the update that goes through CI.
+    // A page, not a dialog form - it lists services and follows a run.
+    window.openEstateModal = function () {
+        openFrame('estateModal', 'estateModalFrame', 'estateModalTitle',
+                  '/estate?embed=1', '', 'The estate');
+    };
+    window.closeEstateModal = function () {
+        closeFrame('estateModal', 'estateModalFrame');
+    };
+
     // The homelab wizard is a foreign document (wizard.safehomelan.com), so it
     // is framed rather than merged, and the CSP's frame-src names its origin
     // (core/security.py, from AILOG_WIZARD_URL). A deep link tells the wizard
@@ -145,6 +155,8 @@
             ?.addEventListener('click', window.closeMetricsModal);
         document.getElementById('wizardModalClose')
             ?.addEventListener('click', window.closeWizardModal);
+        document.getElementById('estateModalClose')
+            ?.addEventListener('click', window.closeEstateModal);
 
         // The modal's own close (Escape / backdrop / shared handler) must also
         // unload the frame, which only these listeners know how to do.
@@ -153,6 +165,7 @@
             reportsModal: 'reportsModalFrame',
             metricsModal: 'metricsModalFrame',
             wizardModal: 'wizardModalFrame',
+            estateModal: 'estateModalFrame',
         };
         Object.keys(FRAMES).forEach((id) => {
             document.getElementById(id)?.addEventListener('appmodal:close', () => {

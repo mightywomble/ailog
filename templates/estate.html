@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The estate - {{ app_version }} · Homelab Manager</title>
+  <script src="/static/vendor/tailwindcss-3.4.16.js" integrity="sha384-mS5Uq7sE90lgbBDN8xgf34ibEgbZo4gB3tfLY40ZRle+M188BQw8onzNHg6GUZaA"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .row-hover:hover { background: rgba(255,255,255,0.04); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 5px; }
+  </style>
+  <link rel="stylesheet" href="/static/css/theme.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/interfaces.css?v={{ app_version }}">
+  <script>
+    (function () {
+      try {
+        var r = document.documentElement;
+        var mode = localStorage.getItem('ui.mode') || 'system';
+        var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        r.dataset.theme = localStorage.getItem('ui.theme') || 'midnight';
+        r.dataset.ui = localStorage.getItem('ui.interface') || 'classic';
+        r.dataset.mode = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
+        r.dataset.density = localStorage.getItem('ui.density') || 'comfortable';
+        r.dataset.motion = localStorage.getItem('ui.motion') || 'full';
+        r.style.colorScheme = r.dataset.mode;
+      } catch (e) {}
+    })();
+  </script>
+  <script type="module" src="/static/js/theme.js?v={{ app_version }}"></script>
+</head>
+{# Served standalone (/estate) and embedded in the index.html modal (?embed=1). #}
+{% set embedded = request.args.get('embed') == '1' %}
+<body class="bg-slate-950 text-slate-100 {% if not embedded %}min-h-screen{% endif %}">
+  <div class="max-w-7xl mx-auto {% if embedded %}px-3 py-2.5{% else %}p-4 sm:p-6{% endif %} space-y-4">
+
+    <!-- header -->
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-amber-600/20 border border-amber-500/30 flex items-center justify-center">
+          <svg class="w-5 h-5 text-amber-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 7l8-4 8 4v10l-8 4-8-4V7zm0 0l8 4m8-4l-8 4m0 0v10"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="{% if embedded %}text-base{% else %}text-xl{% endif %} font-semibold leading-tight">The estate</h1>
+          <div class="text-xs termix-muted">
+            what <span class="font-mono">git</span> says each swarm service should run, and what it is running
+            <span id="estate-head" class="ml-2 font-mono"></span>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span id="estate-mode" class="text-xs px-2 py-1 rounded-lg bg-white/10 termix-text">mode …</span>
+        <button id="estate-refresh" type="button" class="text-xs px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Refresh</button>
+        <button id="estate-check-all" type="button" class="text-xs px-2.5 py-1.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-black font-medium">Check upstreams</button>
+      </div>
+    </div>
+
+    <div id="estate-banner" class="text-xs rounded-lg px-3 py-2 border border-white/10 bg-white/5 termix-muted">
+      Reading the estate checkout…
+    </div>
+
+    <!-- counts -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="card rounded-lg p-3">
+        <div class="text-[11px] termix-muted uppercase tracking-wide">Services</div>
+        <div id="estate-count-services" class="text-xl font-semibold">—</div>
+      </div>
+      <div class="card rounded-lg p-3">
+        <div class="text-[11px] termix-muted uppercase tracking-wide">Mirror images</div>
+        <div id="estate-count-mirror" class="text-xl font-semibold">—</div>
+      </div>
+      <div class="card rounded-lg p-3">
+        <div class="text-[11px] termix-muted uppercase tracking-wide">Built from source</div>
+        <div id="estate-count-build" class="text-xl font-semibold">—</div>
+      </div>
+      <div class="card rounded-lg p-3">
+        <div class="text-[11px] termix-muted uppercase tracking-wide">Drift</div>
+        <div id="estate-count-drift" class="text-xl font-semibold">—</div>
+      </div>
+    </div>
+
+    <!-- services -->
+    <div class="card rounded-lg overflow-hidden">
+      <div class="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-2">
+        <h2 class="text-sm font-semibold termix-text">wizard.yaml</h2>
+        <span id="estate-status" class="text-[11px] termix-muted" role="status" aria-live="polite"></span>
+      </div>
+      <div class="overflow-auto" style="max-height: 58vh">
+        <table class="w-full text-sm">
+          <thead class="text-[11px] uppercase tracking-wide termix-muted bg-white/5 sticky top-0">
+            <tr>
+              <th class="text-left py-2 px-3">Service</th>
+              <th class="text-left py-2 px-3">Kind</th>
+              <th class="text-left py-2 px-3">Pinned</th>
+              <th class="text-left py-2 px-3">Upstream</th>
+              <th class="text-left py-2 px-3">Up to date</th>
+              <th class="text-right py-2 px-3">Action</th>
+            </tr>
+          </thead>
+          <tbody id="estate-rows" class="termix-text">
+            <tr><td colspan="6" class="px-3 py-4 text-xs termix-muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- the update dialog, inside the page: a plan, a confirm, then the run -->
+    <div id="estate-run" class="card rounded-lg p-3 space-y-3" hidden>
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 class="text-sm font-semibold termix-text"><span id="estate-run-title">Update</span></h2>
+          <div id="estate-run-sub" class="text-[11px] termix-muted"></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="estate-run-run" type="button" hidden
+                  class="text-xs px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-medium disabled:opacity-40">Run it</button>
+          <button id="estate-run-close" type="button" class="text-xs px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Close</button>
+        </div>
+      </div>
+      <div id="estate-run-bar" class="w-full bg-white/10 rounded-full h-1.5" hidden role="progressbar"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="estate-run-fill" class="bg-amber-400 h-1.5 rounded-full" style="width: 0%"></div>
+      </div>
+      <div id="estate-run-steps" class="space-y-1 text-xs"></div>
+      <pre id="estate-run-log" class="text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words max-h-64 overflow-auto p-3 rounded-lg bg-black/40 border border-white/10" hidden></pre>
+      <div id="estate-run-state" class="text-xs termix-muted" role="status" aria-live="polite"></div>
+    </div>
+
+  </div>
+
+  <script type="module" src="/static/js/estate.js?v={{ app_version }}"></script>
+</body>
+</html>

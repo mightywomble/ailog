@@ -39,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.17.4'
+APP_VERSION = '3.18.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
