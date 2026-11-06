@@ -14,7 +14,7 @@
 # Access: https://ingest.safehomelan.com (NPM -> <node>:8093)
 services:
   ingest:
-    image: zot.safehomelan.com/ingest:${IMAGE_TAG:-build-120}
+    image: zot.safehomelan.com/ingest:${IMAGE_TAG:-build-182}
     environment:
       TZ: "Europe/London"
       # SQLite manifest (documents + runs)

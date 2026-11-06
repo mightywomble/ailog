@@ -24,7 +24,6 @@ Auth: a bearer token (or x-api-key) must match AILOG_MCP_TOKEN. /healthz is open
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex

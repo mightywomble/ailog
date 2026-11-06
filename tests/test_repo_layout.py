@@ -127,8 +127,6 @@ def test_one_repo_builds_and_deploys_from_the_same_tree():
 
 def test_no_workflow_pushes_or_clones_the_old_repo():
     """It is fine to mention the old repo in a comment explaining the merge."""
-    import re
-
     for path in (ROOT / '.gitea' / 'workflows').glob('*.yml'):
         for line in path.read_text().splitlines():
             if line.lstrip().startswith('#'):
@@ -141,3 +139,67 @@ def test_the_stack_tells_the_app_which_repo_is_the_estate():
     assert 'AILOG_ESTATE_REPO' in stack
     assert '/david/ailog.git' in stack or 'david/ailog' in stack
     assert 'AILOG_ESTATE_ROOT' in stack
+
+
+def test_wizard_yaml_and_the_stack_file_pin_the_same_tag():
+    """One pin, written twice, on purpose: the record and the thing deployed.
+
+    They drifted once - ``status`` said build-150 in wizard.yaml and build-128
+    in its stack - and because ``${IMAGE_TAG:-<pin>}`` falls back to the pin on
+    any deploy that did not rebuild the app, the wrong one is what ships.
+    """
+    import re
+
+    import yaml
+
+    wizard = yaml.safe_load((ROOT / 'deploy' / 'wizard.yaml').read_text()) or {}
+    problems = []
+    for svc in wizard.get('services') or []:
+        name = svc.get('name')
+        image, version = str(svc.get('image') or ''), str(svc.get('version') or '')
+        default = re.search(r'\$\{IMAGE_TAG:-([^}]*)\}', image)
+        if default and version and default.group(1) != version:
+            problems.append(f'{name}: wizard.yaml image pins {default.group(1)}, '
+                            f'version says {version}')
+        stack = ROOT / 'deploy' / 'stacks' / str(name) / 'stack.yml'
+        if not stack.is_file() or not default:
+            continue
+        # every ${IMAGE_TAG:-<pin>} in the stack, not just the one whose image
+        # is named after the service ("homelab-wizard" deploys as "wizard")
+        for found in re.findall(r'\$\{IMAGE_TAG:-([^}]*)\}', stack.read_text()):
+            if found != default.group(1):
+                problems.append(f'{name}: stack pins {found}, '
+                                f'wizard.yaml pins {default.group(1)}')
+    assert problems == [], problems
+
+
+def test_the_wizard_writes_under_the_estate_root():
+    """It renders wizard.yaml and the stacks, so it needs the same prefix."""
+    import importlib.util
+
+    # Loaded by path: AILog has its own ``core`` package, and this file is the
+    # wizard's, not that one.
+    spec = importlib.util.spec_from_file_location(
+        'wizard_core', ROOT / 'deploy' / 'apps' / 'homelab-wizard' / 'core.py')
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+    settings_ = {'repo_dir': '/data/repo', 'estate_root': 'deploy'}
+    assert core.rel('wizard.yaml', settings_) == 'deploy/wizard.yaml'
+    assert core.path('stacks/x/stack.yml', settings_) == '/data/repo/deploy/stacks/x/stack.yml'
+    assert core.estate_dir(settings_) == '/data/repo/deploy'
+    # an estate at the repo root is still expressible, for a pre-merge checkout
+    bare = {'repo_dir': '/data/repo', 'estate_root': ''}
+    assert core.rel('wizard.yaml', bare) == 'wizard.yaml'
+    assert core.path('wizard.yaml', bare) == '/data/repo/wizard.yaml'
+
+
+def test_a_stack_absent_from_the_swarm_is_not_created_by_a_push():
+    """deploy/stacks keeps records for services that are not deployed.
+
+    The merge that first brought the whole tree in listed every stack as
+    changed, so without this guard CI would have created them.
+    """
+    ship = (ROOT / '.gitea' / 'workflows' / 'ship.yml').read_text()
+    assert 'docker stack ls' in ship
+    assert 'CREATE_STACKS' in ship
+    assert 'create_stacks' in ship      # the dispatch input that opts in

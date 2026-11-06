@@ -97,10 +97,10 @@ def store(settings, name, value):
     return {"name": name, "rotated": rotated}
 
 
-def audit(wizard, repo_dir):
+def audit(wizard, estate_dir):
     """Every stack file that still has a credential-shaped env value in it."""
     findings = []
-    stacks = os.path.join(repo_dir, "stacks")
+    stacks = os.path.join(estate_dir, "stacks")
     if not os.path.isdir(stacks):
         return findings
     for name in sorted(os.listdir(stacks)):

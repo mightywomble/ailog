@@ -5,7 +5,7 @@ Field names confirmed from live Swagger and API probing on 2026-05-25.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 from pydantic import BaseModel
 
 

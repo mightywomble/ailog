@@ -14,7 +14,11 @@ DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 DEFAULTS = {
     "gitea_url": "https://git.safehomelan.com",
     "gitea_owner": "david",
-    "gitea_repo": "homelab-ops",
+    "gitea_repo": "ailog",
+    # Where the estate lives inside that repo. It used to be its own repository
+    # (homelab-ops); it is part of AILog's tree now, under deploy/, so every
+    # path this service writes carries that prefix.
+    "estate_root": "deploy",
     "gitea_token": "",
     "zot_url": "https://zot.safehomelan.com",
     "zot_user": "",
@@ -45,6 +49,8 @@ def _seed():
         "zot_password": os.environ.get("ZOT_PASSWORD", ""),
         "openrouter_key": os.environ.get("OPENROUTER_API_KEY", ""),
         "openrouter_model": os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL),
+        "gitea_repo": os.environ.get("GIT_REPO", DEFAULTS["gitea_repo"]),
+        "estate_root": os.environ.get("ESTATE_ROOT", DEFAULTS["estate_root"]),
     })
     return data
 
@@ -63,6 +69,14 @@ def load():
                 data.update(json.load(open(SETTINGS_PATH)))
             except Exception:
                 pass
+        # Where the estate lives is a property of the deployment, not a
+        # preference: the container is told at deploy time. settings.json can
+        # still hold "homelab-ops" from when the estate was its own repository,
+        # and honouring that would send the wizard's writes to a checkout that
+        # no longer has them.
+        for key, env in (("gitea_repo", "GIT_REPO"), ("estate_root", "ESTATE_ROOT")):
+            if os.environ.get(env):
+                data[key] = os.environ[env]
         try:
             import vault as secrets_mod
             data = secrets_mod.overlay(data)
@@ -128,6 +142,29 @@ def repo_dir(settings=None):
     return (settings or load())["repo_dir"]
 
 
+def estate_root(settings=None):
+    """``deploy`` when the estate is a directory inside the app's repo, else ''."""
+    return str((settings or load()).get("estate_root") or "").strip("/")
+
+
+def estate_dir(settings=None):
+    """The checkout's estate directory: the repo itself, or the prefix inside it."""
+    root = estate_root(settings)
+    base = repo_dir(settings)
+    return os.path.join(base, root) if root else base
+
+
+def path(relpath, settings=None):
+    """A path inside the estate, with the repo's estate root applied."""
+    return os.path.join(estate_dir(settings), relpath)
+
+
+def rel(relpath, settings=None):
+    """The repo-relative name for a path: what `git add` wants."""
+    root = estate_root(settings)
+    return f"{root}/{relpath}" if root else relpath
+
+
 def _clone_url(settings):
     return settings["gitea_url"].rstrip("/").replace(
         "https://", f"https://oauth2:{settings['gitea_token']}@")
@@ -181,24 +218,24 @@ def sync_if_stale(settings=None, min_interval=60):
 
 
 def read_yaml(name, settings=None):
-    path = os.path.join(repo_dir(settings), name)
-    return (yaml.safe_load(open(path)) or {}) if os.path.exists(path) else {}
+    full = path(name, settings)
+    return (yaml.safe_load(open(full)) or {}) if os.path.exists(full) else {}
 
 
 def write_yaml(name, data, header=""):
-    path = os.path.join(repo_dir(), name)
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w") as fh:
+    full = path(name)
+    os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+    with open(full, "w") as fh:
         fh.write(header or "")
         fh.write(yaml.safe_dump(data, sort_keys=False, width=100))
-    return path
+    return full
 
 
 def write_text(relpath, text):
-    path = os.path.join(repo_dir(), relpath)
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    open(path, "w").write(text)
-    return path
+    full = path(relpath)
+    os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+    open(full, "w").write(text)
+    return full
 
 
 def head():
