@@ -75,6 +75,8 @@ jobs:
         env:
           PROJECTS: ${{ steps.projects.outputs.projects }}
           ZOT_URL: ${{ secrets.ZOT_URL }}
+          ZOT_USER: ${{ secrets.ZOT_USER }}
+          ZOT_PASSWORD: ${{ secrets.ZOT_PASSWORD }}
         run: |
           set -u
           REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
@@ -125,6 +127,14 @@ jobs:
               FAILED="$FAILED $PROJECT"; continue
             fi
 
+            # The host does the pulling, so the host needs the credentials - and
+            # a host that was pulling from ghcr has never needed them. Doing it
+            # here means a new host works without being set up by hand first.
+            if ! $SSH "docker login $REGISTRY -u '$ZOT_USER' --password-stdin" <<< "$ZOT_PASSWORD" >/dev/null 2>&1; then
+              echo "!!! $PROJECT not deployed - could not log $HOST in to $REGISTRY"
+              FAILED="$FAILED $PROJECT"; continue
+            fi
+
             # Keep the file that is running now: a failed health check rolls
             # back to it rather than leaving a half-up project behind.
             $SSH "set -e; cd $TARGET; if [ -f $FILE ]; then cp $FILE $FILE.previous; fi"
@@ -133,7 +143,7 @@ jobs:
             fi
             $SSH "cd $TARGET && mv $FILE.new $FILE"
 
-            if $SSH "cd $TARGET && docker compose -f $FILE pull -q && docker compose -f $FILE up -d --remove-orphans --wait"; then
+            if UP_LOG=$($SSH "cd $TARGET && docker compose -f $FILE pull -q && docker compose -f $FILE up -d --remove-orphans --wait" 2>&1); then
               HEALTHY=1
               if [ -n "$HEALTH_URL" ]; then
                 for attempt in 1 2 3 4 5 6 7 8 9 10; do
@@ -151,6 +161,10 @@ jobs:
               fi
             else
               echo "!!! $PROJECT: compose up failed on $HOST"
+              # Say why. The first run of this failed with nothing but
+              # "compose up failed" because the host could not pull: the pull
+              # error was inside the ssh command, which only returned an exit code.
+              printf '%s\n' "$UP_LOG" | tail -20
             fi
 
             # Rollback
