@@ -10,7 +10,6 @@
   "env_keys": [
     "UPLOAD_LOCATION",
     "DB_DATA_LOCATION",
-    "IMMICH_VERSION",
     "DB_PASSWORD",
     "DB_USERNAME",
     "DB_DATABASE_NAME"
