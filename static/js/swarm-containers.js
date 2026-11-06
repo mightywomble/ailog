@@ -57,6 +57,16 @@
     };
     window.stopSwarmContainers = stop;
 
+    // The version the container is actually running, which is the thing you
+    // look for and the thing a truncated `image:tag` line hides. `build-348`,
+    // `v3.27.0`, `16-alpine` - whatever the tag is, next to the name.
+    const versionBadge = (c) => {
+        const tag = c.image_tag || (c.image || '').split(':').pop() || '';
+        if (!tag || tag === c.image) return '';
+        return `<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-white/10 border border-white/15 font-mono termix-text"
+                      title="${esc((c.image || '') + ':' + tag)}">${esc(tag)}</span>`;
+    };
+
     const row = (c) => {
         const name = c.name || c.short_id || '?';
         const service = c.service || c.stack || '';
@@ -69,9 +79,10 @@
             <td class="py-1.5 pr-3 min-w-0">
                 <div class="flex items-center gap-2 min-w-0">
                     <span class="truncate text-xs termix-text font-medium" title="${esc(name)}">${esc(name)}</span>
+                    ${versionBadge(c)}
                     ${service ? `<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25">${esc(service)}</span>` : ''}
                 </div>
-                <div class="text-[10px] termix-muted truncate">${esc(c.image || '')}${c.image_tag ? ':' + esc(c.image_tag) : ''}</div>
+                <div class="text-[10px] termix-muted truncate">${esc(c.image_name || c.image || '')}</div>
             </td>
             <td class="py-1.5 pr-3 text-right text-xs tabular-nums termix-text whitespace-nowrap">
                 ${bytes(mem)}${memPct == null ? '' : ` <span class="termix-muted text-[10px]">${memPct.toFixed(0)}%</span>`}

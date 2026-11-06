@@ -566,28 +566,18 @@ button.ov-row-link:focus-visible { outline: 2px solid var(--accent); outline-off
   align-items: center;
   gap: .18rem;
 }
+/* Docker blue, always. This square used to be a traffic light - green when
+   nothing needed doing, red when an image had moved on - which made a button
+   into a status, asked a question only a swarm manager can answer of every
+   node, and turned the sidebar into a wall of red for things that were fine.
+   It identifies Docker; the reachability dot beside it carries the state, and
+   what needs updating is on the manager's page. */
 #hosts-sidebar .host-card .hc-docker {
   padding: 0;
-  color: var(--faint);
-  border: 1px solid var(--border);
-  background: transparent;
+  color: var(--docker);
+  border: 1px solid color-mix(in srgb, var(--docker) 45%, transparent);
+  background: color-mix(in srgb, var(--docker) 14%, transparent);
   cursor: pointer;
-}
-/* green = nothing needs doing, red = an update is pending or a container is
-   unhealthy, grey = not scanned yet. A solid square, like the reachability dot. */
-#hosts-sidebar .host-card .hc-docker[data-state="ok"] {
-  background: var(--ok);
-  border-color: var(--ok);
-  color: var(--bg);
-}
-#hosts-sidebar .host-card .hc-docker[data-state="attention"] {
-  background: var(--bad);
-  border-color: var(--bad);
-  color: var(--bg);
-}
-#hosts-sidebar .host-card .hc-docker[data-state="unknown"] {
-  color: var(--faint);
-  border-style: dashed;
 }
 #hosts-sidebar .host-card .hc-docker:hover {
   border-color: var(--text);
@@ -894,8 +884,8 @@ button.ov-row-link:focus-visible { outline: 2px solid var(--accent); outline-off
     display: block;
   }
   #mobile-host-cards .host-card .hc-docker {
-    color: var(--faint);
-    border: 1px solid var(--border);
+    color: var(--docker);
+    border: 1px solid color-mix(in srgb, var(--docker) 45%, transparent);
   }
   #mobile-host-cards .host-card .hc-docker svg {
     width: calc(var(--hc-icon) - 5px);
@@ -912,23 +902,13 @@ button.ov-row-link:focus-visible { outline: 2px solid var(--accent); outline-off
     align-items: center;
     gap: .22rem;
   }
+  /* Docker blue on the phone grid too: same square, same meaning. */
   #mobile-host-cards .host-card .hc-docker {
     padding: 0;
-    background: transparent;
+    color: var(--docker);
+    border: 1px solid color-mix(in srgb, var(--docker) 45%, transparent);
+    background: color-mix(in srgb, var(--docker) 14%, transparent);
     cursor: pointer;
-  }
-  #mobile-host-cards .host-card .hc-docker[data-state="ok"] {
-    background: var(--ok);
-    border-color: var(--ok);
-    color: var(--bg);
-  }
-  #mobile-host-cards .host-card .hc-docker[data-state="attention"] {
-    background: var(--bad);
-    border-color: var(--bad);
-    color: var(--bg);
-  }
-  #mobile-host-cards .host-card .hc-docker[data-state="unknown"] {
-    border-style: dashed;
   }
   /* the reason you are here: a square green prompt below the Docker square */
   #mobile-host-cards .host-card .hc-ssh {

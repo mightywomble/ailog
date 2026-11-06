@@ -16,6 +16,14 @@
    Loaded AFTER style.css so it can retarget the older classes.
    ========================================================================== */
 
+/* One brand colour lives outside the palettes because it is not ours: Docker
+   blue identifies the Docker button on a host card in every theme, and a button
+   that changes colour to report status is a status pretending to be a button. */
+:root {
+  --docker: #2496ed;
+  --docker-ink: #ffffff;
+}
+
 /* A modal backdrop is deliberately theme-independent: it dims whatever is
    behind it, in both light and dark mode. Override per theme if ever needed. */
 :root {

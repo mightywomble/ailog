@@ -43,9 +43,21 @@
 
     // ---------------------------------------------------------------- listing --
 
+    // The options the user last chose for this mount, so "re-check" re-asks the
+    // same question. Pressing it used to run the per-container scan instead -
+    // the panel said every stack was current, and one click later it listed
+    // images needing updates, which is the answer to a different question.
+    const lastOpts = new WeakMap();
+
+    window.recheckSwarmUpdates = function (mount, hostKey) {
+        if (!mount) return Promise.resolve();
+        return window.renderSwarmUpdates(mount, hostKey, { ...(lastOpts.get(mount) || {}), refresh: true });
+    };
+
     window.renderSwarmUpdates = async function (mount, hostKey, options) {
         if (!mount) return;
         const opts = options || {};
+        lastOpts.set(mount, { all: Boolean(opts.all) });
         mount.innerHTML = '<div class="text-xs termix-muted py-2">Reading the cluster…</div>';
         let data;
         try {

@@ -209,10 +209,12 @@ def test_every_icon_is_a_square_of_the_same_size():
     # column is pinned right, Docker sits above SSH, both are icon-sized.
     a_start = card.index('#hosts-sidebar .host-card .hc-actions {')
     actions = card[a_start:card.index('#hosts-sidebar .host-card .hc-docker {', a_start)]
+    assert 'var(--docker)' in card
     assert 'margin-left: auto' in actions
     assert 'flex-direction: column' in actions
     ssh = card[card.index('#hosts-sidebar .host-card .hc-ssh {'):]
     assert 'width: var(--hc-icon)' in ssh
-    # the Docker square is filled green/red, like the reachability square
-    assert '.hc-docker[data-state="ok"]' in card
-    assert '.hc-docker[data-state="attention"]' in card
+    # the Docker square is Docker blue - it identifies Docker, it is not a
+    # status light: what is behind is the manager's question, not every node's
+    assert 'var(--docker)' in card
+    assert '.hc-docker[data-state=' not in card
