@@ -3,7 +3,7 @@
 # Everything else here is hand-maintained and survives a re-render.
 services:
   anchor:
-    image: zot.safehomelan.com/anchor:latest
+    image: zot.safehomelan.com/anchor:0.18.0
     volumes:
     - type: bind
       source: /opt/docker/data/anchor
