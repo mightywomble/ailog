@@ -222,3 +222,56 @@ jobs:
             echo "::error::stacks that failed to deploy:$FAILED"
             exit 1
           fi
+
+  pin:
+    # A build tag does not exist until the image does, so no pull request can
+    # name it: this is the step the two-repository split could never have. The
+    # run that knows the tag writes it into the pins, on the working branch,
+    # and the next PR carries it to main. Without it the pin is only right on
+    # the run that rebuilt the app - every later deploy of that stack falls
+    # back to whatever the file said (ingest ran build-182 with build-120
+    # written down, one unrelated deploy from rolling back 62 builds).
+    needs: [release, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write the deployed tag into the pins
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          set -e
+          if [ -z "$TAG" ]; then
+            echo "no tag from the release job - nothing to pin"
+            exit 0
+          fi
+          git config user.email "ci@safehomelan.com"
+          git config user.name "ailog ci"
+
+          # the apps this merge rebuilt, read before the branch changes
+          APPS=$(git diff --name-only HEAD^1 HEAD | grep '^deploy/apps/' | cut -d/ -f3 | sort -u || true)
+          if [ -z "$APPS" ]; then
+            echo "no apps rebuilt this run - the pins are already right"
+            exit 0
+          fi
+          echo "apps to pin at $TAG: $APPS"
+
+          git fetch origin dev
+          git checkout -q -B "pins/$TAG" origin/dev
+          python3 deploy/tools/pin_build_tag.py "$TAG" $APPS
+
+          if [ -z "$(git status --porcelain -- deploy)" ]; then
+            echo "pins already name $TAG"
+            exit 0
+          fi
+          git add -A -- deploy
+          git commit -q -m "pins: $TAG - the tag this run built and deployed"
+          # A failed pin is a hygiene problem, not a failed deploy: the service
+          # is already running the new tag. Say so and stop.
+          git push origin "HEAD:dev" || {
+            echo "::warning::could not push the pins to dev - the next release will retry"
+            exit 0
+          }
+          echo "pins pushed to dev: $(git log --oneline -1)"
