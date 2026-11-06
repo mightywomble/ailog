@@ -65,15 +65,22 @@ class Repo:
         return os.path.isdir(os.path.join(self.dir, '.git'))
 
     def ensure(self) -> None:
-        if self.exists():
+        if not self.exists():
+            parent = os.path.dirname(self.dir)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            ok, out = _run(['git', 'clone', '--branch', self.branch, settings.authed_url(), self.dir],
+                           cwd=parent or '.')
+            if not ok:
+                raise GitError(f'clone failed: {out[:300]}')
             return
-        parent = os.path.dirname(self.dir)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        ok, out = _run(['git', 'clone', '--branch', self.branch, settings.authed_url(), self.dir],
-                       cwd=parent or '.')
-        if not ok:
-            raise GitError(f'clone failed: {out[:300]}')
+        # A checkout outlives the setting that named it. When the estate moved
+        # from its own repository into this one, every existing checkout kept
+        # the old remote: the sync then stayed *correct and permanently out of
+        # date*, answering with pins from a tree nobody writes to any more.
+        # Pointing the remote at the configured URL on every use is cheap and
+        # makes AILOG_ESTATE_REPO mean what it says.
+        self.git('remote', 'set-url', 'origin', settings.authed_url())
 
     def sync(self) -> str:
         """Fetch and hard-reset to the branch tip. Returns the new head sha.
