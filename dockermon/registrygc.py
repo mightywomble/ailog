@@ -192,16 +192,25 @@ def _running_refs() -> list[str]:
 
 
 def _swarm_refs() -> list[str]:
-    """What the cluster is deployed with, from the last stack scan (digests included)."""
+    """What the cluster is deployed with, from the last stack scan (digests included).
+
+    ``payload['services']`` is a *count* — "28 services on this cluster" — and
+    the deployed images are one level down, in ``stacks[].services[]``. Walking
+    the count raised "'int' object is not iterable" for the whole registry
+    endpoint, but only when a scan had already run in this process: a fresh
+    process had an empty cache and answered fine, which is why it looked like a
+    front-end bug from the outside and passed in a shell.
+    """
     from . import swarmstack
     refs = []
     with swarmstack._lock:
         caches = list(swarmstack._cache.values())
     for _ts, payload in caches:
-        for row in (payload or {}).get('services') or []:
-            image = str(row.get('image') or '')
-            if image:
-                refs.append(image)
+        for stack in (payload or {}).get('stacks') or []:
+            for row in (stack or {}).get('services') or []:
+                image = str(row.get('image') or '')
+                if image:
+                    refs.append(image)
     return refs
 
 

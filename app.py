@@ -39,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.27.1'
+APP_VERSION = '3.28.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -3688,15 +3688,35 @@ def ssh_terminal_socket(ws):
                         timeout=10
                     )
                     _hostkeys.save_known_hosts(ssh_client)
-                    ssh_channel = ssh_client.invoke_shell(
-                        term='xterm-256color',
-                        width=cols,
-                        height=rows
-                    )
+                    # A container shell is the same session one `docker exec`
+                    # deeper: the SSH hop is to the node either way, so nothing
+                    # about keys, known_hosts or the terminal changes - only the
+                    # command the pty runs. "Connect to the container" and not
+                    # "connect to the host, then type docker exec" is the whole
+                    # point of the button.
+                    container = str(data.get('container') or '').strip()
+                    if container:
+                        import shlex as _shlex
+                        transport = ssh_client.get_transport()
+                        channel = transport.open_session()
+                        channel.get_pty(term='xterm-256color', width=cols, height=rows)
+                        channel.exec_command(
+                            f'sudo -n docker exec -it {_shlex.quote(container)} '
+                            f'{_shlex.quote(str(data.get("shell") or "sh"))}'
+                        )
+                        ssh_channel = channel
+                    else:
+                        ssh_channel = ssh_client.invoke_shell(
+                            term='xterm-256color',
+                            width=cols,
+                            height=rows
+                        )
 
                     stop_event.clear()
                     threading.Thread(target=reader_loop, daemon=True).start()
-                    safe_send({'type': 'connected', 'data': {'message': 'SSH connected'}})
+                    safe_send({'type': 'connected',
+                               'data': {'message': 'Connected to ' + (container or 'the host'),
+                                        'container': container}})
                 except Exception as e:
                     cleanup()
                     safe_send({'type': 'error', 'data': {'message': f'Connection failed: {e}'}})
