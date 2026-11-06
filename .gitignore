@@ -29,6 +29,11 @@ instance/
 # Environment files
 .env
 .env.*
+# ...but the checklist is part of the project, not a secret. deploy/compose/
+# <name>/.env.example is how a project says which keys its host .env must
+# define; the wrong pattern here kept it out of the repository while every
+# `git add -A` said it was clean.
+!.env.example
 
 # Local backups / scratch copies
 *.backup
