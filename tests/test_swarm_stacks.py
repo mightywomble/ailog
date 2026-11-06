@@ -127,7 +127,7 @@ def test_versions_offer_what_zot_holds_and_what_it_could_hold(monkeypatch):
         {'tag': '16-alpine', 'digest': 'sha256:' + 'a' * 64, 'in_zot': True, 'kind': 'version'},
         {'tag': '17-alpine', 'digest': 'sha256:' + 'e' * 64, 'in_zot': True, 'kind': 'version'},
     ])
-    monkeypatch.setattr(swarmstack, '_upstream_candidates', lambda repo, sources: [
+    monkeypatch.setattr(swarmstack, '_upstream_candidates', lambda repo, sources, current='': [
         {'tag': '16.5-alpine', 'in_zot': False, 'kind': 'version',
          'source': 'docker.io/library/postgres:16.5-alpine'},
     ])
@@ -200,3 +200,20 @@ def test_an_image_from_upstream_is_not_behind_a_repository_that_shares_its_name(
     assert rows['portainer']['from_zot'] is False
     assert 'not from zot' in rows['portainer']['note'] or 'straight from upstream' in rows['portainer']['note']
     assert out['updates'] == 1
+
+
+def test_the_publisher_tags_a_database_could_take_come_first(monkeypatch):
+    """postgres publishes 19rc1 first and 16.4-alpine last; the 16 comes first.
+
+    The picker shows a dozen upstream tags, so a plain version sort hid the only
+    upgrade a postgres 16 may take behind the releases that would need a dump.
+    """
+    listed = {'host': 'docker.io', 'repo': 'library/postgres',
+              'tags': ['19rc1-alpine', '18.6-alpine', '18-alpine', 'alpine',
+                       '16.5-alpine', '16.4-alpine', '16.3-alpine']}
+    monkeypatch.setattr(swarmstack.reftags, 'list_tags', lambda image, limit=80: listed)
+
+    out = swarmstack._upstream_candidates('postgres16', {'postgres16': 'docker.io/library/postgres:16-alpine'}, '16-alpine')
+
+    assert [c['tag'] for c in out][:3] == ['16.5-alpine', '16.4-alpine', '16.3-alpine']
+    assert '19rc1-alpine' in [c['tag'] for c in out]      # still offered, and blocked downstream
