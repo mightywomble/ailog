@@ -369,3 +369,51 @@ def test_a_compose_service_is_still_an_update(monkeypatch):
     out = dupdates.updates_for('casaos', containers, lambda command: (True, ''))
     assert len(out['updates']) == 1
     assert out['self_managed'] == {}
+
+
+def test_a_retired_task_on_another_node_is_not_an_update(monkeypatch):
+    """The real one: metamcp_postgres "needed an update" for a day.
+
+    A deploy moves the task to another node and leaves the previous container
+    exited on the node it ran on. Scanned on its own that node sees a dead
+    container holding the old image digest - `docker ps -a` cannot tell it from
+    a stopped container someone cares about. The cluster can: the service is
+    running, on a different host.
+    """
+    import dockermon.updates as dupdates
+    _stub_registry(monkeypatch, digest='sha256:' + 'b' * 64)
+    monkeypatch.setattr(dupdates, 'all_state', lambda: {
+        # the node the task moved to
+        'db-12': {'containers': [
+            {'name': 'metamcp_postgres.1.jqk78uar7bme', 'state': 'running',
+             'service': 'metamcp_postgres', 'image': 'zot/postgres16:16-alpine'},
+        ]},
+        # this node: the retired revision, holding the old digest
+        'db-11': {'containers': [
+            {'name': 'metamcp_postgres.1.x865qef475up', 'state': 'exited',
+             'service': 'metamcp_postgres', 'image': 'zot/postgres16:16-alpine'},
+        ]},
+    })
+    containers = [{'name': 'metamcp_postgres.1.x865qef475up',
+                   'image': 'zot/postgres16:16-alpine', 'state': 'exited',
+                   'service': 'metamcp_postgres'}]
+
+    out = dupdates.updates_for('db-11', containers, lambda command: (True, ''))
+
+    assert out['updates'] == []
+    assert out['attention_only'] == []
+    assert out['containers'] == []
+
+
+def test_a_swarm_service_running_nowhere_is_still_not_an_update(monkeypatch):
+    """Dead is an alert, never an upgrade - even when the cluster agrees it is dead."""
+    import dockermon.updates as dupdates
+    _stub_registry(monkeypatch, digest='sha256:' + 'b' * 64)
+    monkeypatch.setattr(dupdates, 'all_state', lambda: {})
+    containers = [{'name': 'web_web.1.old', 'image': 'zot/web:v1', 'state': 'exited',
+                   'service': 'web_web'}]
+
+    out = dupdates.updates_for('h', containers, lambda command: (True, ''))
+
+    assert out['updates'] == []
+    assert [a['name'] for a in out['attention_only']] == ['web_web.1.old']

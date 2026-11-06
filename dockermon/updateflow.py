@@ -733,3 +733,139 @@ def start(app, host_key: str, image: str = '', container: str = '') -> dict:
     threading.Thread(target=_worker, args=(app, job_id, host_key, image, container),
                      name=f'docker-update-{job_id}', daemon=True).start()
     return job(job_id)
+
+
+# --------------------------------------------------------------------------
+# stack updates: the swarm way
+# --------------------------------------------------------------------------
+
+def _stack_worker(app, job_id: str, host_key: str, stack: str, service: str,
+                  version: str, prune: bool) -> None:
+    """One service of one stack, moved to a chosen version and proved running."""
+    from estate import stackservice, update as estupdate
+    from estate import render, settings as estatesettings
+    from estate.update import LinkedSink
+    from . import registrygc, swarmstack
+
+    with app.app_context():
+        try:
+            _job_step(job_id, 'read the cluster', detail=f'{stack}/{service}')
+            plan = swarmstack.versions(host_key, stack, service)
+            current = plan['current']
+            _job_step(job_id, 'read the cluster', ok=True,
+                      detail=f"{current['tag']} @ {(current['digest'] or '?')[:19]}")
+
+            chosen = next((c for c in plan['candidates'] if c['tag'] == version), None)
+            if chosen and chosen.get('blocked'):
+                _job_update(job_id, status='blocked', error=chosen['blocked'])
+                _job_step(job_id, 'resolve version', ok=False, detail=chosen['blocked'])
+                return
+            if version != current['tag'] and not chosen:
+                raise RuntimeError(f'{version} is not a version zot holds or upstream publishes '
+                                   f'for {plan["target_repo"]}')
+            mirror_source = ''
+            if chosen and not chosen.get('in_zot'):
+                mirror_source = chosen.get('source') or ''
+            _job_step(job_id, 'resolve version', ok=True,
+                      detail=f"{current['tag']} -> {version}"
+                             + (' (mirror into zot first)' if mirror_source else
+                                ('' if version != current['tag'] else ' (same tag, newer digest)')))
+
+            # Same tag, different digest: nothing in git changes, so the honest
+            # move is to roll the service onto the digest zot serves now.
+            if version == current['tag']:
+                _job_step(job_id, 'roll the service onto the new digest')
+                _info, run = _runner(host_key)
+                command = ('$DK service update --image {image} --with-registry-auth --force {svc}'
+                           .format(image=shlex.quote(current['image']),
+                                   svc=shlex.quote(f'{stack}_{service}')))
+                ok, out = run(PRELUDE + command, timeout=RUN_TIMEOUT)
+                for line in (out or '').strip().splitlines():
+                    _job_log(job_id, line)
+                _job_step(job_id, 'roll the service onto the new digest', ok=ok,
+                          detail='' if ok else (out or '').strip()[:200])
+                if not ok:
+                    raise RuntimeError('docker service update failed - see the log')
+                _job_progress(job_id, 70)
+            else:
+                sink = LinkedSink(
+                    step=lambda label, ok=None, detail='': _job_step(job_id, label, ok=ok, detail=detail),
+                    log=lambda text: _job_log(job_id, text),
+                    progress=lambda pct: _job_progress(job_id, pct),
+                )
+                entry = None
+                try:
+                    from estate.git import Repo
+                    entry = render.find_service(
+                        render.load_intent(Repo().read('wizard.yaml')), stack)
+                except Exception:                 # noqa: BLE001 - a missing tree is not fatal
+                    entry = None
+                wizard_service = (render.service_of(entry) if entry else '') or ''
+                if (entry and wizard_service == service and entry.get('kind') != 'build'
+                        and estatesettings.enabled()):
+                    # The estate's own service: let the estate move its pin,
+                    # its mirror entry and its wizard.yaml version together.
+                    estupdate.perform(stack, sink, version=version)
+                else:
+                    stackservice.perform(stack, service, version, sink,
+                                         mirror_source=mirror_source)
+                _job_progress(job_id, 90)
+
+            _job_step(job_id, 'verify running', detail=f'{stack}/{service} on {version}')
+            stackservice.wait_for_service(host_key, stack, service, version,
+                                          LinkedSink(
+                                              step=lambda label, ok=None, detail='':
+                                              _job_step(job_id, label, ok=ok, detail=detail),
+                                              log=lambda text: _job_log(job_id, text),
+                                              progress=lambda pct: None,
+                                          ))
+            _job_progress(job_id, 96)
+
+            if prune:
+                _job_step(job_id, 'prune zot', detail=f'keeping the last {registrygc.keep_default()}')
+                try:
+                    result = registrygc.prune(repos=[plan['target_repo']])
+                    count = len(result.get('deleted') or [])
+                    _job_step(job_id, 'prune zot', ok=True,
+                              detail=f'{count} old tag(s) removed from {plan["target_repo"]}'
+                                     if count else 'nothing to remove')
+                except Exception as exc:          # noqa: BLE001 - never fail an update on this
+                    _job_step(job_id, 'prune zot', ok=False, detail=str(exc)[:200])
+            _job_progress(job_id, 100)
+            _job_update(job_id, status='done', note='deployed by CI and verified running')
+        except Exception as exc:                  # noqa: BLE001 - shown in the dialog
+            _job_update(job_id, status='error', error=str(exc) or exc.__class__.__name__)
+            _job_log(job_id, f'!! {exc}')
+        finally:
+            _job_update(job_id, finished=time.time())
+            release_session()
+
+
+def start_stack(app, host_key: str, stack: str, service: str, version: str,
+                prune: bool = True) -> dict:
+    """Queue a stack-service update; the dialog polls it like any other job."""
+    _prune()
+    job_id = uuid.uuid4().hex[:12]
+    with _jobs_lock:
+        _jobs[job_id] = {
+            'id': job_id,
+            'host_key': host_key,
+            'image': '',
+            'container': f'{stack}_{service}',
+            'stack': stack,
+            'service': service,
+            'version': version,
+            'status': 'running',
+            'label': 'queued',
+            'progress': 0.0,
+            'steps': [],
+            'output': [],
+            'plan': None,
+            'error': '',
+            'started': time.time(),
+            'finished': 0.0,
+        }
+    threading.Thread(target=_stack_worker,
+                     args=(app, job_id, host_key, stack, service, version, prune),
+                     name=f'swarm-update-{job_id}', daemon=True).start()
+    return job(job_id)
