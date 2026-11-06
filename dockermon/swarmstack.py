@@ -53,12 +53,20 @@ _cache: dict[str, tuple[float, dict]] = {}
 DATABASES = ('postgres', 'postgres16', 'mysql', 'mariadb', 'mongo', 'redis',
              'valkey', 'clickhouse', 'timescale', 'couchdb')
 
+# ``{{if .Spec.Mode.Global}}`` is the obvious way to ask "is this global?" and
+# it is a trap: docker renders templates with missingkey=error, so the map that
+# describes a *global* service has no ``Replicated`` key and the one that
+# describes a replicated service has no ``Global`` key - either question fails
+# on half the cluster with "map has no entry for key". ``json .Spec.Mode`` asks
+# nothing and cannot fail. The task counts are just as conditional (a service
+# created seconds ago has no ServiceStatus at all), so they come from
+# ``docker service ls``, which always has them.
 SWARM_INSPECT = (
     "{{.Spec.Name}}\t{{index .Spec.Labels \"com.docker.stack.namespace\"}}\t"
-    "{{.Spec.TaskTemplate.ContainerSpec.Image}}\t"
-    "{{if .Spec.Mode.Global}}global{{else}}replicated{{end}}\t"
-    "{{.ServiceStatus.RunningTasks}}/{{.ServiceStatus.DesiredTasks}}"
+    "{{.Spec.TaskTemplate.ContainerSpec.Image}}\t{{json .Spec.Mode}}"
 )
+
+SWARM_REPLICAS = '{{.Name}}\t{{.Replicas}}'
 
 
 def parse_ref(image: str) -> dict:
@@ -93,12 +101,21 @@ def read_services(run) -> list[dict]:
     ok, out = run(PRELUDE + inspect, timeout=45)
     if not ok:
         raise RuntimeError((out or 'docker service inspect failed').strip()[:300])
+    counts = {}
+    ok_r, out_r = run(PRELUDE + '$DK service ls --format \'' + SWARM_REPLICAS + '\'', timeout=30)
+    if ok_r:
+        for line in (out_r or '').splitlines():
+            bits = line.split('\t')
+            if len(bits) >= 2:
+                counts[bits[0].strip()] = bits[1].strip()
     rows = []
     for line in (out or '').splitlines():
         parts = line.split('\t')
-        if len(parts) < 5 or not parts[0].strip():
+        if len(parts) < 4 or not parts[0].strip():
             continue
-        name, stack, image, mode, replicas = [p.strip() for p in parts[:5]]
+        name, stack, image, mode_json = [p.strip() for p in parts[:4]]
+        mode = 'global' if 'Global' in mode_json else 'replicated'
+        replicas = counts.get(name, '')
         ref = parse_ref(image)
         rows.append({
             'service': name,
