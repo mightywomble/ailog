@@ -155,8 +155,22 @@
 
     <!-- apps view: containers grouped by stack (swarm service / compose project) -->
     <div id="view-apps" class="hidden mt-5">
+      <!-- What is running on this node: every swarm node can answer this, so
+           every swarm node shows it - workers included. Four panes: name, RAM,
+           CPU, network. -->
+      <section id="swarm-containers" class="hidden mb-4 rounded-xl border border-white/10 bg-white/5 p-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Containers on this node</h2>
+          <span id="swarm-containers-count" class="text-xs text-slate-400"></span>
+        </div>
+        <div id="swarm-containers-list" class="mt-2 max-h-96 overflow-auto" data-count="swarm-containers-count"></div>
+      </section>
+
       <!-- On a manager this is the update list: one row per stack, because a
-           service is the thing that has a version and a container is not. -->
+           service is the thing that has a version and a container is not.
+           A worker does not get this section at all: it cannot see the cluster,
+           so anything it said here would be a guess - and updates are started
+           from the manager or not at all. -->
       <section id="swarm-updates" class="hidden mb-4 rounded-xl border border-white/10 bg-white/5 p-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <h2 class="text-sm font-medium uppercase tracking-wide text-slate-400">Stack updates</h2>
@@ -197,6 +211,7 @@
 {% include "partials/swarm-update-modal.html" %}
 
 <script type="module" src="/static/js/swarm-update.js?v={{ app_version }}"></script>
+<script type="module" src="/static/js/swarm-containers.js?v={{ app_version }}"></script>
 <script>
 (function () {
   const HOST_KEY = {{ host_key|tojson }};
@@ -223,6 +238,9 @@
     failures: 0,
     view: 'overview',
     swarm: null,
+    swarmPanelsLoaded: false,
+    swarmUpdatesLoaded: false,
+    swarmContainersLoaded: false,
     appsOpen: new Set(),
     appFilter: '',
   };
@@ -414,21 +432,62 @@
       ctx => ' ' + ctx.dataset.label + ': ' + humanRate(ctx.parsed.y);
 
     if (s.swarm && !state.nodes.length) loadNodes();
-    // A worker's page shows the same docker information minus the upgrades: it
-    // cannot see the cluster, so it cannot answer "what needs updating".
-    const updatesSection = document.getElementById('swarm-updates');
-    if (updatesSection && s.swarm) {
-      updatesSection.classList.remove('hidden');
-      if (!state.swarmUpdatesLoaded) {
-        state.swarmUpdatesLoaded = true;
-        if (typeof window.renderSwarmUpdates === 'function') {
-          window.renderSwarmUpdates(document.getElementById('swarm-updates-list'), HOST_KEY, { all: false });
-        }
-      }
+    // Once per page: the panel counts its own re-checks, and stats come every
+    // two seconds - asking the manager what is behind on that cadence would be
+    // a request per heartbeat for an answer that changes daily.
+    if (s.swarm && !state.swarmPanelsLoaded) {
+      state.swarmPanelsLoaded = true;
+      loadSwarmPanels();
     }
     document.getElementById('swarm-section').classList.toggle('hidden', !s.swarm);
     document.getElementById('tab-cluster').classList.toggle('hidden', !s.swarm);
     if (!state.swarm) loadSwarm();
+  }
+
+  // ------------------------------------------------------- swarm apps panels
+  // Two panels, one question each. The container table is about this node and
+  // every swarm node gets it. The stack-update panel is about the cluster and
+  // only a manager can answer it - so a worker never sees it, and no update
+  // starts anywhere but the manager.
+  async function loadSwarmPanels() {
+    const containersSection = document.getElementById('swarm-containers');
+    if (containersSection) {
+      containersSection.classList.remove('hidden');
+      if (!state.swarmContainersLoaded) {
+        state.swarmContainersLoaded = true;
+        if (typeof window.renderSwarmContainers === 'function') {
+          window.renderSwarmContainers(
+            document.getElementById('swarm-containers-list'), HOST_KEY, {});
+        }
+      }
+    }
+    const updatesSection = document.getElementById('swarm-updates');
+    if (!updatesSection) return;
+    let body;
+    try {
+      body = await getJSON(API + '/swarm/stacks');
+    } catch (e) {
+      updatesSection.classList.add('hidden');
+      return;
+    }
+    if (!body || !body.manager) {
+      updatesSection.classList.add('hidden');
+      state.swarmUpdatesLoaded = false;
+      return;
+    }
+    updatesSection.classList.remove('hidden');
+    const count = document.getElementById('swarm-updates-count');
+    if (count) {
+      count.textContent = body.updates
+        ? body.updates + ' service' + (body.updates === 1 ? '' : 's') + ' behind'
+        : 'every stack current';
+    }
+    if (!state.swarmUpdatesLoaded) {
+      state.swarmUpdatesLoaded = true;
+      if (typeof window.renderSwarmUpdates === 'function') {
+        window.renderSwarmUpdates(document.getElementById('swarm-updates-list'), HOST_KEY, { all: false });
+      }
+    }
   }
 
   // ---------------------------------------------------------------- swarm nodes

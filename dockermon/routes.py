@@ -412,6 +412,51 @@ def api_stats(host_key):
     return jsonify({'success': True, 'stats': totals})
 
 
+_ctr_net_lock = threading.Lock()
+# host_key -> (when, {container id: (rx_total, tx_total)}) so a container's
+# cumulative counters can be turned into a rate the way the host's are.
+_ctr_net_cache: dict[str, tuple[float, dict[str, tuple[int, int]]]] = {}
+
+
+def _container_net_rates(host_key: str, rows: list[dict]) -> None:
+    """Give every container ``net_rx_bps``/``net_tx_bps``, on any transport.
+
+    Over SSH the snapshot has already done this (and left the cumulative
+    figures in ``net_rx_total``); the Engine API reports counters only, so the
+    two transports disagreed about what ``net_rx`` meant - 11 MB a second for a
+    container that had been idle for hours. Both now answer the same question,
+    and nothing has to know which transport answered it.
+    """
+    now = time.time()
+    with _ctr_net_lock:
+        prev = _ctr_net_cache.get(host_key)
+    counters: dict[str, tuple[int, int]] = {}
+    for row in rows:
+        if 'net_rx_bps' in row:
+            continue
+        cid = row.get('id') or ''
+        if not cid:
+            continue
+        rx = int(row.get('net_rx_total', row.get('net_rx')) or 0)
+        tx = int(row.get('net_tx_total', row.get('net_tx')) or 0)
+        counters[cid] = (rx, tx)
+        row['net_rx_total'] = rx
+        row['net_tx_total'] = tx
+        before = (prev[1].get(cid) if prev else None)
+        if not before:
+            row['net_rx_bps'] = 0.0
+            row['net_tx_bps'] = 0.0
+            continue
+        elapsed = max(now - prev[0], 0.001)
+        row['net_rx_bps'] = round(max(0, rx - before[0]) / elapsed, 2)
+        row['net_tx_bps'] = round(max(0, tx - before[1]) / elapsed, 2)
+    with _ctr_net_lock:
+        _ctr_net_cache[host_key] = (now, counters)
+        if len(_ctr_net_cache) > 64:
+            for key in [k for k, v in _ctr_net_cache.items() if now - v[0] > 300]:
+                _ctr_net_cache.pop(key, None)
+
+
 @docker_bp.route('/api/docker/hosts/<path:host_key>/containers')
 def api_containers(host_key):
     try:
@@ -425,6 +470,7 @@ def api_containers(host_key):
             return _error(exc)
     else:
         rows = dstats.collect_containers(client)
+    _container_net_rates(host_key, rows)
     node_filter = request.args.get('node_id')
     if node_filter:
         rows = [r for r in rows if r.get('node_id') == node_filter]

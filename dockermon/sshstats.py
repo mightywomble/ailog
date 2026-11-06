@@ -317,6 +317,10 @@ def snapshot(host_key, user, ip, ssh_key_id=None, timeout: int = 25):
             continue
         usage = usage_by_id.get(parsed['id'][:12]) or usage_by_id.get(parsed['id'])
         containers.append(_container_row(parsed, usage))
+    # `docker stats` reports cumulative counters. The node view has always
+    # converted them to bytes/second; this one shipped the raw totals, so a
+    # container that had been up for hours "used" 11 MB/s on every poll.
+    _container_rates(containers, usage_by_id, time.time())
 
     proc = parse_proc_stat(blocks.get('stat', ''))
     mem = parse_meminfo(blocks.get('mem', ''))
@@ -561,6 +565,11 @@ def _container_rates(rows, usage_by_id, now):
             else:
                 row['net_rx'] = 0.0
                 row['net_tx'] = 0.0
+            # Named fields, because `net_rx` means bytes/second in this module
+            # and cumulative bytes in dockermon/stats.py, and a caller that
+            # wants to draw a number should not have to know which.
+            row['net_rx_bps'] = row['net_rx']
+            row['net_tx_bps'] = row['net_tx']
             row['net_rx_total'] = rx
             row['net_tx_total'] = tx
             updates[cid] = (now, rx, tx)
