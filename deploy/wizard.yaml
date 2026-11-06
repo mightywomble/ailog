@@ -35,7 +35,7 @@ services:
   kind: build
   release: manual
   service: ailog
-  image: zot.safehomelan.com/ailog:v3.26.2
+  image: zot.safehomelan.com/ailog:v3.26.3
   repo: ailog
   version: v3.25.2
   source: ''
