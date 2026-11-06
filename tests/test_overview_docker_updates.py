@@ -321,3 +321,24 @@ def test_the_row_link_looks_like_text_until_hovered():
     assert 'cursor: pointer' in block
     assert ':focus-visible' in block
     assert not re.search(r'#[0-9a-fA-F]{3,8}\b', block), 'a literal hex colour would break the theme switcher'
+
+
+def test_a_retired_swarm_task_is_not_an_update(ctx, scan):
+    """The phantom row: an exited revision on one node, the real task elsewhere.
+
+    After a deploy docker keeps the previous task's container on the node it
+    ran on. Scanned on its own that container carries the old image digest, so
+    it reads as "newer image upstream" forever - metamcp_postgres stayed in
+    this card for a day after its service moved on, because the retired task
+    was on the manager and the running one on a worker.
+    """
+    state, _queued = scan
+    retired = dict(_row('metamcp_postgres.1.x865qef4', image='zot/postgres16:16-alpine'),
+                   state='exited')
+    state['db-11'] = _host_state(retired)
+    state['db-12'] = _host_state(_row('metamcp_app.1.abc1234',
+                                      image='zot.safehomelan.com/metamcp:build-317'))
+
+    out = overview_routes._docker_updates()
+
+    assert [r['container'] for r in out['rows']] == ['metamcp_app.1.abc1234']
