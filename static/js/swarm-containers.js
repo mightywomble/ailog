@@ -1,22 +1,23 @@
-/* What is actually running on this node, in four columns.
+/* What is actually running on this node, as panes you can open.
 
    A swarm node's page has two different questions on it and they were being
    answered by one list. "What needs updating?" is a question about the
    *cluster* - a service's image, its tag, whether zot has moved on - and only a
    manager can answer it. "What is this machine doing?" is a question about
-   *containers* - name, RAM, CPU, network - and every node can answer it,
-   workers included.
+   *containers* - name, version, RAM, CPU, network - and every node can answer
+   it, workers included.
 
    So the workers lost the update list (they never had the truth to put in it)
-   and every node gained this: one row per running container, four panes.
-   Reads /api/docker/hosts/<key>/containers, which reports net_rx_bps /
-   net_tx_bps per container on both transports, and polls while it is on screen.
+   and every node gained this: a pane per running container, two or three to a
+   row. Clicking a pane opens it: three live graphs, the image version, and a
+   terminal *inside* the container - not on the host it happens to be running
+   on, which is the thing you would otherwise have to work out and type.
 */
 
 (function () {
     const POLL_MS = 5000;
-
-    const el = (id) => document.getElementById(id);
+    const POLL_OPEN_MS = 2000;      // an open pane is being watched: keep it live
+    const HISTORY = 60;             // samples kept per container, ~2 min at 2s
 
     const esc = (value) => String(value == null ? '' : value)
         .replace(/&/g, '&amp;')
@@ -45,21 +46,78 @@
 
     const pct = (value) => (value == null || value === '' ? '\u2013' : Number(value).toFixed(1) + '%');
 
-    // One poller per mount, so re-rendering the pane does not leave timers
-    // behind - and a timer that outlives its element is how a page gets slower
-    // the longer it is open.
-    const timers = new WeakMap();
+    // Per mount: the timers, the open panes and the samples, so a re-render
+    // never leaves a timer behind and an open pane keeps its history.
+    const mounts = new WeakMap();
+    const state = (mount) => {
+        let s = mounts.get(mount);
+        if (!s) {
+            s = { timer: null, open: new Set(), series: new Map() };
+            mounts.set(mount, s);
+        }
+        return s;
+    };
 
     const stop = (mount) => {
-        const timer = timers.get(mount);
-        if (timer) clearTimeout(timer);
-        timers.delete(mount);
+        if (!mount) return;
+        const s = mounts.get(mount);
+        if (s && s.timer) clearTimeout(s.timer);
+        if (s) s.timer = null;
     };
     window.stopSwarmContainers = stop;
 
-    // The version the container is actually running, which is the thing you
-    // look for and the thing a truncated `image:tag` line hides. `build-348`,
-    // `v3.27.0`, `16-alpine` - whatever the tag is, next to the name.
+    const push = (s, id, cpu, mem, netIn, netOut) => {
+        let series = s.series.get(id);
+        if (!series) {
+            series = { cpu: [], mem: [], net: [] };
+            s.series.set(id, series);
+        }
+        series.cpu.push(Number(cpu) || 0);
+        series.mem.push(Number(mem) || 0);
+        series.net.push((Number(netIn) || 0) + (Number(netOut) || 0));
+        ['cpu', 'mem', 'net'].forEach((key) => {
+            while (series[key].length > HISTORY) series[key].shift();
+        });
+    };
+
+    // A sparkline, drawn by hand: three of them per open pane, and a chart
+    // library for sixty points of two numbers is a dependency nobody needs.
+    const draw = (canvas, values, colour, kind) => {
+        if (!canvas) return;
+        const dpr = window.devicePixelRatio || 1;
+        const width = canvas.clientWidth || 220;
+        const height = canvas.clientHeight || 48;
+        if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+            canvas.width = Math.round(width * dpr);
+            canvas.height = Math.round(height * dpr);
+        }
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        if (!values.length) return;
+
+        const max = kind === 'pct' ? 100 : Math.max(...values, 1);
+        const stepX = values.length > 1 ? width / (values.length - 1) : width;
+        const y = (v) => height - 2 - (Math.min(v, max) / max) * (height - 4);
+
+        ctx.beginPath();
+        values.forEach((v, i) => {
+            const x = i * stepX;
+            if (i === 0) ctx.moveTo(x, y(v));
+            else ctx.lineTo(x, y(v));
+        });
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // a soft fill under the line, so a flat idle graph still reads as a graph
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+        ctx.fillStyle = colour.replace('rgb', 'rgba').replace(')', ', 0.15)');
+        ctx.fill();
+    };
+
     const versionBadge = (c) => {
         const tag = c.image_tag || (c.image || '').split(':').pop() || '';
         if (!tag || tag === c.image) return '';
@@ -67,88 +125,177 @@
                       title="${esc((c.image || '') + ':' + tag)}">${esc(tag)}</span>`;
     };
 
-    const row = (c) => {
+    const charts = (c, s) => {
+        const series = s.series.get(c.id) || { cpu: [], mem: [], net: [] };
+        const boxes = [
+            ['CPU', 'cpu', 'rgb(56, 189, 248)', pct(c.cpu_percent)],
+            ['RAM', 'mem', 'rgb(167, 139, 250)', bytes(c.mem_used)],
+            ['NET', 'net', 'rgb(52, 211, 153)', `${rate(Number(c.net_rx_bps || 0) + Number(c.net_tx_bps || 0))}`],
+        ];
+        return `<div class="grid grid-cols-3 gap-2 mt-2">
+            ${boxes.map(([label, key, colour, now]) => `
+                <div class="rounded bg-black/30 border border-white/10 p-1.5">
+                    <div class="flex items-baseline justify-between">
+                        <span class="text-[10px] uppercase tracking-wide termix-muted">${label}</span>
+                        <span class="text-[10px] tabular-nums termix-text">${esc(now)}</span>
+                    </div>
+                    <canvas class="w-full h-12 block" data-chart="${key}" data-colour="${colour}"
+                            style="height:48px"></canvas>
+                </div>`).join('')}
+        </div>`;
+    };
+
+    const pane = (c, isOpen, s) => {
         const name = c.name || c.short_id || '?';
         const service = c.service || c.stack || '';
         const cpu = Number(c.cpu_percent || 0);
-        const mem = Number(c.mem_used || 0);
-        const memPct = c.mem_percent == null ? null : Number(c.mem_percent);
         const netIn = Number(c.net_rx_bps || 0);
         const netOut = Number(c.net_tx_bps || 0);
-        return `<tr class="border-t border-white/5">
-            <td class="py-1.5 pr-3 min-w-0">
-                <div class="flex items-center gap-2 min-w-0">
-                    <span class="truncate text-xs termix-text font-medium" title="${esc(name)}">${esc(name)}</span>
-                    ${versionBadge(c)}
-                    ${service ? `<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25">${esc(service)}</span>` : ''}
+        return `<div class="rounded-lg border border-white/10 bg-white/5 ${isOpen ? 'sm:col-span-2 xl:col-span-3' : ''}"
+                     data-pane="${esc(c.id)}">
+            <button type="button" class="w-full text-left p-2" data-toggle="${esc(c.id)}">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                            <span class="truncate text-xs termix-text font-medium" title="${esc(name)}">${esc(name)}</span>
+                            ${versionBadge(c)}
+                            ${service ? `<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25">${esc(service)}</span>` : ''}
+                        </div>
+                        <div class="text-[10px] termix-muted truncate">${esc(c.image_name || c.image || '')}</div>
+                    </div>
+                    <svg class="w-3.5 h-3.5 shrink-0 termix-muted transition-transform ${isOpen ? 'rotate-90' : ''}"
+                         fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+                    </svg>
                 </div>
-                <div class="text-[10px] termix-muted truncate">${esc(c.image_name || c.image || '')}</div>
-            </td>
-            <td class="py-1.5 pr-3 text-right text-xs tabular-nums termix-text whitespace-nowrap">
-                ${bytes(mem)}${memPct == null ? '' : ` <span class="termix-muted text-[10px]">${memPct.toFixed(0)}%</span>`}
-            </td>
-            <td class="py-1.5 pr-3 text-right text-xs tabular-nums whitespace-nowrap ${cpu >= 80 ? 'text-amber-300' : 'termix-text'}">
-                ${pct(cpu)}
-            </td>
-            <td class="py-1.5 text-right text-xs tabular-nums whitespace-nowrap">
-                <span class="text-emerald-300">&darr; ${rate(netIn)}</span>
-                <span class="text-amber-300 ml-2">&uarr; ${rate(netOut)}</span>
-            </td>
-        </tr>`;
+                <div class="mt-1 grid grid-cols-3 gap-1 text-[10px] tabular-nums">
+                    <span class="termix-text">${bytes(c.mem_used)}<span class="termix-muted"> ram</span></span>
+                    <span class="${cpu >= 80 ? 'text-amber-300' : 'termix-text'}">${pct(cpu)}<span class="termix-muted"> cpu</span></span>
+                    <span class="termix-text truncate"><span class="text-emerald-300">\u2193${rate(netIn)}</span>
+                        <span class="text-amber-300">\u2191${rate(netOut)}</span></span>
+                </div>
+            </button>
+            <div class="px-2 pb-2 ${isOpen ? '' : 'hidden'}" data-detail="${esc(c.id)}">
+                ${isOpen ? charts(c, s) : ''}
+                <div class="flex items-center justify-between gap-2 mt-2">
+                    <span class="text-[10px] termix-muted truncate" title="${esc(c.image || '')}">
+                        ${esc(c.image || '')}${c.image_tag ? ':' + esc(c.image_tag) : ''}
+                    </span>
+                    ${typeof window.openContainerShell === 'function' ? `
+                    <button type="button" data-shell="${esc(c.id)}"
+                            class="shrink-0 text-[11px] px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white font-medium">
+                        ssh into container
+                    </button>` : ''}
+                </div>
+                <div class="text-[10px] text-red-400 mt-1 hidden" data-shell-error></div>
+            </div>
+        </div>`;
     };
 
-    const table = (rows) => `
-        <table class="w-full table-fixed">
-            <thead>
-                <tr class="text-[10px] uppercase tracking-wide termix-muted">
-                    <th class="text-left font-medium pb-1 w-[46%]">Container</th>
-                    <th class="text-right font-medium pb-1 w-[16%]">RAM</th>
-                    <th class="text-right font-medium pb-1 w-[12%]">CPU</th>
-                    <th class="text-right font-medium pb-1 w-[26%]">Network</th>
-                </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-        </table>`;
+    const wire = (mount, hostKey, containers, options) => {
+        const s = state(mount);
+        mount.querySelectorAll('[data-toggle]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const id = button.dataset.toggle;
+                if (s.open.has(id)) s.open.delete(id);
+                else s.open.add(id);
+                render(mount, hostKey, containers, options);
+            });
+        });
+        mount.querySelectorAll('[data-shell]').forEach((button) => {
+            button.addEventListener('click', async (event) => {
+                event.stopPropagation();
+                const id = button.dataset.shell;
+                const errorBox = button.closest('[data-detail]')?.querySelector('[data-shell-error]');
+                button.disabled = true;
+                const label = button.textContent;
+                button.textContent = 'checking\u2026';
+                try {
+                    const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostKey)}`
+                        + `/containers/${encodeURIComponent(id)}/shell`, { headers: { Accept: 'application/json' } });
+                    const data = await res.json();
+                    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+                    if (typeof window.openContainerShell !== 'function') {
+                        throw new Error('the terminal is not available on this page');
+                    }
+                    await window.openContainerShell(hostKey, id, data.shell);
+                    button.textContent = 'open';
+                } catch (err) {
+                    if (errorBox) {
+                        errorBox.textContent = err.message;
+                        errorBox.classList.remove('hidden');
+                    }
+                    button.textContent = label;
+                } finally {
+                    button.disabled = false;
+                }
+            });
+        });
+    };
 
-    const load = async (mount, hostKey, options) => {
-        const opts = options || {};
-        let data;
-        try {
-            const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostKey)}/containers`,
-                { headers: { Accept: 'application/json' } });
-            data = await res.json();
-            if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
-        } catch (err) {
-            mount.innerHTML = `<div class="text-xs text-red-400 py-2">Could not read this node's containers (${esc(err.message)}).</div>`;
-            return;
-        }
-        const running = (data.containers || [])
-            .filter((c) => String(c.state || '').toLowerCase() === 'running')
-            .sort((a, b) => Number(b.mem_used || 0) - Number(a.mem_used || 0));
-        const count = el(mount.dataset.count || '');
-        if (count) {
-            count.textContent = `${running.length} running`
-                + (running.length ? ` \u00b7 ${bytes(running.reduce((sum, c) => sum + Number(c.mem_used || 0), 0))} in use` : '');
-        }
-        mount.innerHTML = running.length
-            ? table(running.map(row).join(''))
-            : '<div class="text-xs termix-muted py-2">No containers are running on this node.</div>';
-
-        stop(mount);
-        // Poll only while the element is still in the document: a pane that has
-        // been replaced must not keep asking the node for stats forever.
-        if (opts.poll !== false && mount.isConnected) {
-            timers.set(mount, setTimeout(() => {
-                if (!mount.isConnected) { timers.delete(mount); return; }
-                load(mount, hostKey, opts);
-            }, opts.pollMs || POLL_MS));
-        }
+    const render = (mount, hostKey, containers, options) => {
+        const s = state(mount);
+        mount.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+            ${containers.map((c) => pane(c, s.open.has(c.id), s)).join('')}
+        </div>`;
+        wire(mount, hostKey, containers, options);
+        // redraw only what is open: a closed pane has no canvas
+        s.open.forEach((id) => {
+            const row = containers.find((c) => c.id === id);
+            const series = s.series.get(id);
+            if (!row || !series) return;
+            const detail = mount.querySelector(`[data-detail="${CSS.escape(id)}"]`);
+            if (!detail) return;
+            draw(detail.querySelector('[data-chart="cpu"]'), series.cpu, 'rgb(56, 189, 248)', 'pct');
+            draw(detail.querySelector('[data-chart="mem"]'), series.mem, 'rgb(167, 139, 250)', 'mem');
+            draw(detail.querySelector('[data-chart="net"]'), series.net, 'rgb(52, 211, 153)', 'net');
+        });
     };
 
     window.renderSwarmContainers = function (mount, hostKey, options) {
         if (!mount) return;
         stop(mount);
+        const opts = options || {};
+        const s = state(mount);
         mount.innerHTML = '<div class="text-xs termix-muted py-2">Reading this node\u2019s containers\u2026</div>';
-        load(mount, hostKey, options);
+
+        const load = async () => {
+            let data;
+            try {
+                const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostKey)}/containers`,
+                    { headers: { Accept: 'application/json' } });
+                data = await res.json();
+                if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+            } catch (err) {
+                mount.innerHTML = `<div class="text-xs text-red-400 py-2">Could not read this node's containers (${esc(err.message)}).</div>`;
+                return;
+            }
+            const running = (data.containers || [])
+                .filter((c) => String(c.state || '').toLowerCase() === 'running')
+                .sort((a, b) => Number(b.mem_used || 0) - Number(a.mem_used || 0));
+            running.forEach((c) => push(s, c.id, c.cpu_percent, c.mem_used, c.net_rx_bps, c.net_tx_bps));
+
+            const count = document.getElementById(mount.dataset.count || '');
+            if (count) {
+                count.textContent = `${running.length} running`
+                    + (running.length ? ` \u00b7 ${bytes(running.reduce((sum, c) => sum + Number(c.mem_used || 0), 0))} in use` : '');
+            }
+            if (!running.length) {
+                mount.innerHTML = '<div class="text-xs termix-muted py-2">No containers are running on this node.</div>';
+            } else {
+                render(mount, hostKey, running, opts);
+            }
+
+            // Poll only while the element is still in the document: a pane that
+            // has been replaced must not keep asking the node for stats forever.
+            const wait = s.open.size ? POLL_OPEN_MS : (opts.pollMs || POLL_MS);
+            if (opts.poll !== false && mount.isConnected) {
+                s.timer = setTimeout(() => {
+                    if (!mount.isConnected) { s.timer = null; return; }
+                    load();
+                }, wait);
+            }
+        };
+        load();
     };
 })();
