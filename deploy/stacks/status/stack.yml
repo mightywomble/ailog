@@ -11,7 +11,7 @@
 # - PVE_TOKEN is the token id + secret as Proxmox expects after "PVEAPIToken="
 services:
   status:
-    image: zot.safehomelan.com/status:${IMAGE_TAG:-build-150}
+    image: zot.safehomelan.com/status:${IMAGE_TAG:-build-179}
     environment:
       TZ: "Europe/London"
       STATUS_DB: "/data/status.db"

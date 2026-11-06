@@ -141,7 +141,7 @@ def service_detail(name: str):
     if not svc:
         raise HTTPException(404, f"{name} is not in wizard.yaml")
     try:
-        stack = open(os.path.join(core.repo_dir(), f"stacks/{name}/stack.yml")).read()
+        stack = open(core.path(f"stacks/{name}/stack.yml")).read()
     except Exception:
         stack = ""
     return {"entry": svc, "stack": stack}
@@ -210,7 +210,7 @@ def secrets_state():
         error = None
     except Exception as exc:
         swarm, error = [], str(exc)
-    audit = secrets_mod.audit(pipeline.load_wizard(), core.repo_dir())
+    audit = secrets_mod.audit(pipeline.load_wizard(), core.estate_dir())
     return {"swarm": swarm, "error": error, "audit": audit,
             "mounted": [n for n in secrets_mod.WIZARD_SECRETS if secrets_mod.read_file(n)],
             "plaintext_rows": len(audit)}

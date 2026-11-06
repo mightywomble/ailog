@@ -300,7 +300,6 @@ def build(cfg: dict, log=lambda *a: None) -> dict:
         note("managelm", False, str(e)[:160])
         mcp = Mcp(cfg["mcp_url"], cfg["mcp_key"], "status")
 
-    gitea = {}
     try:
         ailog_hosts = parse_json_text(mcp.call("ailog__list_hosts", {"include_status": True}))
         if isinstance(ailog_hosts, dict):

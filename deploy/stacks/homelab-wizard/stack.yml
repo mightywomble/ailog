@@ -11,6 +11,11 @@ services:
       WIZ_SSH_USER: david
       ZOT_USER: david
       OPENROUTER_MODEL: anthropic/claude-sonnet-4.5
+      # The estate is part of AILog's tree now (deploy/). These two describe
+      # where the checkout puts it, so they come from the deploy, not from the
+      # stored settings.
+      GIT_REPO: ailog
+      ESTATE_ROOT: deploy
     secrets:
     - wizard_gitea_token
     - wizard_zot_password

@@ -6,8 +6,6 @@ import subprocess
 import threading
 import time
 
-import core
-
 KEY = os.environ.get("WIZ_SSH_KEY", "/data/ssh/id_ed25519")
 USER = os.environ.get("WIZ_SSH_USER", "david")
 

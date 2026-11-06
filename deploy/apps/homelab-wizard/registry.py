@@ -223,7 +223,7 @@ def newest_tag(image, limit=100):
                            f"({len(listed['tags'])} tags seen: {', '.join(listed['tags'][:5])})")
 
     # Same major only: "update postgres" must not silently jump 16 -> 18.
-    major, majors = _major(current), [t for t in tagged if _major(t) == _major(current)]
+    majors = [t for t in tagged if _major(t) == _major(current)]
     pool = majors if (current and is_version_tag(current) and majors) else tagged
 
     def rank(t):

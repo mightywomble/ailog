@@ -7,7 +7,6 @@ import time
 
 import core
 import forge
-import registry
 import swarmio
 
 BUILD_WF = "build.yml"
@@ -46,7 +45,7 @@ def _render_service(entry):
     path = f"stacks/{entry['name']}/stack.yml"
     existing = core.read_yaml(path) or None
     core.write_text(path, core.render_stack(entry, existing, registry))
-    files = [path]
+    files = [core.rel(path)]
 
     mirror = core.mirror_entry(entry)
     if mirror:
@@ -59,13 +58,13 @@ def _render_service(entry):
         else:
             mirrors["mirrors"].append(mirror)
         core.write_text("mirror-images.json", json.dumps(mirrors, indent=2) + "\n")
-        files.append("mirror-images.json")
+        files.append(core.rel("mirror-images.json"))
     return files
 
 
 def _write_wizard(wiz):
     header = ""
-    path = os.path.join(core.repo_dir(), "wizard.yaml")
+    path = core.path("wizard.yaml")
     if os.path.exists(path):
         header = open(path).read().split("\nversion:", 1)[0] + "\n"
     core.write_yaml("wizard.yaml", wiz, header)
@@ -86,18 +85,18 @@ def apply_version(name, tag):
     if entry.get("kind") == "mirror":
         entry["source"] = core.with_tag(entry.get("source"), tag)
     _write_wizard(wiz)
-    files = ["wizard.yaml"]
+    files = [core.rel("wizard.yaml")]
 
     registry = (wiz.get("defaults") or {}).get("registry", "zot.safehomelan.com")
     path = f"stacks/{name}/stack.yml"
-    full = os.path.join(core.repo_dir(), path)
+    full = core.path(path)
     if os.path.exists(full):
         text = open(full).read()
         new_text, changed = core.bump_image(text, entry.get("service") or name,
                                             core.image_ref(entry, registry))
         if changed:
             core.write_text(path, new_text)
-            files.append(path)
+            files.append(core.rel(path))
 
     mirror = core.mirror_entry(entry)
     if mirror:
@@ -110,7 +109,7 @@ def apply_version(name, tag):
         else:
             rows.append(mirror)
         core.write_text("mirror-images.json", json.dumps(mirrors, indent=2) + "\n")
-        files.append("mirror-images.json")
+        files.append(core.rel("mirror-images.json"))
     return entry, files
 
 
@@ -130,7 +129,8 @@ def save_service(entry):
         services.append(entry)
 
     _write_wizard(wiz)
-    return {"ok": True, "problems": [], "files": sorted(set(["wizard.yaml"] + _render_service(entry))),
+    return {"ok": True, "problems": [],
+            "files": sorted(set([core.rel("wizard.yaml")] + _render_service(entry))),
             "entry": entry}
 
 
@@ -141,8 +141,8 @@ def delete_service(name):
     if len(wiz["services"]) == before:
         return {"ok": False, "problems": [f"{name} is not in wizard.yaml"]}
     core.write_yaml("wizard.yaml", wiz)
-    files = ["wizard.yaml", f"stacks/{name}"]
-    full = os.path.join(core.repo_dir(), "stacks", name)
+    files = [core.rel("wizard.yaml"), core.rel(f"stacks/{name}")]
+    full = core.path(f"stacks/{name}")
     if os.path.isdir(full):
         shutil.rmtree(full)
     mirrors = core.read_yaml("mirror-images.json") or {}
@@ -151,7 +151,7 @@ def delete_service(name):
     if len(kept) != len(entries):
         mirrors["mirrors"] = kept
         core.write_text("mirror-images.json", json.dumps(mirrors, indent=2) + "\n")
-        files.append("mirror-images.json")
+        files.append(core.rel("mirror-images.json"))
     return {"ok": True, "files": files}
 
 

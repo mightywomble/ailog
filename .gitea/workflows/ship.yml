@@ -17,6 +17,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      create_stacks:
+        description: 'Create stacks that do not exist on the swarm yet'
+        type: boolean
+        default: false
 
 jobs:
   release:
@@ -120,6 +125,12 @@ jobs:
         env:
           ZOT_URL: ${{ secrets.ZOT_URL }}
           IMAGE_TAG: ${{ needs.release.outputs.tag }}
+          # A tree that lists a stack does not mean the estate should grow one.
+          # deploy/stacks/ keeps records for services that were never deployed
+          # (or were removed); a push that brings the whole tree in - the merge
+          # that first landed deploy/ - would otherwise create them. Existing
+          # stacks are updated; new ones need an explicit dispatch.
+          CREATE_STACKS: ${{ github.event.inputs.create_stacks || 'false' }}
         run: |
           set -e
           # multi-line job outputs are unreliable across Gitea runners, so the
@@ -173,8 +184,16 @@ jobs:
           }
 
           FAILED=""
+          SKIPPED=""
+          LIVE_STACKS=$(docker stack ls --format '{{.Name}}' 2>/dev/null || true)
           for APP in $STACKS; do
             [ -f "deploy/stacks/$APP/stack.yml" ] || continue
+            # Refuse to create a stack by accident - see CREATE_STACKS above.
+            if [ "$CREATE_STACKS" != "true" ] && ! printf '%s\n' "$LIVE_STACKS" | grep -qx "$APP"; then
+              echo "--- $APP exists in deploy/stacks but not on the swarm - not creating it"
+              echo "    (dispatch this workflow with create_stacks=true to create it)"
+              SKIPPED="$SKIPPED $APP"; continue
+            fi
             # A tag that is not in zot takes the service down: swarm accepts the
             # deploy, then every task is rejected with "not found". Check first.
             MISSING=$(missing_images "$APP")
@@ -198,6 +217,7 @@ jobs:
             [ -f "deploy/stacks/$APP/stack.yml" ] || continue
             echo "--- $APP"; docker stack ps "$APP" --no-trunc | head -8
           done
+          [ -n "$SKIPPED" ] && echo "not deployed (absent from the swarm):$SKIPPED" || true
           if [ -n "$FAILED" ]; then
             echo "::error::stacks that failed to deploy:$FAILED"
             exit 1
