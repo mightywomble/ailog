@@ -172,3 +172,31 @@ def test_a_global_service_is_read_as_global_without_its_status(monkeypatch):
     assert row['mode'] == 'global'
     assert row['replicas'] == '3/3'
     assert row['update_available'] is True
+
+
+def test_an_image_from_upstream_is_not_behind_a_repository_that_shares_its_name(monkeypatch):
+    """`portainer_portainer` runs `portainer/portainer-ce:lts` from Docker Hub.
+
+    zot holds a repository with the same name - somebody pushed one once - and
+    comparing the two manufactured an update for an image the cluster never
+    pulls from zot at all. A service outside zot is not behind; it is elsewhere.
+    """
+    from_zot = 'a_agent\ta\tzot.safehomelan.com/agent:lts@sha256:' + 'f' * 64 + '\t' + REPLICATED
+    upstream = 'p_portainer\tp\tportainer/portainer-ce:lts@sha256:' + 'e' * 64 + '\t' + REPLICATED
+
+    def fake(image, timeout=12, refresh=False):
+        return {'digest': 'sha256:' + '0' * 64, 'error': None}   # zot always 'moves'
+
+    monkeypatch.setattr(swarmstack.reg, 'remote_digest', fake)
+    run = FakeRun('\n'.join([from_zot, upstream]), counts='a_agent\t1/1\np_portainer\t1/1')
+    monkeypatch.setattr(swarmstack, '_runner', lambda host: ({}, run))
+    swarmstack.clear()
+
+    out = swarmstack.scan('db-11')
+
+    rows = {r['short']: r for stack in out['stacks'] for r in stack['services']}
+    assert rows['agent']['update_available'] is True       # from zot, and it moved
+    assert rows['portainer']['update_available'] is False  # from Docker Hub
+    assert rows['portainer']['from_zot'] is False
+    assert 'not from zot' in rows['portainer']['note'] or 'straight from upstream' in rows['portainer']['note']
+    assert out['updates'] == 1

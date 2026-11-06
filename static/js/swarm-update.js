@@ -29,9 +29,14 @@
     };
 
     const serviceLine = (row) => {
-        const behind = row.update_available
-            ? '<span class="text-amber-300">update available</span>'
-            : '<span class="text-emerald-300">current</span>';
+        // Not every service in a stack pulls from zot: portainer's does not, and
+        // comparing it against a zot repository that happens to share its name
+        // invented an update for an image the cluster never gets from there.
+        const behind = row.from_zot === false
+            ? `<span class="termix-muted" title="${esc(row.note || '')}">not from zot</span>`
+            : (row.update_available
+                ? '<span class="text-amber-300">update available</span>'
+                : '<span class="text-emerald-300">current</span>');
         return `${esc(row.short)} <span class="font-mono">${esc(row.tag)}</span> `
             + `<span class="termix-muted">${esc(row.replicas)}</span> ${behind}`;
     };
