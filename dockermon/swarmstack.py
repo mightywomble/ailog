@@ -309,8 +309,16 @@ def _zot_candidates(repo: str) -> list[dict]:
     return out
 
 
-def _upstream_candidates(repo: str, sources: dict[str, str]) -> list[dict]:
-    """Tags the publisher offers that zot does not hold yet (by name)."""
+def _upstream_candidates(repo: str, sources: dict[str, str], current: str = '') -> list[dict]:
+    """Tags the publisher offers that zot does not hold yet (by name).
+
+    The publisher answers with everything it has ever published and only a dozen
+    are shown, so the order is the whole feature: sorting purely by version put
+    ``19rc1`` first and hid ``16.4-alpine`` - the one upgrade a postgres 16
+    actually wants - behind the releases it must not take. Tags sharing the
+    current major version come first, newest of those first, and only then the
+    rest: the blocked ones are still listed (and explained) but never first.
+    """
     source = sources.get(repo) or ''
     if not source:
         return []
@@ -320,13 +328,26 @@ def _upstream_candidates(repo: str, sources: dict[str, str]) -> list[dict]:
         return []
     host = listed.get('host') or ''
     upstream_repo = listed.get('repo') or ''
-    out = []
-    for tag in listed.get('tags') or []:
-        out.append({'tag': tag, 'in_zot': False, 'kind': 'version',
-                    'source': f'{host}/{upstream_repo}:{tag}'})
-        if len(out) >= 12:
-            break
-    return out
+    major = _major(current)
+
+    def rank(tag: str):
+        same = bool(major) and _major(tag) == major
+        return (0 if same else 1, _descending(tag))
+
+    tags = sorted(listed.get('tags') or [], key=rank)
+    return [{'tag': tag, 'in_zot': False, 'kind': 'version',
+             'source': f'{host}/{upstream_repo}:{tag}'}
+            for tag in tags[:12]]
+
+
+def _descending(tag: str):
+    """A sort key that puts the newest tag first, without reversing the list."""
+    key = reftags._version_key(tag)
+    return tuple(-part if isinstance(part, int) else _invert(part) for part in key)
+
+
+def _invert(text: str) -> str:
+    return ''.join(chr(0x10FFFF - ord(ch)) for ch in str(text))
 
 
 def versions(host_key: str, stack: str, service: str) -> dict:
@@ -339,7 +360,7 @@ def versions(host_key: str, stack: str, service: str) -> dict:
     row = rows[0]
     sources = mirror_sources()
     zot = _zot_candidates(row['repo'])
-    upstream = _upstream_candidates(row['repo'], sources)
+    upstream = _upstream_candidates(row['repo'], sources, row['tag'])
     known = {c['tag'] for c in zot}
     upstream = [c for c in upstream if c['tag'] not in known]
 
