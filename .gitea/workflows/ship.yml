@@ -237,6 +237,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Push as a person, not as gitea-actions. Gitea does not trigger
+          # workflows for a push made by the actions token, so a pin commit
+          # pushed with it lands on dev with no checks at all - and if a
+          # dev -> main pull request is open at that moment its head moves to
+          # that unchecked commit and the merge answers
+          # 405 "Not all required status checks successful" forever, because
+          # the required pull_request contexts will never be reported for it.
+          token: ${{ secrets.GIT_API_KEY }}
 
       - name: Write the deployed tag into the pins
         env:

@@ -129,6 +129,145 @@ class Forge:
         r = self.http.get(f'{self.api}{self.path}/pulls/{index}', timeout=30)
         return r.json() if r.status_code == 200 else {}
 
+    # ------------------------------------------------------- required checks --
+    def branch_protection(self, branch: str) -> dict:
+        """The rule that decides whether a merge is allowed at all."""
+        r = self.http.get(f'{self.api}{self.path}/branch_protections', timeout=30)
+        if r.status_code != 200:
+            return {}
+        for rule in r.json() or []:
+            if str(rule.get('branch_name') or '') == branch:
+                return rule
+        return {}
+
+    def required_checks(self, branch: str) -> list[str]:
+        """The status contexts a merge into ``branch`` must wait for.
+
+        Asked of the protection rule rather than hard-coded: the rule is the
+        thing that refuses the merge, so it is the thing that knows.  An
+        unprotected branch answers [] and merges as it always did.
+        """
+        rule = self.branch_protection(branch)
+        if not rule:
+            return []
+        return [str(c) for c in (rule.get('status_check_contexts') or [])]
+
+    def commit_status(self, sha: str) -> dict:
+        r = self.http.get(f'{self.api}{self.path}/commits/{sha}/status', timeout=30)
+        return r.json() if r.status_code == 200 else {}
+
+    def check_report(self, sha: str, required: list[str],
+                     statuses: list | None = None) -> tuple[list, list, list]:
+        """``(green, pending, failed)`` for the contexts this branch requires.
+
+        ``failed`` is built for a person: a context name alone does not say what
+        went wrong, and the description Gitea stores ("Waiting to run",
+        "Process completed with exit code 1") does.
+        """
+        if statuses is None:
+            statuses = self.commit_status(sha).get('statuses') or []
+        seen = {str(s.get('context') or ''): s for s in statuses}
+        green: list[str] = []
+        pending: list[str] = []
+        failed: list[str] = []
+        for context in required:
+            row = seen.get(context) or {}
+            state = str(row.get('status') or '').lower()
+            if not row or state in ('pending', 'running', 'queued', 'waiting'):
+                pending.append(context)
+            elif state == 'success':
+                green.append(context)
+            else:
+                detail = str(row.get('description') or '').strip()
+                failed.append(f'{context}: {state}' + (f' - {detail}' if detail else ''))
+        return green, pending, failed
+
+    def merge_when_ready(self, index: int, report=None, runs=None,
+                         timeout: float | None = None, poll: float = 10.0,
+                         grace: float = 120.0) -> dict:
+        """Merge once the branch's required checks are green - or say what is not.
+
+        A protected branch answers a merge with
+        ``405 Not all required status checks successful`` until CI has finished,
+        and CI takes as long as a build takes.  Twelve attempts of exponential
+        backoff is about eighty seconds, so every one-click estate update ended
+        "after 12 attempts: 405" on a pull request that was perfectly fine.
+
+        ``report`` is called as ``report(label, detail, ok=None)`` while waiting
+        so the job log says which check is still running instead of going quiet
+        for ten minutes.  ``runs`` may return one line about the workflow runs
+        for the head - that is what tells a slow runner from a wedged one.
+
+        ``grace`` is how long a head with *no* statuses at all may look like a
+        run that has not started yet before it is called uncheckable.
+        """
+        pr = self.pr(index)
+        base = str((pr.get('base') or {}).get('branch') or settings.base_branch())
+        sha = str((pr.get('head') or {}).get('sha') or '')
+        required = self.required_checks(base)
+        if not required:
+            return self.merge_pr(index)
+
+        if report:
+            report('required checks', f'waiting on {len(required)} check(s): '
+                                      + ', '.join(required))
+
+        deadline = time.time() + (timeout if timeout is not None else settings.check_wait())
+        last = ''
+        silent_since = 0.0
+        while True:
+            statuses = self.commit_status(sha).get('statuses') or []
+            green, pending, failed = self.check_report(sha, required, statuses=statuses)
+            if failed:
+                raise ForgeError(f'PR #{index} cannot merge - required checks failed: '
+                                 + '; '.join(failed))
+            # A commit with no statuses at all is not slow, it is uncheckable,
+            # and waiting for it is waiting for nothing. Gitea does not trigger
+            # workflows for a push made by the actions token, so a commit CI
+            # pushed (the pin job writing the tag it just deployed) has no run
+            # and never will - and if that commit is a pull request's head, the
+            # required contexts can never be reported for it. Say that, once it
+            # has had long enough for a run to start.
+            if not statuses:
+                silent_since = silent_since or time.time()
+                if time.time() - silent_since >= grace:
+                    fresh = runs(sha) if runs else ''
+                    raise ForgeError(
+                        f'PR #{index} head {sha[:8]} has no status checks at all'
+                        + (f' ({fresh})' if fresh else '')
+                        + ' - so the required checks ('
+                        + ', '.join(required) + ') can never be reported for it and no '
+                          'merge will be accepted, however long this waits. This is what '
+                          'a commit pushed by CI looks like: Gitea does not run workflows '
+                          'for a push made with the actions token. Push the branch again '
+                          'as a person (or re-run the workflow that pushed it) so CI runs '
+                          'on the new head')
+            else:
+                silent_since = 0.0
+            detail = f'{len(green)}/{len(required)} green'
+            if pending:
+                detail += ' - waiting on ' + ', '.join(pending)
+            note = runs(sha) if runs else ''
+            if note:
+                detail += f' | {note}'
+            if detail != last:
+                last = detail
+                if report:
+                    report('required checks', detail)
+            if not pending:
+                if report:
+                    report('required checks', f'all {len(required)} green', ok=True)
+                return self.merge_pr(index)
+            if time.time() >= deadline:
+                fresh = runs(sha) if runs else ''
+                raise ForgeError(
+                    f'PR #{index} is mergeable but its required checks never finished: '
+                    f'{len(green)}/{len(required)} green, still waiting on '
+                    f'{", ".join(pending)}' + (f' ({fresh})' if fresh else '')
+                    + '. If the run has been in progress with no new output, the build '
+                      'runner is wedged - restart act-runner on the build host and re-run')
+            time.sleep(poll)
+
     def merge_pr(self, index: int, attempts: int = 12, conflict_after: float = 25.0) -> dict:
         """Merge, and say why when it will not.
 

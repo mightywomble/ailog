@@ -27,7 +27,7 @@
 # (only applied when the users table is still empty).
 services:
   app:
-    image: zot.safehomelan.com/metamcp:${IMAGE_TAG:-build-111}
+    image: zot.safehomelan.com/metamcp:${IMAGE_TAG:-build-317}
     environment:
       NODE_ENV: "production"
       POSTGRES_HOST: "postgres"
