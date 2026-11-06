@@ -72,3 +72,16 @@ def test_the_page_lists_build_apps_as_rebuilds(client):
     source = open(os.path.join(STATIC, 'estate.js')).read()
     assert "row.action === 'rebuild'" in source
     assert 'rebuild' in source
+
+
+def test_a_refused_merge_is_readable_in_the_page():
+    """The reason a merge was refused is a sentence, and must not be clipped.
+
+    The 405 came back as one long line in a one-line span, so the only place
+    the real reason survived was the branch's job log. Both the run state and
+    the step detail now wrap, and a failed step is coloured as a failure.
+    """
+    source = open(os.path.join(STATIC, 'estate.js')).read()
+    assert 'whitespace-pre-wrap' in source
+    assert 'break-words' in source
+    assert "step.ok === false ? 'text-red-300'" in source

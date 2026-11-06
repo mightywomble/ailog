@@ -31,6 +31,8 @@ source-to-build mapping the estate could follow.
 
 from __future__ import annotations
 
+import calendar
+import datetime
 import json
 import threading
 import time
@@ -44,9 +46,71 @@ from .git import Conflict, GitError, Repo
 MIRROR_WF = 'mirror.yml'
 SHIP_WF = 'ship.yml'
 BUILD_WF = 'build.yml'
+CI_WF = 'ci.yml'
 
 PULL_TIMEOUT = 180
 JOB_TTL = 3600
+
+
+def _age(stamp: str) -> str:
+    """How long ago an ISO timestamp was, or '' when it is not a real one."""
+    try:
+        when = datetime.datetime.strptime(str(stamp), '%Y-%m-%dT%H:%M:%SZ')
+    except (TypeError, ValueError):
+        return ''
+    if when.year < 2000:            # Gitea's zero value for "has not started"
+        return ''
+    seconds = int(time.time() - calendar.timegm(when.timetuple()))
+    if seconds < 60:
+        return ''
+    if seconds < 3600:
+        return f'{seconds // 60}m'
+    return f'{seconds // 3600}h{(seconds % 3600) // 60:02d}m'
+
+
+def _runs_note(forge, sha: str) -> str:
+    """What is running for this commit, and for how long.
+
+    A wedged runner and a slow build are identical through the status API: both
+    are just "pending". The age is the only thing that tells them apart, and it
+    is the difference between waiting and restarting act-runner.
+    """
+    try:
+        rows = [r for r in forge.runs(limit=30) if str(r.get('head_sha') or '') == sha]
+    except Exception:               # noqa: BLE001 - a note must never fail the run
+        return ''
+    if not rows:
+        return 'no run registered yet'
+    bits = []
+    for run in rows[:3]:
+        state = str(run.get('conclusion') or run.get('status') or '?').lower()
+        if state in ('success', 'failure', 'cancelled', 'skipped'):
+            continue
+        age = _age(run.get('started_at') or '')
+        bits.append(f'{forge.workflow_of(run)} {state}' + (f' for {age}' if age else ''))
+    return '; '.join(bits)
+
+
+def _merge(forge, sink, pr: dict, label: str = 'required checks') -> dict:
+    """Merge, saying which required check is still running while it waits.
+
+    A protected branch refuses the merge until CI finishes, so this is a wait,
+    not a retry: see ``Forge.merge_when_ready``.
+    """
+    def report(what: str, detail: str, ok=None) -> None:
+        sink.step(what or label, ok=ok, detail=detail)
+        sink.log(f'{what or label}: {detail}')
+
+    try:
+        return forge.merge_when_ready(pr['number'], report=report,
+                                      runs=lambda sha: _runs_note(forge, sha))
+    except forge_mod.ForgeError as exc:
+        # Leave the reason on the step as well as in the error: the job's error
+        # field is one message, but the step list is what a person reads first,
+        # and "merge PR #99" must not stay unmarked while the run says it failed.
+        sink.step('merged', ok=False, detail=str(exc))
+        sink.log(f'merge refused: {exc}')
+        raise
 
 # Written into apps/<name>/ so the estate's own CI treats the app as changed.
 BUILD_MARKER = 'BUILD_REQUEST.json'
@@ -487,7 +551,7 @@ def perform(name: str, sink: Sink, version: str = '') -> dict:
     sink.step('pull request', ok=True, detail=f'#{pr.get("number")} {summary_title(pr)}')
     sink.progress(62)
 
-    merged = forge.merge_pr(pr['number'])
+    merged = _merge(forge, sink, pr)
     sink.step('merged', ok=True, detail=f'PR #{pr["number"]}')
     sink.progress(68)
 
@@ -590,7 +654,7 @@ def _perform_build(repo: Repo, entry: dict, name: str, sink: Sink, version: str 
     sink.step('pull request', ok=True, detail=f'#{pr.get("number")} {summary_title(pr)}')
     sink.progress(54)
 
-    merged = forge.merge_pr(pr['number'])
+    merged = _merge(forge, sink, pr)
     sink.step('merged', ok=True, detail=f'PR #{pr["number"]}')
     sink.progress(58)
 
@@ -665,7 +729,7 @@ def _pin_build(repo: Repo, name: str, tag: str, sink: Sink) -> bool:
                               f'wizard.yaml and the stack so a later deploy cannot fall back '
                               f'to the previous build.')
     sink.step('pin pull request', ok=True, detail=f'#{pr.get("number")} {summary_title(pr)}')
-    merged = forge.merge_pr(pr['number'])
+    merged = _merge(forge, sink, pr)
     sink.step('pin merged', ok=True, detail=f'PR #{pr["number"]}')
     run = forge.find_run(SHIP_WF, sha=merged.get('sha') or '', timeout=PULL_TIMEOUT)
     if run is not None:
