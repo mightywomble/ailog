@@ -30,7 +30,11 @@ jobs:
       - name: Build, smoke test and clean up changed apps
         run: |
           set -e
-          git fetch origin main --depth=1 2>/dev/null || true
+          # Not --depth=1: a shallow main has no merge base with HEAD, and
+          # `git diff main...HEAD` then prints "no merge base" and exits
+          # non-zero - the `|| true` swallowed it, so every dev push reported
+          # "No changed apps" and built nothing at all.
+          git fetch origin main 2>/dev/null || true
           if git rev-parse --verify origin/main >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only origin/main...HEAD | grep '^deploy/apps/' | cut -d/ -f3 | sort -u | grep -v '^$' || true)
           else

@@ -203,3 +203,19 @@ def test_a_stack_absent_from_the_swarm_is_not_created_by_a_push():
     assert 'docker stack ls' in ship
     assert 'CREATE_STACKS' in ship
     assert 'create_stacks' in ship      # the dispatch input that opts in
+
+
+def test_the_push_workflows_compare_against_a_real_base():
+    """Both build and mirror once "did nothing" and reported success.
+
+    build.yml fetched main with --depth=1, so `git diff main...HEAD` had no
+    merge base, failed, and `|| true` turned that into "No changed apps". A dev
+    push therefore never built anything before its PR was opened. mirror.yml
+    read its previous state from main, which does not carry the file until the
+    first merge - an empty base means every entry looks new, so it re-mirrored
+    the whole estate on the branch that introduced it.
+    """
+    build = (ROOT / '.gitea' / 'workflows' / 'build.yml').read_text()
+    assert 'fetch origin main --depth' not in build
+    mirror = (ROOT / '.gitea' / 'workflows' / 'mirror.yml').read_text()
+    assert 'HEAD^:deploy/mirror-images.json' in mirror
