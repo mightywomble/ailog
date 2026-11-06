@@ -18,4 +18,5 @@ import './activity.js';       // what the app is doing right now (progress strip
 import './shell.js';              // responsive shell: drawer, tab bar, view state
 import './command-palette.js';    // ⌘K fast path over views/hosts/actions
 import './overview.js';           // dashboard overview cards
+import './compose-section.js';     // Settings → Docker: compose projects on non-swarm hosts
 import './pwa.js';                // installable app: service worker + install button

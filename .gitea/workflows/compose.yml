@@ -1,0 +1,169 @@
+name: Deploy compose projects
+# Standalone docker hosts - the ones that are not swarm nodes. One directory per
+# project under deploy/compose/<name>/:
+#
+#   compose.yml     the deployable file (images point at zot)
+#   project.json    where it runs: host, ssh target, directory, health, env keys
+#   .env.example    the keys the host's .env must define (never the values)
+#
+# The swarm path is ship.yml (build -> push -> docker stack deploy). This is the
+# other half: pull -> up -d --wait -> health, on a host nobody else configures.
+# Images are mirrored into zot by mirror.yml from deploy/mirror-images.json, so
+# a deploy never depends on ghcr or Docker Hub being reachable from the host.
+#
+# The host's .env stays on the host: it holds credentials, and the project
+# directory is /home/david/code/<project> on every one of these hosts.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/compose/**'
+      - 'deploy/mirror-images.json'
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'One project name, or empty for every changed project'
+        default: ''
+
+jobs:
+  compose:
+    runs-on: deploy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Log in to zot
+        run: echo "${{ secrets.ZOT_PASSWORD }}" | docker login "${{ secrets.ZOT_URL }}" -u "${{ secrets.ZOT_USER }}" --password-stdin
+
+      - name: Which projects
+        id: projects
+        run: |
+          set -e
+          if [ -n "${{ github.event.inputs.project }}" ]; then
+            printf '%s\n' "${{ github.event.inputs.project }}" > /tmp/projects
+          elif git rev-parse --verify HEAD^1 >/dev/null 2>&1; then
+            git diff --name-only HEAD^1 HEAD | grep '^deploy/compose/' | cut -d/ -f3 | sort -u > /tmp/projects || true
+          else
+            ls deploy/compose > /tmp/projects 2>/dev/null || true
+          fi
+          if [ ! -s /tmp/projects ]; then
+            echo "no compose project changed"
+            echo "projects=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "projects: $(tr '\n' ' ' < /tmp/projects)"
+          echo "projects=$(tr '\n' ' ' < /tmp/projects)" >> "$GITHUB_OUTPUT"
+
+      - name: Install the deploy key
+        if: steps.projects.outputs.projects != ''
+        env:
+          COMPOSE_SSH_KEY: ${{ secrets.COMPOSE_SSH_KEY }}
+        run: |
+          set -e
+          if [ -z "$COMPOSE_SSH_KEY" ]; then
+            echo "::error::COMPOSE_SSH_KEY is not set - the runner cannot reach the compose hosts"
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$COMPOSE_SSH_KEY" > ~/.ssh/compose_deploy
+          chmod 600 ~/.ssh/compose_deploy
+          ssh-keygen -y -f ~/.ssh/compose_deploy > /dev/null   # fails loudly on a bad key
+
+      - name: Deploy
+        if: steps.projects.outputs.projects != ''
+        env:
+          PROJECTS: ${{ steps.projects.outputs.projects }}
+          ZOT_URL: ${{ secrets.ZOT_URL }}
+        run: |
+          set -u
+          REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
+          FAILED=""
+
+          for PROJECT in $PROJECTS; do
+            DIR="deploy/compose/$PROJECT"
+            [ -f "$DIR/project.json" ] || { echo "--- $PROJECT has no project.json - skipping"; continue; }
+            echo "=== $PROJECT ==="
+
+            # Everything the deploy needs, read from the project's own file.
+            eval "$(python3 - "$DIR/project.json" <<'PY'
+          import json, shlex, sys
+          p = json.load(open(sys.argv[1]))
+          for key, var in (('ssh', 'HOST'), ('dir', 'TARGET'), ('compose_file', 'FILE'),
+                           ('env_file', 'ENVFILE'), ('name', 'NAME')):
+              print(f'{var}={shlex.quote(str(p.get(key) or ""))}')
+          print('HEALTH_URL=' + shlex.quote(str((p.get('health') or {}).get('url') or '')))
+          print('HEALTH_SERVICE=' + shlex.quote(str((p.get('health') or {}).get('service') or '')))
+          print('ENV_KEYS=' + shlex.quote(' '.join(p.get('env_keys') or [])))
+          PY
+            )"
+
+            if [ -z "$HOST" ] || [ -z "$TARGET" ]; then
+              echo "!!! $PROJECT: project.json needs ssh and dir"; FAILED="$FAILED $PROJECT"; continue
+            fi
+
+            SSH="ssh -i $HOME/.ssh/compose_deploy -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 $HOST"
+
+            # Every image must already be in zot. A missing tag does not fail
+            # `compose pull` in a way anyone reads: the host keeps the old image
+            # and `up` says "up to date" while nothing moved.
+            MISSING=""
+            for IMG in $(grep -oE "$REGISTRY/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+" "$DIR/compose.yml" | sed "s/\${[A-Z_]*:-\([^}]*\)}/\1/" | sort -u); do
+              docker manifest inspect "$IMG" >/dev/null 2>&1 || MISSING="$MISSING $IMG"
+            done
+            if [ -n "$MISSING" ]; then
+              echo "!!! $PROJECT not deployed - image(s) missing from zot:$MISSING"
+              FAILED="$FAILED $PROJECT"; continue
+            fi
+
+            # The env file holds credentials and is never in this repository.
+            # Refuse rather than deploy a project that will come up misconfigured.
+            MISSING_KEYS=$($SSH "cd $TARGET 2>/dev/null || exit 3; for K in $ENV_KEYS; do grep -qE \"^[[:space:]]*\${K}=\" $ENVFILE || echo \$K; done" 2>/dev/null || echo "ENVFILE")
+            if [ -n "$MISSING_KEYS" ]; then
+              echo "!!! $PROJECT not deployed - $TARGET/$ENVFILE is missing:$MISSING_KEYS"
+              echo "    (values are not in git on purpose; see $DIR/.env.example)"
+              FAILED="$FAILED $PROJECT"; continue
+            fi
+
+            # Keep the file that is running now: a failed health check rolls
+            # back to it rather than leaving a half-up project behind.
+            $SSH "set -e; cd $TARGET; if [ -f $FILE ]; then cp $FILE $FILE.previous; fi"
+            if ! $SSH "cat > $TARGET/$FILE.new" < "$DIR/compose.yml"; then
+              echo "!!! $PROJECT: could not write $TARGET/$FILE"; FAILED="$FAILED $PROJECT"; continue
+            fi
+            $SSH "cd $TARGET && mv $FILE.new $FILE"
+
+            if $SSH "cd $TARGET && docker compose -f $FILE pull -q && docker compose -f $FILE up -d --remove-orphans --wait"; then
+              HEALTHY=1
+              if [ -n "$HEALTH_URL" ]; then
+                for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                  if $SSH "curl -fsS -o /dev/null --max-time 5 $HEALTH_URL"; then HEALTHY=0; break; fi
+                  sleep 3
+                done
+                [ "$HEALTHY" = 0 ] || echo "!!! $PROJECT: $HEALTH_URL did not answer after 30s"
+              else
+                HEALTHY=0
+              fi
+              if [ "$HEALTHY" = 0 ]; then
+                echo "--- $PROJECT deployed"
+                $SSH "cd $TARGET && docker compose -f $FILE ps --format json" | head -20 || true
+                continue
+              fi
+            else
+              echo "!!! $PROJECT: compose up failed on $HOST"
+            fi
+
+            # Rollback
+            echo "--- $PROJECT rolling back to the previous $FILE"
+            if $SSH "cd $TARGET && [ -f $FILE.previous ] && mv $FILE.previous $FILE && docker compose -f $FILE up -d --remove-orphans --wait"; then
+              echo "    rolled back"
+            else
+              echo "    !!! rollback FAILED - $HOST:$TARGET needs a person"
+            fi
+            FAILED="$FAILED $PROJECT"
+          done
+
+          if [ -n "$FAILED" ]; then
+            echo "::error::compose projects that did not deploy:$FAILED"
+            exit 1
+          fi
