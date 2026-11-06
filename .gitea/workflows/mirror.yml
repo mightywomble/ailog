@@ -35,7 +35,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # What changed since the last pushed state. main is the usual answer;
+          # on the branch that first carries the file main does not have it yet,
+          # and an empty base would re-mirror every entry.
           git show origin/main:deploy/mirror-images.json > /tmp/previous.json 2>/dev/null \
+            || git show HEAD^:deploy/mirror-images.json > /tmp/previous.json 2>/dev/null \
             || echo '{"mirrors": []}' > /tmp/previous.json
 
           python3 - <<'PY' > /tmp/changed-entries
