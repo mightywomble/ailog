@@ -36,14 +36,32 @@ def test_the_docker_square_sits_above_the_ssh_prompt():
     assert 'flex-direction: column' in actions
 
 
-def test_the_square_is_green_when_idle_and_red_when_something_needs_doing():
+def test_the_square_is_docker_blue_and_not_a_traffic_light():
+    """A button that changes colour to report status is a status in a button.
+
+    The Docker square used to be green when nothing needed doing and red when
+    an image had moved on - on every host, including the four workers that
+    cannot see the cluster and so could not answer the question at all. It
+    identifies Docker now, in Docker blue, in every theme.
+    """
     css = _read('static', 'css', 'ui.css')
-    assert '.hc-docker[data-state="ok"]' in css
-    assert '.hc-docker[data-state="attention"]' in css
+    assert '.hc-docker[data-state="ok"]' not in css
+    assert '.hc-docker[data-state="attention"]' not in css
+    # the colour rule (the second block for this selector, after the sizing one)
+    at = css.index('#hosts-sidebar .host-card .hc-docker {', css.index('#hosts-sidebar .host-card .hc-docker {' ) + 1)
+    block = css[at:]
+    block = block[:block.index('}')]
+    assert 'var(--docker)' in block
+    assert 'var(--ok)' not in block and 'var(--bad)' not in block
+
+    theme = _read('static', 'css', 'theme.css')
+    assert '--docker: #2496ed' in theme            # one brand colour, every theme
+
     js = _read('static', 'js', 'app-core.js')
     block = js[js.index('const applyDockerBadge'):js.index('const refreshDockerBadges')]
-    assert "button.dataset.state = row.status || 'unknown'" in block
-    assert 'row.updates' in block and 'row.attention' in block
+    # the tooltip says what the host runs, not what is wrong with it
+    assert 'row.updates' not in block
+    assert 'container${row.containers === 1' in block
 
 
 def test_the_badge_polls_the_overview_endpoint_not_a_live_snapshot():
