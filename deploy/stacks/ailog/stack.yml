@@ -97,7 +97,7 @@ services:
   # Reaches the app's read-only JSON endpoints (overview/reports) on the
   # stack network as http://ailog:5001.
   ailog-mcp:
-    image: zot.safehomelan.com/ailog-mcp:${IMAGE_TAG:-build-191}
+    image: zot.safehomelan.com/ailog-mcp:${IMAGE_TAG:-build-256}
     command: ["python3", "mcp_service.py"]
     environment:
       DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
