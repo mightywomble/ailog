@@ -167,6 +167,15 @@ def _docker_updates() -> Dict[str, Any]:
         for row in (state or {}).get('updates') or []:
             if row.get('self_managed'):
                 continue
+            # Only something running has an update. A swarm service leaves the
+            # previous task's container behind - exited - on whatever node it
+            # ran on, and scanned on its own that looks exactly like an
+            # out-of-date image: metamcp_postgres sat in this card with the old
+            # digest for a day after the current task had moved on, because the
+            # retired revision was on the manager and the running task was on a
+            # worker. Nothing to press, nothing to update.
+            if (row.get('state') or 'running').lower() != 'running':
+                continue
             rows.append({
                 'host_key': host_key,
                 'host': name,
