@@ -3,6 +3,13 @@
 Everything is environment-driven so the app can ship with the feature present but
 inert (`AILOG_ALLOW_ESTATE=off`), and so the credentials can arrive as Docker
 secrets without a rebuild.
+
+Since v3.24 the estate lives *in AILog's own repo* under ``deploy/`` (it was
+`homelab-ops`), so the default here is the app's own repository. What used to be
+two repos - the app, and the thing that deploys the app - is one tree, one merge
+and one chain: `deploy/stacks` deploys to the swarm, `deploy/compose` to the
+standalone hosts, and CI is the only thing that ever runs `docker` against
+either.
 """
 
 from __future__ import annotations
@@ -12,9 +19,9 @@ from pathlib import Path
 
 MODES = ('off', 'plan', 'on')
 
-DEFAULT_REPO = 'https://git.safehomelan.com/david/homelab-ops.git'
+DEFAULT_REPO = 'https://git.safehomelan.com/david/ailog.git'
 DEFAULT_OWNER = 'david'
-DEFAULT_NAME = 'homelab-ops'
+DEFAULT_NAME = 'ailog'
 
 
 def _env(name: str, default: str = '') -> str:
@@ -47,6 +54,20 @@ def enabled() -> bool:
 
 def dry_run() -> bool:
     return mode() != 'on'
+
+
+def root() -> str:
+    """The directory the estate's files live in, inside the repo.
+
+    The estate used to be its own repo, so wizard.yaml sat at the root. It is
+    part of AILog's repo now and lives under ``deploy/``. ``AILOG_ESTATE_ROOT``
+    overrides it, and an empty value means "the repo's own root" - which is what
+    a checkout made before the merge still is.
+    """
+    raw = os.getenv('AILOG_ESTATE_ROOT')
+    if raw is None:
+        return 'deploy'
+    return raw.strip('/')
 
 
 def repo_dir() -> Path:

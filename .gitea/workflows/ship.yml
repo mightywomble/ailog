@@ -3,6 +3,11 @@ name: Release and deploy
 # workflow builds every changed app, pushes it to zot, then deploys every
 # changed stack - with the tag that was just built, in the same run.
 #
+# Everything estate-side is under deploy/ now (this workflow used to live in the
+# homelab-ops repo): apps are deploy/apps/<name>, stacks deploy/stacks/<name>.
+# The release job runs on the build server's runner (ubuntu-latest); the deploy
+# job runs on the swarm manager (label deploy).
+#
 # Why the "bump the tag in the other repo" step is gone: stack files carry
 #   image: zot.safehomelan.com/<app>:${IMAGE_TAG:-<pinned tag>}
 # and the deploy job exports IMAGE_TAG, so `docker stack deploy` interpolates
@@ -36,11 +41,11 @@ jobs:
           if git rev-parse --verify HEAD^1 >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only HEAD^1 HEAD)
             echo "changed files:"; printf '%s\n' "$CHANGED"
-            APPS=$(printf '%s\n' "$CHANGED" | grep '^apps/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
-            STACKS=$(printf '%s\n' "$CHANGED" | grep '^stacks/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
+            APPS=$(printf '%s\n' "$CHANGED" | grep '^deploy/apps/' | cut -d/ -f3 | sort -u | grep -v '^$' || true)
+            STACKS=$(printf '%s\n' "$CHANGED" | grep '^deploy/stacks/' | cut -d/ -f3 | sort -u | grep -v '^$' || true)
           else
-            APPS=$(ls apps 2>/dev/null || true)
-            STACKS=$(ls stacks 2>/dev/null || true)
+            APPS=$(ls deploy/apps 2>/dev/null || true)
+            STACKS=$(ls deploy/stacks 2>/dev/null || true)
           fi
           # write the changed set to files: this runner resolves job outputs but
           # not step outputs inside the same job, so the build step reads these
@@ -68,30 +73,30 @@ jobs:
           REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
           APPS=$(cat .changed-apps 2>/dev/null || true)
           echo "apps to build: ${APPS:-none}"
-          cfg() { python3 -c "import json;print(json.load(open('apps/$1/build.json')).get('$2',''))"; }
+          cfg() { python3 -c "import json;print(json.load(open('deploy/apps/$1/build.json')).get('$2',''))"; }
 
           for APP in $APPS; do
-            if [ -f "apps/$APP/build.json" ]; then
+            if [ -f "deploy/apps/$APP/build.json" ]; then
               SRC=$(cfg "$APP" source); REF=$(cfg "$APP" ref)
               DF=$(cfg "$APP" dockerfile); CTX=$(cfg "$APP" context); CTX=${CTX:-.}
               WORK="/tmp/homelab-build/$APP"
               rm -rf "$WORK"
               echo "=== cloning $SRC ($REF) for $APP ==="
               git clone --depth 1 --branch "$REF" "$SRC" "$WORK"
-              [ -f "apps/$APP/patch.sh" ] && bash "apps/$APP/patch.sh" "$WORK"
+              [ -f "deploy/apps/$APP/patch.sh" ] && bash "deploy/apps/$APP/patch.sh" "$WORK"
               echo "=== building $APP as $REGISTRY/$APP:$BUILD_TAG ==="
               docker build -f "$WORK/$DF" -t "$REGISTRY/$APP:$BUILD_TAG" -t "$REGISTRY/$APP:latest" "$WORK/$CTX"
               rm -rf "$WORK"
-            elif [ -f "apps/$APP/Dockerfile" ]; then
-              echo "=== building apps/$APP as $REGISTRY/$APP:$BUILD_TAG ==="
-              docker build -t "$REGISTRY/$APP:$BUILD_TAG" -t "$REGISTRY/$APP:latest" "apps/$APP"
+            elif [ -f "deploy/apps/$APP/Dockerfile" ]; then
+              echo "=== building deploy/apps/$APP as $REGISTRY/$APP:$BUILD_TAG ==="
+              docker build -t "$REGISTRY/$APP:$BUILD_TAG" -t "$REGISTRY/$APP:latest" "deploy/apps/$APP"
             else
-              echo "apps/$APP has no Dockerfile or build.json - skipping"
+              echo "deploy/apps/$APP has no Dockerfile or build.json - skipping"
               continue
             fi
-            if [ -f "apps/$APP/test.sh" ]; then
+            if [ -f "deploy/apps/$APP/test.sh" ]; then
               echo "=== smoke testing $APP ==="
-              bash "apps/$APP/test.sh" "$REGISTRY/$APP:$BUILD_TAG"
+              bash "deploy/apps/$APP/test.sh" "$REGISTRY/$APP:$BUILD_TAG"
             fi
             docker push "$REGISTRY/$APP:$BUILD_TAG"
             docker push "$REGISTRY/$APP:latest"
@@ -124,18 +129,18 @@ jobs:
           if git rev-parse --verify HEAD^1 >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only HEAD^1 HEAD)
             echo "changed files:"; printf '%s\n' "$CHANGED"
-            APPS=$(printf '%s\n' "$CHANGED" | grep '^apps/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
-            STACKS=$(printf '%s\n' "$CHANGED" | grep '^stacks/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
+            APPS=$(printf '%s\n' "$CHANGED" | grep '^deploy/apps/' | cut -d/ -f3 | sort -u | grep -v '^$' || true)
+            STACKS=$(printf '%s\n' "$CHANGED" | grep '^deploy/stacks/' | cut -d/ -f3 | sort -u | grep -v '^$' || true)
           else
-            APPS=$(ls apps 2>/dev/null || true)
-            STACKS=$(ls stacks 2>/dev/null || true)
+            APPS=$(ls deploy/apps 2>/dev/null || true)
+            STACKS=$(ls deploy/stacks 2>/dev/null || true)
           fi
           # Always add the stacks that reference a rebuilt app - not only when no
-          # stack file changed. A merge that touched both apps/x and stacks/y used
+          # stack file changed. A merge that touched both deploy/apps/x and deploy/stacks/y used
           # to deploy y alone, so x's new image was built, pushed and never run.
           for APP in $APPS; do
-            for f in stacks/*/stack.yml; do
-              grep -q "/$APP:" "$f" && dirname "$f" | cut -d/ -f2
+            for f in deploy/stacks/*/stack.yml; do
+              grep -q "/$APP:" "$f" && dirname "$f" | cut -d/ -f3
             done
           done | sort -u > /tmp/stacks-from-apps || true
           FROM_APPS=$(tr '\n' ' ' < /tmp/stacks-from-apps)
@@ -146,12 +151,12 @@ jobs:
           REGISTRY="${ZOT_URL#https://}"; REGISTRY="${REGISTRY%/}"
 
           # IMAGE_TAG only means something for images THIS run pushed. A run that
-          # only touched stacks/ (or a stack whose app did not rebuild) must use
+          # only touched deploy/stacks/ (or a stack whose app did not rebuild) must use
           # the pinned ${IMAGE_TAG:-<tag>} default, otherwise swarm tries to pull
           # build-<n> that was never pushed and the service is rejected.
           stack_tag() {   # echoes the tag to use for $1, empty = keep pinned
             for A in $APPS; do
-              grep -q "/$A:" "stacks/$1/stack.yml" || continue
+              grep -q "/$A:" "deploy/stacks/$1/stack.yml" || continue
               if docker manifest inspect "$REGISTRY/$A:$IMAGE_TAG" >/dev/null 2>&1; then
                 echo "$IMAGE_TAG"; return 0
               fi
@@ -160,7 +165,7 @@ jobs:
           }
 
           missing_images() {   # echoes zot images in $1 that are not in the registry
-            grep -oE 'zot\.safehomelan\.com/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+' "stacks/$1/stack.yml" \
+            grep -oE 'zot\.safehomelan\.com/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+' "deploy/stacks/$1/stack.yml" \
               | sed 's/\${IMAGE_TAG:-[^}]*}/'"${IMAGE_TAG:-latest}"'/' | sort -u \
               | while read -r IMG; do
                   docker manifest inspect "$IMG" >/dev/null 2>&1 || echo "$IMG"
@@ -169,7 +174,7 @@ jobs:
 
           FAILED=""
           for APP in $STACKS; do
-            [ -f "stacks/$APP/stack.yml" ] || continue
+            [ -f "deploy/stacks/$APP/stack.yml" ] || continue
             # A tag that is not in zot takes the service down: swarm accepts the
             # deploy, then every task is rejected with "not found". Check first.
             MISSING=$(missing_images "$APP")
@@ -185,12 +190,12 @@ jobs:
             fi
             # one broken stack must not stop the rest of the estate deploying
             if ! ( if [ -n "$TAG" ]; then IMAGE_TAG="$TAG"; else unset IMAGE_TAG; fi
-                   docker stack deploy -c "stacks/$APP/stack.yml" "$APP" --with-registry-auth ); then
+                   docker stack deploy -c "deploy/stacks/$APP/stack.yml" "$APP" --with-registry-auth ); then
               echo "!!! $APP failed to deploy"; FAILED="$FAILED $APP"
             fi
           done
           for APP in $STACKS; do
-            [ -f "stacks/$APP/stack.yml" ] || continue
+            [ -f "deploy/stacks/$APP/stack.yml" ] || continue
             echo "--- $APP"; docker stack ps "$APP" --no-trunc | head -8
           done
           if [ -n "$FAILED" ]; then

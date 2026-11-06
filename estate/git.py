@@ -112,8 +112,30 @@ class Repo:
         return self.head()
 
     # ---------------------------------------------------------------- files --
+    def root(self) -> str:
+        """``deploy`` when the checkout keeps the estate there, else ``''``.
+
+        Resolved against the tree rather than trusted: a checkout cloned while
+        the estate was still its own repo has wizard.yaml at the root, and
+        reading it through the prefix would report "no services" for a tree that
+        is perfectly fine. One stat, and the answer picks itself.
+        """
+        prefix = settings.root()
+        if not prefix:
+            return ''
+        if os.path.isfile(os.path.join(self.dir, prefix, 'wizard.yaml')):
+            return prefix
+        if os.path.isfile(os.path.join(self.dir, 'wizard.yaml')):
+            return ''
+        return prefix
+
+    def rel(self, relpath: str) -> str:
+        """The repo-relative path the rest of the code uses, with the root on."""
+        root = self.root()
+        return f'{root}/{relpath}' if root else relpath
+
     def path(self, relpath: str) -> str:
-        return os.path.join(self.dir, relpath)
+        return os.path.join(self.dir, self.rel(relpath))
 
     def read(self, relpath: str, default: str = '') -> str:
         try:
@@ -132,11 +154,14 @@ class Repo:
         ok, out = self.git('status', '--porcelain')
         if not ok:
             return []
-        return [line[3:].strip() for line in out.splitlines() if line.strip()]
+        root = self.root()
+        cut = len(root) + 1 if root else 0
+        return [(line[3:].strip()[cut:] if cut else line[3:].strip())
+                for line in out.splitlines() if line.strip()]
 
     # --------------------------------------------------------------- commit --
     def commit(self, message: str, paths) -> list[str]:
-        files = [p for p in paths if p]
+        files = [self.rel(p) for p in paths if p]
         if files:
             ok, out = self.git('add', '--', *files)
             if not ok:
