@@ -121,3 +121,24 @@ def test_the_milestones_are_the_pipeline_in_order():
     order = [source.index(marker) for marker in (
         "'read the cluster'", "'resolve version'", "'verify running'", "'prune zot'")]
     assert order == sorted(order)
+
+
+def test_a_hidden_overlay_is_actually_hidden():
+    """`hidden` the attribute loses to `flex` the class, and the page said so.
+
+    The overlay covers the viewport with `fixed inset-0 ... flex`. The browser's
+    own `[hidden] { display: none }` is a UA rule, so a utility class that sets
+    display beats it: the attribute-hidden dialog sat over the page on every
+    load, empty, titled "Stack update", with a close button that closed nothing
+    interesting. It hides with the utility class instead, and the script toggles
+    that class rather than the attribute.
+    """
+    partial = (TEMPLATES / 'partials' / 'swarm-update-modal.html').read_text()
+    tag = partial.split('<div id="swarmUpdateModal"', 1)[1].split('>', 1)[0]
+    classes = tag.split('class="', 1)[1].split('"', 1)[0]
+    assert 'hidden' in classes                 # the utility class does the hiding
+    assert 'hidden' not in tag.replace(classes, '')   # and not the attribute beside it
+
+    source = (JS / 'swarm-update.js').read_text()
+    assert '.hidden = ' not in source                     # no attribute toggling
+    assert "classList.toggle('hidden'" in source
