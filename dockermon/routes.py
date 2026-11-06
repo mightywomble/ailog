@@ -987,6 +987,86 @@ def api_swarm_refresh(host_key):
     return api_swarm(host_key)
 
 
+# --------------------------------------------------------------------------
+# stack updates (swarm: the stack is the unit, the version is the choice)
+# --------------------------------------------------------------------------
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/swarm/stacks')
+def api_swarm_stacks(host_key):
+    """Every stack on the cluster, with the services that have moved on.
+
+    Read from the manager, because a worker cannot see the cluster - and
+    because a service's deployed image is a fact about the *service*, not about
+    whichever container happens to be on the node being clicked.
+    """
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    refresh = (request.args.get('refresh') or '').lower() in ('1', 'true', 'yes')
+    try:
+        from . import swarmstack
+        return jsonify({'success': True, **swarmstack.scan(host_key, refresh=refresh)})
+    except Exception as exc:                    # noqa: BLE001 - report, never 500 the page
+        return _error(exc)
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/swarm/stacks/<stack>/services/<service>/versions')
+def api_swarm_versions(host_key, stack, service):
+    """What this service could be moved to, and what it is on now."""
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    try:
+        from . import swarmstack
+        return jsonify({'success': True, **swarmstack.versions(host_key, stack, service)})
+    except Exception as exc:                    # noqa: BLE001 - surfaced in the dialog
+        return jsonify({'success': False, 'error': str(exc) or exc.__class__.__name__}), 502
+
+
+@docker_bp.route('/api/docker/hosts/<path:host_key>/swarm/stacks/<stack>/services/<service>/update',
+                 methods=['POST'])
+def api_swarm_update(host_key, stack, service):
+    """Move one service of one stack to a version the person chose."""
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    body = request.get_json(silent=True) or {}
+    version = str(body.get('version') or '').strip()
+    if not version:
+        return _error('a version is required: the dialog asks which one', status=400)
+    if not body.get('confirm'):
+        return _error('confirmation is required: the dialog shows the milestones first',
+                      status=400)
+    if duflow.mode() == 'off':
+        return _error('updates are disabled on this server (AILOG_ALLOW_UPDATES=off)',
+                      status=403)
+    app = current_app._get_current_object()
+    started = duflow.start_stack(app, host_key, stack, service, version,
+                                 prune=bool(body.get('prune', True)))
+    return jsonify({'success': True, 'job': started})
+
+
+@docker_bp.route('/api/docker/registry/images')
+def api_registry_images():
+    """Every zot repository, what keeps each tag alive, and what could go."""
+    try:
+        from . import registrygc
+        return jsonify({'success': True, **registrygc.describe()})
+    except Exception as exc:                    # noqa: BLE001
+        return jsonify({'success': False, 'error': str(exc) or exc.__class__.__name__}), 502
+
+
+@docker_bp.route('/api/docker/registry/prune', methods=['POST'])
+def api_registry_prune():
+    """Delete the zot manifests nothing uses, keeping the newest N per repo."""
+    body = request.get_json(silent=True) or {}
+    if not body.get('confirm'):
+        return _error('confirmation is required: show the plan first', status=400)
+    try:
+        from . import registrygc
+        result = registrygc.prune(dry_run=bool(body.get('dry_run')))
+    except Exception as exc:                    # noqa: BLE001
+        return jsonify({'success': False, 'error': str(exc) or exc.__class__.__name__}), 502
+    return jsonify({'success': True, **result})
+
+
 @docker_bp.route('/api/docker/history/clear', methods=['POST'])
 def api_history_clear():
     host_key = (request.args.get('host_key') or '').strip() or None

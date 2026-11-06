@@ -3454,6 +3454,40 @@ const showHostInfoMain = async () => {
             })();
 
             const updates = (async () => {
+                // A swarm manager is asked about *stacks*, not containers. A
+                // service's deployed image is a fact about the service; the
+                // container list on one node cannot see it, and counts the
+                // previous task's container - left exited behind by the last
+                // deploy - as an update that will never clear.
+                try {
+                    const swarmRes = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/swarm/stacks`,
+                        { headers: { Accept: 'application/json' } });
+                    const swarm = await swarmRes.json();
+                    if (token !== logsMainViewToken || logsMainMode !== 'docker') return;
+                    if (swarmRes.ok && swarm.success && swarm.manager) {
+                        const list = document.getElementById('docker-updates-list');
+                        const count = document.getElementById('docker-updates-count');
+                        const title = document.getElementById('docker-updates-title');
+                        if (title) title.textContent = 'Stack updates';
+                        if (count) {
+                            count.textContent = swarm.updates
+                                ? `${swarm.updates} service${swarm.updates === 1 ? '' : 's'} behind`
+                                : 'every stack current';
+                        }
+                        window.swarmPanelTarget = { mount: list, hostKey: hostId };
+                        if (list && typeof window.renderSwarmUpdates === 'function') {
+                            window.renderSwarmUpdates(list, hostId, { all: false });
+                        }
+                        const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates`, { headers: { Accept: 'application/json' } });
+                        const data = await res.json();
+                        if (token !== logsMainViewToken || logsMainMode !== 'docker') return;
+                        renderDockerLogPicker(data.containers || []);
+                        return;
+                    }
+                    window.swarmPanelTarget = null;
+                } catch (_) {
+                    // a worker (or a host with no swarm) simply falls through
+                }
                 try {
                     const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates`, { headers: { Accept: 'application/json' } });
                     const data = await res.json();
@@ -3605,7 +3639,7 @@ const showHostInfoMain = async () => {
                     <!-- What upstream has moved on from -->
                     <div class="p-3 rounded-lg bg-white/5 border border-white/10">
                         <div class="flex items-center justify-between mb-1">
-                            <h3 class="text-sm font-semibold termix-text">Container updates</h3>
+                            <h3 id="docker-updates-title" class="text-sm font-semibold termix-text">Container updates</h3>
                             <div class="flex items-center gap-3">
                                 <span id="docker-updates-count" class="text-xs termix-muted">checking upstream images…</span>
                                 <button id="docker-updates-refresh" type="button" class="text-xs px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20">re-check</button>
@@ -3728,7 +3762,17 @@ const showHostInfoMain = async () => {
             };
             window.onWizardDeployed = refreshAfterWizard;
             window.onWizardClosed = refreshAfterWizard;
-            document.addEventListener('ailog:container-updated', (event) => {
+            // A stack update ends somewhere else in the page (the swarm dialog owns
+        // the job), so the panel is refreshed from the event rather than by
+        // guessing when to poll.
+        document.addEventListener('ailog:swarm-updated', () => {
+            const target = window.swarmPanelTarget;
+            if (target && target.mount && typeof window.renderSwarmUpdates === 'function') {
+                window.renderSwarmUpdates(target.mount, target.hostKey, { refresh: true, all: false });
+            }
+        });
+
+        document.addEventListener('ailog:container-updated', (event) => {
                 const from = event.detail && event.detail.hostKey;
                 if (!from || from !== dockerViewHostId) return;
                 refreshAfterWizard();
