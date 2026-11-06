@@ -1,0 +1,72 @@
+# immich - photo library on the `photos` host (standalone docker compose).
+#
+# Owned by CI: .gitea/workflows/compose.yml writes this file to
+# /home/david/code/immich/docker-compose.yml, pulls, and restarts the project.
+# Edit it here, not on the host - a change made on the host is what the next
+# deploy quietly throws away.
+#
+# Derived from immich's upstream compose file, with two deliberate changes:
+#   - every image comes from zot, so a deploy cannot depend on ghcr or Docker
+#     Hub being reachable (and an upstream image is pulled into zot once, by
+#     deploy/mirror-images.json, not on every host)
+#   - IMMICH_VERSION is pinned instead of `release`, so "update immich" is a
+#     commit someone can read rather than a tag that moves under the estate
+#
+# The .env stays on the host (it holds the database password) and is not in
+# this repository; deploy/compose/immich/.env.example lists the keys it needs.
+
+name: immich
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: zot.safehomelan.com/immich-server:${IMMICH_VERSION:-v3.3.6}
+    volumes:
+      - ${UPLOAD_LOCATION}:/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    ports:
+      - '2283:2283'
+    depends_on:
+      - redis
+      - database
+    restart: always
+    healthcheck:
+      disable: false
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: zot.safehomelan.com/immich-machine-learning:${IMMICH_VERSION:-v3.3.6}
+    volumes:
+      - model-cache:/cache
+    env_file:
+      - .env
+    restart: always
+    healthcheck:
+      disable: false
+
+  redis:
+    container_name: immich_redis
+    image: zot.safehomelan.com/valkey:9
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    restart: always
+
+  database:
+    container_name: immich_postgres
+    image: zot.safehomelan.com/immich-postgres:14-vectorchord0.4.3-pgvectors0.2.0
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_DB: ${DB_DATABASE_NAME}
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: always
+    healthcheck:
+      disable: false
+
+volumes:
+  model-cache:
