@@ -63,6 +63,7 @@
         const head = `<div class="flex items-center justify-between gap-2 text-xs termix-muted mb-2">
                 <span>${data.updates} service${data.updates === 1 ? '' : 's'} behind on ${data.services} services</span>
                 <span class="flex items-center gap-2">
+                    <button type="button" data-swarm-all class="px-2 py-1 rounded bg-white/10 hover:bg-white/20">${opts.all ? 'only updates' : 'every service'}</button>
                     <button type="button" data-swarm-prune class="px-2 py-1 rounded bg-white/10 hover:bg-white/20">prune zot</button>
                     <button type="button" data-swarm-recheck class="px-2 py-1 rounded bg-white/10 hover:bg-white/20">re-check</button>
                 </span>
@@ -84,8 +85,11 @@
                                 <span class="truncate">${serviceLine(row)}</span>
                                 ${row.update_available
                                     ? `<button type="button" class="text-[11px] px-2 py-0.5 rounded bg-amber-600/80 hover:bg-amber-500 text-black font-medium"
-                                        data-swarm-service="${esc(row.short)}" data-swarm-stack="${esc(stack.name)}">update</button>`
-                                    : '<span class="text-[11px] termix-muted">—</span>'}
+                                        data-swarm-service="${esc(row.short)}" data-swarm-stack="${esc(stack.name)}" title="choose a version">update</button>`
+                                    : (opts.all && row.from_zot !== false
+                                        ? `<button type="button" class="text-[11px] px-2 py-0.5 rounded bg-white/10 hover:bg-white/20"
+                                            data-swarm-service="${esc(row.short)}" data-swarm-stack="${esc(stack.name)}" title="choose a version">change version</button>`
+                                        : '<span class="text-[11px] termix-muted">—</span>')}
                             </div>`).join('')}
                     </div>
                 </div>`).join('');
@@ -93,6 +97,10 @@
         mount.querySelectorAll('[data-swarm-service]').forEach((button) => {
             button.addEventListener('click', () => window.openSwarmUpdate(
                 hostKey, button.dataset.swarmStack, button.dataset.swarmService));
+        });
+        mount.querySelectorAll('[data-swarm-all]').forEach((button) => {
+            button.addEventListener('click', () => window.renderSwarmUpdates(
+                mount, hostKey, { refresh: false, all: !opts.all }));
         });
         mount.querySelectorAll('[data-swarm-recheck]').forEach((button) => {
             button.addEventListener('click', () => window.renderSwarmUpdates(mount, hostKey, { refresh: true, all: opts.all }));
