@@ -106,10 +106,12 @@ def test_the_host_pane_takes_the_update_card_off_a_worker():
     assert "if (card) card.classList.add('hidden')" in after.split('try {', 1)[0]
 
 
-def test_the_container_table_is_four_panes():
+def test_every_pane_carries_the_four_numbers():
     source = (JS / 'swarm-containers.js').read_text()
-    for head in ('>Container<', '>RAM<', '>CPU<', '>Network<'):
-        assert head in source
+    pane = source[source.index('const pane = (c, isOpen, s) =>'):source.index('const wire =')]
+    assert 'versionBadge(c)' in pane          # name, then what version it is
+    assert 'bytes(c.mem_used)' in pane
+    assert 'pct(cpu)' in pane
     assert 'net_rx_bps' in source and 'net_tx_bps' in source
     # and it stops polling when the pane it drew into is gone
     assert 'mount.isConnected' in source
@@ -141,8 +143,8 @@ def test_the_container_list_shows_the_image_version():
     assert 'image_tag' in source
     assert 'versionBadge' in source
     # a badge beside the name, not a third line under it
-    row = source[source.index('const row = (c) =>'):source.index('const table =')]
-    assert '${versionBadge(c)}' in row
+    pane = source[source.index('const pane = (c, isOpen, s) =>'):source.index('const wire =')]
+    assert '${versionBadge(c)}' in pane
 
 
 def test_recheck_asks_the_question_the_panel_is_showing():
@@ -164,3 +166,44 @@ def test_recheck_asks_the_question_the_panel_is_showing():
     assert 'window.recheckSwarmUpdates' in stacks
     # it remembers which list the user chose before re-asking
     assert 'lastOpts' in stacks
+
+
+# ------------------------------------------------------------------ the panes
+
+def test_the_panes_are_two_or_three_to_a_row_and_open_in_place():
+    source = (JS / 'swarm-containers.js').read_text()
+    assert 'sm:grid-cols-2 xl:grid-cols-3' in source
+    assert 'data-toggle' in source and 'data-detail' in source
+    # opening one shows the three graphs, not a new page
+    for key in ('data-chart="cpu"', 'data-chart="mem"', 'data-chart="net"'):
+        assert key in source
+    assert 'series.cpu' in source and 'HISTORY' in source
+    # a watched pane polls faster than an idle list
+    assert 'POLL_OPEN_MS' in source
+
+
+def test_a_pane_offers_a_terminal_inside_the_container():
+    """Not the host it happens to be on - that is a hop the user has to make."""
+    source = (JS / 'swarm-containers.js').read_text()
+    assert 'ssh into container' in source
+    assert '/shell' in source                 # asked before offering a prompt
+    assert 'openContainerShell' in source
+
+    core = (JS / 'app-core.js').read_text()
+    assert 'window.openContainerShell' in core
+    # the socket is told which container, and the resume check knows the difference
+    assert '...(container ? { container } : {})' in core
+    assert 'sshConnectedContainer === sshTargetContainer' in core
+
+    app = (ROOT / 'app.py').read_text()
+    assert "data.get('container')" in app
+    assert 'docker exec -it' in app
+
+
+def test_a_container_without_a_shell_says_so_instead_of_failing_later():
+    source = (ROOT / 'dockermon' / 'routes.py').read_text()
+    block = source[source.index('def api_container_shell'):]
+    block = block[:block.index('# ------------------------------------')]
+    assert "'sh', 'bash', 'ash'" in block
+    assert 'no shell' in block
+    assert '409' in block
