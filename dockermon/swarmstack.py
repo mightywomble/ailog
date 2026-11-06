@@ -94,6 +94,19 @@ def is_manager(run) -> bool:
     return bool(ok and (out or '').strip().lower() == 'true')
 
 
+def is_swarm_node(run) -> bool:
+    """A worker and a host that never joined a swarm both say manager: false.
+
+    They are not the same page: a worker belongs to the cluster and must not be
+    offered container updates (the manager owns them), while a plain host has
+    nothing *but* its own containers to update. ``LocalNodeState`` is what
+    tells them apart - ``active`` on any node in a swarm, ``inactive`` outside.
+    """
+    from .updateflow import PRELUDE
+    ok, out = run(PRELUDE + '$DK info --format "{{.Swarm.LocalNodeState}}"', timeout=20)
+    return bool(ok and (out or '').strip().lower() == 'active')
+
+
 def read_services(run) -> list[dict]:
     """Every service on the cluster, straight from the manager (one round trip)."""
     from .updateflow import PRELUDE
@@ -228,7 +241,8 @@ def scan(host_key: str, refresh: bool = False) -> dict:
 
     _info, run = _runner(host_key)
     if not is_manager(run):
-        out = {'host_key': host_key, 'manager': False, 'stacks': [], 'ts': now,
+        out = {'host_key': host_key, 'manager': False, 'swarm': is_swarm_node(run),
+               'stacks': [], 'ts': now,
                'note': 'this node is not a swarm manager, so it cannot see the cluster'}
         with _lock:
             _cache[host_key] = (now, dict(out))
@@ -248,6 +262,7 @@ def scan(host_key: str, refresh: bool = False) -> dict:
     out = {
         'host_key': host_key,
         'manager': True,
+        'swarm': True,
         'stacks': sorted(stacks.values(),
                          key=lambda s: (-s['updates'], s['name'].lower())),
         'services': len(rows),
