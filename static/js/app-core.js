@@ -2451,9 +2451,11 @@ export function init() {
         });
 
         // ------------------------------------------------------ docker badge --
-        // The Docker square answers one question: does anything on this host
-        // need doing? Green = nothing, red = an image the registry has moved on
-        // from or a container that is not healthy, grey = not checked yet.
+        // The Docker square identifies Docker, in Docker blue, on every host
+        // that has it. It is a button, not a status: the reachability dot
+        // beside it already says whether the host answered, and "is anything
+        // behind?" is a question only a swarm manager can answer - so the
+        // tooltip says what the host is running instead of what is wrong.
         // The answer comes from a background scan (/api/docker/overview) and is
         // cached for a minute: a live SSH snapshot per card per poll would put
         // `docker stats` on every host every 20 seconds.
@@ -2473,18 +2475,13 @@ export function init() {
                 return;
             }
             button.hidden = false;
+            // Kept for the tooltip's naming only; the colour no longer moves.
             button.dataset.state = row.status || 'unknown';
             const label = row.friendly_name || card.dataset.hostId;
             const bits = [];
-            if (row.updates) bits.push(`${row.updates} image update${row.updates === 1 ? '' : 's'}`);
-            if (row.attention) bits.push(`${row.attention} needing attention`);
-            if (!bits.length) {
-                bits.push(row.containers
-                    ? `${row.containers} containers, all current`
-                    : 'nothing needs doing');
-            }
+            if (row.containers) bits.push(`${row.containers} container${row.containers === 1 ? '' : 's'}`);
             if (row.error) bits.push(`check failed: ${row.error}`);
-            button.title = `Docker on ${label}: ${bits.join(' · ')} — open Docker information`;
+            button.title = `Docker on ${label}${bits.length ? ': ' + bits.join(' · ') : ''} — open Docker information`;
             button.setAttribute('aria-label', button.title);
         };
 
@@ -3822,6 +3819,17 @@ const showHostInfoMain = async () => {
                 button.disabled = true;
                 button.textContent = 'checking…';
                 try {
+                    // Which question is this card showing? On a manager it is the
+                    // stack list, and the per-container scan would replace it
+                    // with the old image view - which is exactly what pressing
+                    // re-check used to do: a panel that said every stack was
+                    // current, and a click later listed images needing updates.
+                    const target = window.swarmPanelTarget;
+                    if (target && target.hostKey === hostId
+                        && typeof window.recheckSwarmUpdates === 'function') {
+                        await window.recheckSwarmUpdates(target.mount, hostId);
+                        return;
+                    }
                     await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates/refresh`, { method: 'POST' });
                     const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates?refresh=1`, { headers: { Accept: 'application/json' } });
                     const data = await res.json();

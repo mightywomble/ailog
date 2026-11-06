@@ -133,3 +133,34 @@ def test_a_worker_is_never_offered_a_stack_update(monkeypatch):
     assert out['manager'] is False
     assert out['stacks'] == []
     assert out['updates'] if 'updates' in out else True    # never a count from a worker
+
+
+def test_the_container_list_shows_the_image_version():
+    """The version is the thing you look for, and a truncated image:tag hides it."""
+    source = (JS / 'swarm-containers.js').read_text()
+    assert 'image_tag' in source
+    assert 'versionBadge' in source
+    # a badge beside the name, not a third line under it
+    row = source[source.index('const row = (c) =>'):source.index('const table =')]
+    assert '${versionBadge(c)}' in row
+
+
+def test_recheck_asks_the_question_the_panel_is_showing():
+    """Re-check on a manager used to list images needing updates.
+
+    The card says "Stack updates", the button ran the per-container scan, and
+    one click later the panel answered a different question - the old image list
+    the stack view exists to replace.
+    """
+    js = (JS / 'app-core.js').read_text()
+    handler = js[js.index("document.getElementById('docker-updates-refresh')"):]
+    handler = handler[:handler.index('docker-log-select')]
+    assert 'window.swarmPanelTarget' in handler
+    assert 'recheckSwarmUpdates' in handler
+    # and the per-container refresh is the fallback, not the first move
+    assert handler.index('recheckSwarmUpdates') < handler.index('/updates/refresh')
+
+    stacks = (JS / 'swarm-update.js').read_text()
+    assert 'window.recheckSwarmUpdates' in stacks
+    # it remembers which list the user chose before re-asking
+    assert 'lastOpts' in stacks
