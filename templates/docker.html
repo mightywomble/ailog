@@ -1148,6 +1148,20 @@
 })();
 </script>
 <script>
+/* A container pane can offer a terminal, but this page has no terminal of its
+   own - the SSH socket, xterm and the log panes all live in the main shell. So
+   hand the request over the only way a page can: as a URL the shell understands.
+   It opens in a new tab so the docker page you were reading stays where it was. */
+window.openContainerShell = function (hostKey, containerId, shell) {
+  if (!containerId) return;
+  var params = new URLSearchParams({
+    host: hostKey || '',
+    container: containerId,
+    shell: shell || ''
+  });
+  window.open('/?' + params.toString(), '_blank', 'noopener');
+};
+
 /* Re-colour Chart.js instances when the theme/mode changes. */
 document.addEventListener('themechange', function () {
   var colors = window.themeColors ? window.themeColors() : null;

@@ -6843,6 +6843,34 @@ aiAnalyseBtn.addEventListener('click', () => runAiAnalysis({
         // --- INITIALIZATION ---
         populateHostCards();
 
+        // The standalone docker page has the container panes but not the
+        // terminal, so 'ssh into container' there arrives as a link:
+        // /?host=<host>&container=<id>&shell=<sh|bash|ash>. Open it here, then
+        // drop the parameters so a refresh doesn't reconnect behind your back.
+        (() => {
+            const params = new URLSearchParams(window.location.search);
+            const deepContainer = params.get('container');
+            if (!deepContainer) return;
+            const deepHost = params.get('host') || '';
+            const deepShell = params.get('shell') || '';
+            params.delete('container');
+            params.delete('host');
+            params.delete('shell');
+            const rest = params.toString();
+            window.history.replaceState({}, '', window.location.pathname
+                + (rest ? '?' + rest : '') + window.location.hash);
+            if (typeof window.openContainerShell !== 'function') return;
+            Promise.resolve()
+                .then(() => populateHostCards())
+                .then(() => new Promise((done) => setTimeout(done, 200)))
+                .then(() => window.openContainerShell(deepHost, deepContainer, deepShell))
+                .catch((err) => {
+                    if (typeof window.showToast === 'function') {
+                        window.showToast('Could not open the container shell: ' + err.message, 'error');
+                    }
+                });
+        })();
+
 }
 
 document.addEventListener('DOMContentLoaded', init);

@@ -207,3 +207,26 @@ def test_a_container_without_a_shell_says_so_instead_of_failing_later():
     assert "'sh', 'bash', 'ash'" in block
     assert 'no shell' in block
     assert '409' in block
+
+
+def test_the_docker_page_hands_a_container_shell_over_to_the_shell_that_has_one():
+    """The panes live on a page with no terminal on it.
+
+    ``/docker/<host>`` renders the containers, but xterm, the SSH socket and the
+    log panes are all in the main shell - so the button was being left out
+    entirely there (``typeof window.openContainerShell === 'function'`` was
+    false). The page now answers the call by turning it into a link the shell
+    understands, which keeps the terminal in one place instead of two.
+    """
+    page = (TEMPLATES / 'docker.html').read_text()
+    assert 'window.openContainerShell = function (hostKey, containerId, shell)' in page
+    assert "container: containerId" in page
+    assert "window.open('/?' + params.toString()" in page
+    # a new tab, so the docker page being read is not thrown away
+    assert "'_blank'" in page
+
+    core = (JS / 'app-core.js').read_text()
+    assert "params.get('container')" in core
+    # one shot: a refresh must not silently reconnect
+    assert "params.delete('container')" in core
+    assert 'window.history.replaceState' in core
