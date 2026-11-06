@@ -320,6 +320,13 @@ def frozen(monkeypatch, tmp_path):
             self.merged.append(index)
             return {'merged': True, 'sha': 'merge-sha'}
 
+        def merge_when_ready(self, index, report=None, runs=None, **kwargs):
+            # the estate path waits for a protected branch's required checks;
+            # this fake has no protection, so there is nothing to wait for
+            if report:
+                report('required checks', 'no protection on this branch', ok=True)
+            return self.merge_pr(index)
+
     forge = FakeForge()
     monkeypatch.setattr(update, 'Repo', FakeRepo)
     monkeypatch.setattr(update.forge_mod, 'Forge', lambda *a, **k: forge)
