@@ -7,9 +7,35 @@ that ships them. Replaces `homelab_docker_build` + `homelab_docker_deploy`.
 wizard.yaml              the source of truth: image, version, ports, url, replicas
 apps/<app>/              Dockerfile or build.json (+ patch.sh, test.sh)
 stacks/<app>/stack.yml   rendered from wizard.yaml, hand-editable
+compose/<name>/          a project on a host that is NOT a swarm node
 mirror-images.json       upstream images to cache into zot
-.gitea/workflows/        build.yml · mirror.yml · ship.yml
+tools/pin_build_tag.py   writes the tag a run deployed back into the pins
 ```
+
+## Two kinds of host
+
+| | descibed by | shipped by | rolled back by |
+|---|---|---|---|
+| swarm service | `stacks/<name>/stack.yml` | `ship.yml` → `docker stack deploy` | `ship.yml` refuses a stack whose images are absent from zot |
+| plain docker host | `compose/<name>/{compose.yml, project.json}` | `compose.yml` → `pull`, `up -d --wait` | the previous file, if the health check does not answer |
+
+A compose project is three files:
+
+```
+compose.yml     the deployable file - images point at zot, and the version is
+                written literally (a variable in the host's .env outranks the
+                default beside it, which is how immich kept pulling :v3 after
+                the file said v3.3.6)
+project.json    host, ssh target, directory, health check, .env keys
+.env.example    the keys the host's .env must define - never the values
+```
+
+The `.env` stays on the host, in `/home/david/code/<project>`. The pipeline
+logs the host in to zot (it does the pulling), refuses a project whose `.env` is
+missing a key, and reads the deployed tree from `Settings → Docker`.
+
+Matrix is hand-managed. CasaOS hosts are out of scope by name: their compose
+projects belong to CasaOS.
 
 ## The shape of a change
 
