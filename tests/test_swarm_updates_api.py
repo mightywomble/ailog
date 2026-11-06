@@ -142,3 +142,23 @@ def test_a_hidden_overlay_is_actually_hidden():
     source = (JS / 'swarm-update.js').read_text()
     assert '.hidden = ' not in source                     # no attribute toggling
     assert "classList.toggle('hidden'" in source
+
+
+def test_the_picker_is_reachable_when_nothing_is_behind():
+    """A clean cluster still has to be able to move a service.
+
+    The panel listed only stacks with an update, and only a row that was behind
+    got a button - so on a cluster where everything is current (the normal
+    state, and the state the phantom fix produced) there was no way to reach the
+    version picker at all. "every service" shows them all, and a service that is
+    current gets "change version", which opens the same picker.
+    """
+    source = (JS / 'swarm-update.js').read_text()
+    assert 'data-swarm-all' in source
+    assert "'only updates' : 'every service'" in source
+    assert 'change version' in source
+    # the button is only offered for something that can be moved: zot, not upstream
+    lines = source.splitlines()
+    at = next(i for i, l in enumerate(lines) if 'change version' in l)
+    window = '\n'.join(lines[max(0, at - 2):at + 1])
+    assert 'from_zot' in window        # offered only for something zot can serve
