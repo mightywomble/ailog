@@ -156,15 +156,17 @@ class Forge:
         r = self.http.get(f'{self.api}{self.path}/commits/{sha}/status', timeout=30)
         return r.json() if r.status_code == 200 else {}
 
-    def check_report(self, sha: str, required: list[str]) -> tuple[list, list, list]:
+    def check_report(self, sha: str, required: list[str],
+                     statuses: list | None = None) -> tuple[list, list, list]:
         """``(green, pending, failed)`` for the contexts this branch requires.
 
         ``failed`` is built for a person: a context name alone does not say what
         went wrong, and the description Gitea stores ("Waiting to run",
         "Process completed with exit code 1") does.
         """
-        seen = {str(s.get('context') or ''): s
-                for s in (self.commit_status(sha).get('statuses') or [])}
+        if statuses is None:
+            statuses = self.commit_status(sha).get('statuses') or []
+        seen = {str(s.get('context') or ''): s for s in statuses}
         green: list[str] = []
         pending: list[str] = []
         failed: list[str] = []
@@ -181,7 +183,8 @@ class Forge:
         return green, pending, failed
 
     def merge_when_ready(self, index: int, report=None, runs=None,
-                         timeout: float | None = None, poll: float = 10.0) -> dict:
+                         timeout: float | None = None, poll: float = 10.0,
+                         grace: float = 120.0) -> dict:
         """Merge once the branch's required checks are green - or say what is not.
 
         A protected branch answers a merge with
@@ -194,6 +197,9 @@ class Forge:
         so the job log says which check is still running instead of going quiet
         for ten minutes.  ``runs`` may return one line about the workflow runs
         for the head - that is what tells a slow runner from a wedged one.
+
+        ``grace`` is how long a head with *no* statuses at all may look like a
+        run that has not started yet before it is called uncheckable.
         """
         pr = self.pr(index)
         base = str((pr.get('base') or {}).get('branch') or settings.base_branch())
@@ -208,11 +214,36 @@ class Forge:
 
         deadline = time.time() + (timeout if timeout is not None else settings.check_wait())
         last = ''
+        silent_since = 0.0
         while True:
-            green, pending, failed = self.check_report(sha, required)
+            statuses = self.commit_status(sha).get('statuses') or []
+            green, pending, failed = self.check_report(sha, required, statuses=statuses)
             if failed:
                 raise ForgeError(f'PR #{index} cannot merge - required checks failed: '
                                  + '; '.join(failed))
+            # A commit with no statuses at all is not slow, it is uncheckable,
+            # and waiting for it is waiting for nothing. Gitea does not trigger
+            # workflows for a push made by the actions token, so a commit CI
+            # pushed (the pin job writing the tag it just deployed) has no run
+            # and never will - and if that commit is a pull request's head, the
+            # required contexts can never be reported for it. Say that, once it
+            # has had long enough for a run to start.
+            if not statuses:
+                silent_since = silent_since or time.time()
+                if time.time() - silent_since >= grace:
+                    fresh = runs(sha) if runs else ''
+                    raise ForgeError(
+                        f'PR #{index} head {sha[:8]} has no status checks at all'
+                        + (f' ({fresh})' if fresh else '')
+                        + ' - so the required checks ('
+                        + ', '.join(required) + ') can never be reported for it and no '
+                          'merge will be accepted, however long this waits. This is what '
+                          'a commit pushed by CI looks like: Gitea does not run workflows '
+                          'for a push made with the actions token. Push the branch again '
+                          'as a person (or re-run the workflow that pushed it) so CI runs '
+                          'on the new head')
+            else:
+                silent_since = 0.0
             detail = f'{len(green)}/{len(required)} green'
             if pending:
                 detail += ' - waiting on ' + ', '.join(pending)
