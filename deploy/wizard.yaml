@@ -235,9 +235,9 @@ services:
 - name: metamcp
   kind: build
   service: app
-  image: zot.safehomelan.com/metamcp:${IMAGE_TAG:-build-317}
+  image: zot.safehomelan.com/metamcp:${IMAGE_TAG:-build-348}
   repo: metamcp
-  version: build-317
+  version: build-348
   source: ghcr.io/metatool-ai/metamcp:2.4.22
   ports:
   - host: 8091
