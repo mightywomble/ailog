@@ -1,0 +1,140 @@
+name: Mirror upstream images to zot
+# Caches prebuilt upstream images into the zot registry (cache proxy), running
+# on the build server runner. Entries come from deploy/mirror-images.json:
+#   - name   -> pushed as zot.safehomelan.com/<name>:<version> and :latest
+#   - source -> fully-qualified upstream reference (registry/repo:tag)
+# Version tag resolution:
+#   - pinned source tag (e.g. 1.6.0)  -> used as the version tag
+#   - latest/beta source              -> resolved by pulling the image and
+#     matching its digest against the upstream registry's version tags
+# Triggers: a push to the 'build' branch that changes deploy/mirror-images.json, or a
+# manual run (repo Actions -> "Mirror upstream images to zot" -> Run workflow),
+# e.g. to pick up a new upstream release.
+# No paths: filter here: on this Gitea the filter never matched a dev push, so
+# the mirror silently did nothing. The 'Check for changed entries' step below is
+# the real gate and exits in seconds when nothing moved.
+on:
+  push:
+    branches: [build, dev]
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Log in to the zot registry
+        run: |
+          echo "${{ secrets.ZOT_PASSWORD }}" | docker login "${{ secrets.ZOT_URL }}" -u "${{ secrets.ZOT_USER }}" --password-stdin
+
+      - name: Check for changed entries
+        run: |
+          set -euo pipefail
+
+          # What changed since the last pushed state. main is the usual answer;
+          # on the branch that first carries the file main does not have it yet,
+          # and an empty base would re-mirror every entry.
+          git show origin/main:deploy/mirror-images.json > /tmp/previous.json 2>/dev/null \
+            || git show HEAD^:deploy/mirror-images.json > /tmp/previous.json 2>/dev/null \
+            || echo '{"mirrors": []}' > /tmp/previous.json
+
+          python3 - <<'PY' > /tmp/changed-entries
+          import json
+
+          with open("/tmp/previous.json") as f:
+              prev = json.load(f)
+          with open("deploy/mirror-images.json") as f:
+              curr = json.load(f)
+
+          prev_map = {e["name"]: e["source"] for e in prev.get("mirrors", [])}
+
+          for entry in curr.get("mirrors", []):
+              name, source = entry["name"], entry["source"]
+              if name not in prev_map or source != prev_map[name]:
+                  print(name, source)
+          PY
+
+          if [ ! -s /tmp/changed-entries ]; then
+              echo "No changed entries found - skipping mirror"
+              exit 0
+          fi
+
+          echo "Changed entries:"
+          cat /tmp/changed-entries
+
+
+      - name: Mirror changed images
+        env:
+          ZOT_URL: ${{ secrets.ZOT_URL }}
+        run: |
+          set -e
+          REGISTRY_HOST="${ZOT_URL#https://}"; REGISTRY_HOST="${REGISTRY_HOST%/}"
+
+          while read -r NAME SRC; do
+            [ -n "$NAME" ] || continue
+            echo "=== Mirroring $SRC -> $REGISTRY_HOST/$NAME ==="
+            REGISTRY="${SRC%%/*}"
+            if [ "$REGISTRY" = "$SRC" ]; then
+              echo "source must be fully qualified (registry/repo:tag): $SRC"
+              exit 1
+            fi
+            REPO="${SRC#*/}"; REPO="${REPO%%:*}"; TAG="${SRC##*:}"
+
+            echo "pulling $SRC..."
+            docker pull "$SRC" >/dev/null
+            DIGEST=$(docker inspect "$SRC" | python3 -c 'import json,sys; i=json.load(sys.stdin)[0]; d=(i.get("RepoDigests") or [""]); print(d[0].split("@")[-1] if d and "@" in d[0] else "")')
+
+            if [ "$TAG" = "latest" ] || [ "$TAG" = "beta" ]; then
+              # resolve the version tag by matching this digest against upstream version tags
+              case "$REGISTRY" in
+                docker.io) AUTH_URL="https://auth.docker.io/token?service=registry.docker.io&scope=repository:${REPO}:pull"; API="https://registry-1.docker.io" ;;
+                *)         AUTH_URL="https://${REGISTRY}/token?scope=repository:${REPO}:pull&service=${REGISTRY}"; API="https://${REGISTRY}" ;;
+              esac
+              TOKEN=$(curl -fsSL "$AUTH_URL" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+              # page through ALL tags: the first page may only contain old tags
+              TAGS=""
+              TURL="${API}/v2/${REPO}/tags/list?n=100"
+              while [ -n "$TURL" ]; do
+                HF=$(mktemp)
+                BODY=$(curl -fsSL -D "$HF" -H "Authorization: Bearer $TOKEN" "$TURL")
+                TAGS="$TAGS $(printf '%s' "$BODY" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin).get("tags") or []))')"
+                TURL=$(grep -i '^link:' "$HF" | tr -d '\r' | sed -n 's/.*<\([^>]*\)>.*/\1/p')
+                # some registries (e.g. Docker Hub) return relative next-page URLs
+                case "$TURL" in
+                  /*)      TURL="${API}${TURL}" ;;
+                  https?://*) ;;
+                  *)       TURL="" ;;
+                esac
+                rm -f "$HF"
+              done
+              echo "upstream version tags found: $(echo "$TAGS" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+(\.[0-9]+)+$' | sort -rV | head -5 | tr '\n' ' ')..."
+              VERSION=""
+              for T in $(echo "$TAGS" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+(\.[0-9]+)+$' | sort -rV | head -40); do
+                D=$(curl -fsSI -H "Authorization: Bearer $TOKEN" \
+                     -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+                     "${API}/v2/${REPO}/manifests/${T}" \
+                     | tr -d '\r' | grep -i '^docker-content-digest:' | awk '{print $2}')
+                if [ "$D" = "$DIGEST" ]; then VERSION="$T"; break; fi
+              done
+              if [ -z "$VERSION" ]; then
+                VERSION="sha-$(echo "$DIGEST" | cut -c8-19)"
+                echo "no upstream version tag matched this digest - falling back to $VERSION"
+              fi
+            else
+              VERSION="$TAG"
+            fi
+
+            echo "resolved version: $VERSION (digest ${DIGEST:0:19}...)"
+            docker tag "$SRC" "$REGISTRY_HOST/$NAME:$VERSION"
+            docker tag "$SRC" "$REGISTRY_HOST/$NAME:latest"
+            docker push "$REGISTRY_HOST/$NAME:$VERSION" >/dev/null
+            docker push "$REGISTRY_HOST/$NAME:latest" >/dev/null
+            echo "mirrored: $REGISTRY_HOST/$NAME:$VERSION and :latest"
+            docker rmi "$SRC" "$REGISTRY_HOST/$NAME:$VERSION" "$REGISTRY_HOST/$NAME:latest" >/dev/null 2>&1 || true
+          done < /tmp/changed-entries
+          docker image prune -f >/dev/null 2>&1 || true
+          echo "Mirror complete."

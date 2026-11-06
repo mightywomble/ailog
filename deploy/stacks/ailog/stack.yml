@@ -1,0 +1,152 @@
+# AILog (multi-host log analysis platform) on the swarm, image mirrored into
+# zot by repo1's "Mirror upstream images to zot" workflow.
+# Upstream: https://git.safehomelan.com/david/ailog (vibecoded app; image
+# docker.io/mightywomble/ailog has no useful version tags upstream, so the
+# release workflow publishes version-tagged copies into zot; this stack pins
+# one of those (v3.17.1, 2026-11-04). Bump the tag to upgrade.
+# - single container; the SQLite app db persists on the shared NFS
+#   (/opt/docker/data/ailog) so the service can reschedule to any node
+# - NO LOGIN: the app is unauthenticated by design - trusted internal
+#   network only (see the upstream README's security warning)
+# - SSH keys for monitored hosts are uploaded in the app UI and stored in
+#   its db; outbound SSH to LAN/tailnet hosts works via node networking
+# Access: http://<any swarm node LAN IP>:5001 or http://<any node Tailscale
+# IP>:5001 (routing mesh)
+services:
+  ailog:
+    image: zot.safehomelan.com/ailog:v3.24.0
+    environment:
+      DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
+      # Registry credentials for the update checker (dockermon/updates.py).
+      # zot answers Basic realm="zot", so every manifest HEAD without these is
+      # a 401 and Container updates reports "registry: ... answered HTTP 401".
+      # The password comes from the zot_password secret mounted below; the app
+      # reads /run/secrets/zot_password itself (no ZOT_PASSWORD_FILE needed).
+      ZOT_USER: "david"
+      # Container updates from the Docker view (dockermon/updateflow.py).
+      # on      - the update dialog really pulls and recreates the one service
+      # dry_run - the dialog shows the exact commands and executes nothing
+      # off     - the dialog refuses to start
+      # Scoped by construction: one compose service with --no-deps, or one
+      # swarm service via `service update`, never a project or a host.
+      AILOG_ALLOW_UPDATES: "on"
+      # Swarm updates go through the estate's own pipeline (estate/): the app
+      # commits the version bump to homelab-ops, pushes dev, opens the PR to
+      # main, and watches mirror.yml then ship.yml. It builds and deploys
+      # nothing itself - CI does, on the runners that hold the zot credentials
+      # and the manager socket.
+      # off  - the estate view is inert and swarm rows fall back to
+      #        `docker service update`
+      # plan - the dialog shows the commit + PR it would make, and makes none
+      # on   - commit, PR, merge, watch
+      AILOG_ALLOW_ESTATE: "on"
+      # Where the estate lives now: this repo, under deploy/. The app is its own
+      # estate - the stacks that deploy it, the wizard.yaml that pins them and
+      # the apps CI builds all sit in deploy/, so a release is one merge instead
+      # of two, and the tag a build produces can be pinned by the same run that
+      # deployed it.
+      AILOG_ESTATE_REPO: "https://git.safehomelan.com/david/ailog.git"
+      AILOG_ESTATE_OWNER: "david"
+      AILOG_ESTATE_NAME: "ailog"
+      AILOG_ESTATE_ROOT: "deploy"
+      # Master key for encrypting uploaded SSH private keys at rest
+      # (Fernet, PBKDF2-derived). Keep stable - changing it makes previously
+      # stored keys undecryptable. Mounted as
+      # /run/secrets/ailog_sshkey_master_key (see utils/secretfiles.py).
+      # Self-healing remediation. dry_run = plan and apply are enabled, but the
+      # playbook only runs with --check --diff: nothing on a host is changed.
+      # Set to "on" to let approved plans make real changes, or "off" to hide
+      # the apply path entirely.
+      AILOG_ALLOW_REMEDIATION: "dry_run"
+      # Signs the short-lived plan confirmation tokens (HMAC over
+      # slug|hosts|dry_run|expiry). Without it the app falls back to a
+      # development constant. Changing it only invalidates in-flight plans.
+      # AILOG_SECRET_KEY is /run/secrets/ailog_secret_key
+    secrets:
+      - zot_password
+      - estate_git_token
+      - ailog_secret_key
+      - ailog_sshkey_master_key
+    volumes:
+      - type: bind
+        source: /opt/docker/data/ailog
+        target: /var/lib/ailog
+    ports:
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      replicas: 1
+      # the db is SQLite on NFS: pin the app and its MCP sidecar to one node so
+      # both processes share a consistent view of the WAL ("database disk image
+      # is malformed" / "Host ID not found" seen from another node)
+      placement:
+        constraints:
+          - node.hostname == swarm-worker4
+      restart_policy:
+        condition: any
+
+  # MCP server for agents (Goose via MetaMCP): hosts, log sources, log
+  # interrogation, host facts, AI reports. Same image as the app - the
+  # service just runs mcp_service.py instead of the Flask server, so it
+  # reuses the app's SSH transport, host list and encrypted key material.
+  # Reaches the app's read-only JSON endpoints (overview/reports) on the
+  # stack network as http://ailog:5001.
+  ailog-mcp:
+    image: zot.safehomelan.com/ailog-mcp:${IMAGE_TAG:-build-191}
+    command: ["python3", "mcp_service.py"]
+    environment:
+      DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
+      # same master key as the app: needed to decrypt the stored SSH keys,
+      # mounted as /run/secrets/ailog_sshkey_master_key
+      AILOG_URL: "http://ailog:5001"
+      AILOG_MCP_BIND: "0.0.0.0"
+      AILOG_MCP_PORT: "5002"
+      # 0 = read-only interrogation allow-list (ls/cat/grep/tail/journalctl/docker
+      # ps|logs|inspect/systemctl status/df/free/ps/ss); 1 lifts it entirely
+      AILOG_MCP_ALLOW_RAW: "0"
+      TZ: "Europe/London"
+    secrets:
+      - ailog_mcp_token
+      - ailog_sshkey_master_key
+    volumes:
+      - type: bind
+        source: /opt/docker/data/ailog
+        target: /var/lib/ailog
+    ports:
+      - "8092:5002"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5002/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == swarm-worker4
+      restart_policy:
+        condition: any
+
+
+secrets:
+  ailog_secret_key:
+    external: true
+  ailog_mcp_token:
+    external: true
+  ailog_sshkey_master_key:
+    external: true
+  # Shared registry credential (david's zot login). Used by the update checker
+  # to read manifest digests; mounted at /run/secrets/zot_password.
+  zot_password:
+    external: true
+  # A Gitea token with push on homelab-ops (and read on the app sources it
+  # builds). The estate pipeline commits a version bump with it and opens the
+  # PR; mounted at /run/secrets/estate_git_token.
+  estate_git_token:
+    external: true

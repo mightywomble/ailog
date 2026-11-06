@@ -1,0 +1,144 @@
+# PatchMon (patch-management server) on the swarm, all images mirrored into
+# zot by repo1's "Mirror upstream images to zot" workflow.
+# Upstream guide: https://patchmon.net/docs/patchmon-operator-guide/installing-patchmon-server-on-docker
+# Swarm adaptations (docker stack deploy vs docker compose):
+#  - env_file is ignored by stack deploy, so all env vars are inline below
+#  - depends_on conditions are ignored; healthchecks + on-failure restarts
+#    cover the startup ordering instead
+#  - guacd's `network_mode: service:server` (shared netns) is not supported
+#    by swarm, so guacd joins the overlay network and the server points at
+#    it via GUACD_ADDRESS. Caveat: in-browser RDP may not work, because the
+#    server opens per-session RDP listeners on 127.0.0.1 which guacd cannot
+#    reach from its own netns. Everything else (agents, patching, UI) works.
+# Data: postgres + redis live on the shared NFS (/opt/docker/data/patchmon/)
+# so the services can reschedule to any node.
+# Access: http://<any swarm node LAN IP>:3000 or http://<any node Tailscale
+# IP>:3000 (routing mesh). CORS origins are the NPM-fronted domains:
+#   https://patchmon.safehomelan.com (tailscale) / https://patchlan.safehomelan.com (lan)
+services:
+  server:
+    image: zot.safehomelan.com/patchmon-server:2.1.7
+    environment:
+      CORS_ORIGIN: "https://patchmon.safehomelan.com,https://patchlan.safehomelan.com"
+      # JWT_SECRET, SESSION_SECRET, AI_ENCRYPTION_KEY, POSTGRES_PASSWORD,
+      # REDIS_PASSWORD and the DATABASE_URL that embeds the database password
+      # are all built from swarm secrets by the entrypoint below. None of them
+      # are in this file any more.
+      POSTGRES_HOST: "database"
+      POSTGRES_USER: "patchmon_user"
+      POSTGRES_DB: "patchmon_db"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      GUACD_ADDRESS: "guacd:4822"
+      TRUST_PROXY: "true"
+      TZ: "Europe/London"
+      PORT: "3000"
+    # The image's ENTRYPOINT is ./entrypoint.sh with no CMD, and it has no
+    # `_FILE` support, so this reads the five secrets and execs that same
+    # entrypoint. DATABASE_URL is rebuilt here because the copy in the stack
+    # file embedded the password.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        export JWT_SECRET="$$(cat /run/secrets/patchmon_jwt_secret)"
+        export SESSION_SECRET="$$(cat /run/secrets/patchmon_session_secret)"
+        export AI_ENCRYPTION_KEY="$$(cat /run/secrets/patchmon_ai_encryption_key)"
+        export POSTGRES_PASSWORD="$$(cat /run/secrets/patchmon_postgres_password)"
+        export REDIS_PASSWORD="$$(cat /run/secrets/patchmon_redis_password)"
+        export DATABASE_URL="postgresql://patchmon_user:$${POSTGRES_PASSWORD}@database:5432/patchmon_db"
+        exec ./entrypoint.sh
+    secrets:
+      - patchmon_jwt_secret
+      - patchmon_session_secret
+      - patchmon_ai_encryption_key
+      - patchmon_postgres_password
+      - patchmon_redis_password
+    ports:
+      - "3000:3000"
+    # Startup migrations can take ~60s on a cold/NFS-backed DB. The image
+    # healthcheck only allows ~80s total before killing the task, which made
+    # the server flap on first boot, so allow a longer start period here.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 6
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  database:
+    image: zot.safehomelan.com/postgres:17-alpine
+    secrets:
+      - patchmon_postgres_password
+    environment:
+      POSTGRES_USER: "patchmon_user"
+      POSTGRES_PASSWORD_FILE: "/run/secrets/patchmon_postgres_password"
+      POSTGRES_DB: "patchmon_db"
+    volumes:
+      - type: bind
+        source: /opt/docker/data/patchmon/postgres
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patchmon_user -d patchmon_db"]
+      interval: 3s
+      timeout: 5s
+      retries: 7
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  redis:
+    image: zot.safehomelan.com/redis:7-alpine
+    # the password is a secret, so it cannot sit in argv of a fixed command
+    command:
+      - sh
+      - -c
+      - exec redis-server --requirepass "$$(cat /run/secrets/patchmon_redis_password)"
+    secrets:
+      - patchmon_redis_password
+    volumes:
+      - type: bind
+        source: /opt/docker/data/patchmon/redis
+        target: /data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$(cat /run/secrets/patchmon_redis_password)\" ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 7
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  guacd:
+    image: zot.safehomelan.com/guacd:1.6.0
+    # The image healthcheck only fires every 5 minutes with no start period,
+    # so Swarm reports 0/1 for ages. Check the daemon port quickly instead.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+secrets:
+  patchmon_jwt_secret:
+    external: true
+  patchmon_session_secret:
+    external: true
+  patchmon_ai_encryption_key:
+    external: true
+  patchmon_postgres_password:
+    external: true
+  patchmon_redis_password:
+    external: true

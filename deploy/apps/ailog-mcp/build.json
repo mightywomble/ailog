@@ -1,0 +1,6 @@
+{
+  "source": "https://git.safehomelan.com/david/ailog",
+  "ref": "main",
+  "dockerfile": "docker/Dockerfile",
+  "context": "."
+}
