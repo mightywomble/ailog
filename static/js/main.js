@@ -14,6 +14,7 @@ import './monitoring-wizard.js';
 import './wizard-fallback.js';
 import './iframe-modals.js';     // docker + reports dialogs (iframes)
 import './update-modal.js';      // update one container, in place
+import './swarm-update.js';      // swarm: stack updates, versions to choose, milestones
 import './activity.js';       // what the app is doing right now (progress strip)
 import './shell.js';              // responsive shell: drawer, tab bar, view state
 import './command-palette.js';    // ⌘K fast path over views/hosts/actions
