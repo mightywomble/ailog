@@ -3459,11 +3459,22 @@ const showHostInfoMain = async () => {
                 // container list on one node cannot see it, and counts the
                 // previous task's container - left exited behind by the last
                 // deploy - as an update that will never clear.
+                const containersCard = document.getElementById('docker-swarm-containers-card');
                 try {
                     const swarmRes = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/swarm/stacks`,
                         { headers: { Accept: 'application/json' } });
                     const swarm = await swarmRes.json();
                     if (token !== logsMainViewToken || logsMainMode !== 'docker') return;
+                    if (swarmRes.ok && swarm.success && swarm.swarm) {
+                        // In a swarm, every node shows what it is running.
+                        if (containersCard) {
+                            containersCard.classList.remove('hidden');
+                            if (typeof window.renderSwarmContainers === 'function') {
+                                window.renderSwarmContainers(
+                                    document.getElementById('docker-swarm-containers-list'), hostId, {});
+                            }
+                        }
+                    }
                     if (swarmRes.ok && swarm.success && swarm.manager) {
                         const list = document.getElementById('docker-updates-list');
                         const count = document.getElementById('docker-updates-count');
@@ -3485,8 +3496,22 @@ const showHostInfoMain = async () => {
                         return;
                     }
                     window.swarmPanelTarget = null;
+                    if (swarmRes.ok && swarm.success && swarm.swarm) {
+                        // A worker: no update list at all, because there is no
+                        // true answer to put in it and nothing to start from
+                        // here. Its containers are above instead.
+                        const card = document.getElementById('docker-updates-card');
+                        if (card) card.classList.add('hidden');
+                        try {
+                            const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates`, { headers: { Accept: 'application/json' } });
+                            const data = await res.json();
+                            if (token !== logsMainViewToken || logsMainMode !== 'docker') return;
+                            renderDockerLogPicker(data.containers || []);
+                        } catch (_) { /* the log picker is a convenience */ }
+                        return;
+                    }
                 } catch (_) {
-                    // a worker (or a host with no swarm) simply falls through
+                    // a host with no swarm simply falls through
                 }
                 try {
                     const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates`, { headers: { Accept: 'application/json' } });
@@ -3636,8 +3661,11 @@ const showHostInfoMain = async () => {
                         </div>
                     </div>
 
-                    <!-- What upstream has moved on from -->
-                    <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                    <!-- What upstream has moved on from. Removed entirely on a
+                         swarm worker: updates are started from the manager, and
+                         a node that cannot see the cluster cannot say what is
+                         behind. -->
+                    <div id="docker-updates-card" class="p-3 rounded-lg bg-white/5 border border-white/10">
                         <div class="flex items-center justify-between mb-1">
                             <h3 id="docker-updates-title" class="text-sm font-semibold termix-text">Container updates</h3>
                             <div class="flex items-center gap-3">
@@ -3648,6 +3676,17 @@ const showHostInfoMain = async () => {
                         <div id="docker-updates-list" class="max-h-72 overflow-auto">
                             <div class="text-xs termix-muted py-2">Comparing local image digests with the registry…</div>
                         </div>
+                    </div>
+
+                    <!-- What is running on this node: name, RAM, CPU, network.
+                         Every swarm node shows this, workers included. -->
+                    <div id="docker-swarm-containers-card" class="p-3 rounded-lg bg-white/5 border border-white/10 hidden">
+                        <div class="flex items-center justify-between gap-3 mb-2">
+                            <h3 class="text-sm font-semibold termix-text">Containers on this node</h3>
+                            <span id="docker-swarm-containers-count" class="text-xs termix-muted"></span>
+                        </div>
+                        <div id="docker-swarm-containers-list" class="max-h-72 overflow-auto"
+                             data-count="docker-swarm-containers-count"></div>
                     </div>
 
                     <!-- Live per-container log, dockervision-style -->
