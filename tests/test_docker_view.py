@@ -91,7 +91,7 @@ def test_the_fleet_pane_is_next_to_the_analyse_button():
     assert 'id="docker-analyse-btn"' in view
     assert 'id="docker-fleet"' in view
     # the pane is in the same row, and covers all four measures
-    row = view[view.index('xl:grid-cols-3'):view.index('<!-- What upstream has moved on from -->')]
+    row = view[view.index('xl:grid-cols-3'):view.index('id="docker-updates-card"')]
     assert 'docker-analyse-btn' in row
     assert 'docker-fleet' in row
     for label in ('CPU', 'RAM', 'NET', 'STORAGE'):
