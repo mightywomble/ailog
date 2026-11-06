@@ -1,13 +1,13 @@
 name: Mirror upstream images to zot
 # Caches prebuilt upstream images into the zot registry (cache proxy), running
-# on the build server runner. Entries come from mirror-images.json:
+# on the build server runner. Entries come from deploy/mirror-images.json:
 #   - name   -> pushed as zot.safehomelan.com/<name>:<version> and :latest
 #   - source -> fully-qualified upstream reference (registry/repo:tag)
 # Version tag resolution:
 #   - pinned source tag (e.g. 1.6.0)  -> used as the version tag
 #   - latest/beta source              -> resolved by pulling the image and
 #     matching its digest against the upstream registry's version tags
-# Triggers: a push to the 'build' branch that changes mirror-images.json, or a
+# Triggers: a push to the 'build' branch that changes deploy/mirror-images.json, or a
 # manual run (repo Actions -> "Mirror upstream images to zot" -> Run workflow),
 # e.g. to pick up a new upstream release.
 # No paths: filter here: on this Gitea the filter never matched a dev push, so
@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          git show origin/main:mirror-images.json > /tmp/previous.json 2>/dev/null \
+          git show origin/main:deploy/mirror-images.json > /tmp/previous.json 2>/dev/null \
             || echo '{"mirrors": []}' > /tmp/previous.json
 
           python3 - <<'PY' > /tmp/changed-entries
@@ -43,7 +43,7 @@ jobs:
 
           with open("/tmp/previous.json") as f:
               prev = json.load(f)
-          with open("mirror-images.json") as f:
+          with open("deploy/mirror-images.json") as f:
               curr = json.load(f)
 
           prev_map = {e["name"]: e["source"] for e in prev.get("mirrors", [])}
