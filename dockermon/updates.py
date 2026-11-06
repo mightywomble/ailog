@@ -297,6 +297,50 @@ def owner_project(container: dict) -> str:
     return ''
 
 
+_SWARM_TASK = re.compile(r'^(?P<service>[^.\s]+)\.(?P<slot>\d+)\.(?P<task>[a-z0-9]{6,})$')
+
+
+def _is_swarm_task(container: dict) -> bool:
+    """True for one task revision of a swarm service (``metamcp_postgres.1.abc``).
+
+    The name is the reliable signal: a swarm task container is named
+    ``<service>.<slot>.<task-id>`` and nothing else is. ``docker ps`` reports
+    no compose labels for them, which is why the per-service filter above never
+    saw them as a set.
+    """
+    name = str((container or {}).get('name') or '')
+    return bool(_SWARM_TASK.match(name)) or bool((container or {}).get('swarm_service'))
+
+
+def _service_name(container: dict) -> str:
+    name = str((container or {}).get('name') or '')
+    match = _SWARM_TASK.match(name)
+    if match:
+        return match.group('service')
+    return str((container or {}).get('swarm_service') or (container or {}).get('service') or '')
+
+
+def _running_elsewhere(host_key: str, service: str) -> bool:
+    """Does this swarm service have a running task on any *other* host?
+
+    The retired revision lives on the node the previous task ran on; the live
+    task may be anywhere in the cluster, so a per-host view cannot answer this
+    on its own. The cached scan of every other host can - it is the same data
+    the dashboard card already reads, so this costs nothing.
+    """
+    if not service:
+        return False
+    for other, state in all_state().items():
+        if other == host_key or not state:
+            continue
+        for row in state.get('containers') or []:
+            if str(row.get('state') or '').lower() != 'running':
+                continue
+            if _service_name(row) == service:
+                return True
+    return False
+
+
 def _local_digests(run, images) -> dict:
     """``{image_ref: 'sha256:…'}`` for the images present on the host."""
     try:
@@ -327,6 +371,18 @@ def updates_for(host_key: str, containers, run, refresh: bool = False) -> dict:
     rows = [c for c in rows
             if not (c.get('service') in running_services
                     and (c.get('state') or '').lower() != 'running')]
+    # ...and the same is true across the estate, which is where it actually bit:
+    # a deploy moves the task to another node and leaves the old container
+    # exited behind *here*. Scanned host by host that node sees a dead container
+    # carrying the previous image digest, and reported it as an update for a
+    # service that was running happily somewhere else - metamcp_postgres sat in
+    # the updates list for a day on the manager while its task ran on a worker.
+    # A retired task revision is not an update and not an alert; ask the cluster
+    # (the cached state of every other host) before believing it.
+    rows = [c for c in rows
+            if not (_is_swarm_task(c)
+                    and (c.get('state') or '').lower() != 'running'
+                    and _running_elsewhere(host_key, _service_name(c)))]
     images = sorted({str(c['image']) for c in rows if c.get('image')})
     local = _local_digests(run, images)
 
@@ -379,7 +435,10 @@ def updates_for(host_key: str, containers, run, refresh: bool = False) -> dict:
         elif owner:
             pass
         elif local_digest and remote_digest_value:
-            if local_digest != remote_digest_value:
+            # Only something running has an update. A stopped container is
+            # "start it", not "upgrade it", and offering it as an update is how
+            # a retired task revision became a permanent item in the list.
+            if local_digest != remote_digest_value and (not state or state == 'running'):
                 entry['update_available'] = True
                 entry['reasons'].insert(0, 'newer image upstream')
         elif remote_digest_value and not local_digest:
