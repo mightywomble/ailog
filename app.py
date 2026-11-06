@@ -39,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.24.1'
+APP_VERSION = '3.25.0'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -151,6 +151,11 @@ def create_app(config: dict | None = None) -> Flask:
     # Owns nothing docker-facing - it commits a version bump and watches the run.
     from estate import estate_bp
     app.register_blueprint(estate_bp)
+
+    # Projects on hosts that run plain docker compose (not swarm): read-only
+    # here, deployed by compose.yml. Settings -> Docker is this.
+    from composecfg import compose_bp as _compose_bp
+    app.register_blueprint(_compose_bp)
 
     # Groups, tags, inventory exports and DB backup/restore (modular bolt-on)
     from inventory import groups_bp as _inv_groups_bp, export_bp as _inv_export_bp, dbadmin_bp as _inv_dbadmin_bp

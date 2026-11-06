@@ -1,0 +1,29 @@
+{
+  "name": "immich",
+  "description": "Photo and video library (Immich)",
+  "host": "photos",
+  "ssh": "david@100.64.49.47",
+  "dir": "/home/david/code/immich",
+  "compose_file": "docker-compose.yml",
+  "env_file": ".env",
+  "//": "Keys the .env on the host must define. The file stays on the host and is never committed - this is the checklist, not a copy.",
+  "env_keys": [
+    "UPLOAD_LOCATION",
+    "DB_DATA_LOCATION",
+    "IMMICH_VERSION",
+    "DB_PASSWORD",
+    "DB_USERNAME",
+    "DB_DATABASE_NAME"
+  ],
+  "//health": "Checked inside the host after `compose up --wait`, before the deploy is called good.",
+  "health": {
+    "service": "immich-server",
+    "url": "http://127.0.0.1:2283/api/server/ping"
+  },
+  "images": {
+    "immich-server": "zot.safehomelan.com/immich-server:v3.3.6",
+    "immich-machine-learning": "zot.safehomelan.com/immich-machine-learning:v3.3.6",
+    "valkey": "zot.safehomelan.com/valkey:9",
+    "immich-postgres": "zot.safehomelan.com/immich-postgres:14-vectorchord0.4.3-pgvectors0.2.0"
+  }
+}

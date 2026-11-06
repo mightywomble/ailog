@@ -76,6 +76,22 @@
     {
       "name": "postgres16",
       "source": "docker.io/library/postgres:16-alpine"
+    },
+    {
+      "name": "immich-server",
+      "source": "ghcr.io/immich-app/immich-server:v3.3.6"
+    },
+    {
+      "name": "immich-machine-learning",
+      "source": "ghcr.io/immich-app/immich-machine-learning:v3.3.6"
+    },
+    {
+      "name": "immich-postgres",
+      "source": "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0"
+    },
+    {
+      "name": "valkey",
+      "source": "docker.io/valkey/valkey:9"
     }
   ]
 }
