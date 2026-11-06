@@ -122,6 +122,7 @@ def read_services(run) -> list[dict]:
             'stack': stack or name.rsplit('_', 1)[0],
             'short': name.rsplit('_', 1)[-1],
             'image': image,
+            'host': ref['host'],
             'repo': ref['repo'],
             'tag': ref['tag'],
             'digest': ref['digest'],
@@ -185,15 +186,30 @@ def _zot_digest(repo: str, tag: str) -> str:
 # --------------------------------------------------------------------------
 
 def _compare(rows: list[dict], refresh: bool) -> list[dict]:
-    """Attach the registry's current digest for each service's tag."""
+    """Attach the registry's current digest for each service's tag.
+
+    Only for images zot actually serves.  ``portainer_portainer`` runs
+    ``portainer/portainer-ce:lts`` straight from Docker Hub; zot happens to hold
+    a repository of the same name, and comparing against it manufactured an
+    update for an image the cluster never pulls from there.  A service outside
+    zot is not behind - it is somewhere else, and the honest thing to say is so.
+    """
+    zot_host = _zot_host()
     by_tag: dict[str, str] = {}
     for row in rows:
         key = f'{row["repo"]}:{row["tag"]}'
-        if key in by_tag:
+        if key in by_tag or row.get('host') != zot_host:
             continue
-        info = reg.remote_digest(f'{_zot_host()}/{row["repo"]}:{row["tag"]}', refresh=refresh)
+        info = reg.remote_digest(f'{zot_host}/{row["repo"]}:{row["tag"]}', refresh=refresh)
         by_tag[key] = info.get('digest') or ''
     for row in rows:
+        row['from_zot'] = row.get('host') == zot_host
+        if not row['from_zot']:
+            row['available'] = ''
+            row['update_available'] = False
+            row['note'] = (f'runs {row.get("host") or "docker.io"}/{row["repo"]}:{row["tag"]} '
+                           'straight from upstream - not from zot')
+            continue
         current = by_tag.get(f'{row["repo"]}:{row["tag"]}', '')
         row['available'] = current
         # A retired tag (deleted upstream, or one we never mirrored) answers
