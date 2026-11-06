@@ -1,0 +1,81 @@
+{
+  "_comment": "Prebuilt upstream images to mirror (cache) into zot. name = repository name in zot (zot.safehomelan.com/<name>). source must be fully qualified (registry/repo:tag). A latest/beta source gets its version tag resolved by digest-matching the upstream version tags; a pinned tag is used as-is.",
+  "mirrors": [
+    {
+      "name": "termix",
+      "source": "ghcr.io/termix-ssh/termix:26.11.0"
+    },
+    {
+      "name": "guacd",
+      "source": "docker.io/guacamole/guacd:1.6.0"
+    },
+    {
+      "name": "wordpress",
+      "source": "docker.io/library/wordpress:7.1.4"
+    },
+    {
+      "name": "mysql",
+      "source": "docker.io/library/mysql:8.0"
+    },
+    {
+      "name": "patchmon-server",
+      "source": "ghcr.io/patchmon/patchmon-server:2.1.7"
+    },
+    {
+      "name": "ollama-admin",
+      "source": "ghcr.io/ollama-admin/ollama-admin:0.15.6"
+    },
+    {
+      "name": "postgres",
+      "source": "docker.io/library/postgres:17-alpine"
+    },
+    {
+      "name": "redis",
+      "source": "docker.io/library/redis:7-alpine"
+    },
+    {
+      "name": "anchor",
+      "source": "ghcr.io/zhfahim/anchor:latest"
+    },
+    {
+      "name": "anythingllm",
+      "source": "docker.io/mintplexlabs/anythingllm:1.19.0"
+    },
+    {
+      "name": "langlearn",
+      "source": "docker.io/mightywomble/langlearn:1.0"
+    },
+    {
+      "name": "grammarcheck",
+      "source": "docker.io/mightywomble/grammarcheck:1.0"
+    },
+    {
+      "name": "cloudflared",
+      "source": "docker.io/cloudflare/cloudflared:2026.10.7"
+    },
+    {
+      "name": "dozzle",
+      "source": "docker.io/amir20/dozzle:v11.4.1"
+    },
+    {
+      "name": "vikunja",
+      "source": "docker.io/vikunja/vikunja:2.8.0"
+    },
+    {
+      "name": "huntly",
+      "source": "docker.io/lcomplete/huntly:0.6.6"
+    },
+    {
+      "name": "freshrss",
+      "source": "docker.io/freshrss/freshrss:1.30.4"
+    },
+    {
+      "name": "metamcp",
+      "source": "ghcr.io/metatool-ai/metamcp:2.4.22"
+    },
+    {
+      "name": "postgres16",
+      "source": "docker.io/library/postgres:16-alpine"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# Second example stack (multi-image/multi-stack demo): two replicas of the
+# goodbye app from the homelab_docker_build pipeline, published on port 8081
+# via the swarm routing mesh (reachable through ANY swarm node's Tailscale IP).
+services:
+  goodbye:
+    image: zot.safehomelan.com/goodbye:${IMAGE_TAG:-latest}
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: any
+    ports:
+      - "8081:8081"
