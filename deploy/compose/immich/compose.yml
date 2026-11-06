@@ -9,8 +9,11 @@
 #   - every image comes from zot, so a deploy cannot depend on ghcr or Docker
 #     Hub being reachable (and an upstream image is pulled into zot once, by
 #     deploy/mirror-images.json, not on every host)
-#   - IMMICH_VERSION is pinned instead of `release`, so "update immich" is a
-#     commit someone can read rather than a tag that moves under the estate
+#   - the immich version is written literally instead of `release`, so "update
+#     immich" is a commit someone can read rather than a tag that moves under
+#     the estate - and it is written literally rather than as
+#     ${IMMICH_VERSION}, because the .env on the host still said `v3` and
+#     outranked the pin it was supposed to be pinned to
 #
 # The .env stays on the host (it holds the database password) and is not in
 # this repository; deploy/compose/immich/.env.example lists the keys it needs.
@@ -20,7 +23,7 @@ name: immich
 services:
   immich-server:
     container_name: immich_server
-    image: zot.safehomelan.com/immich-server:${IMMICH_VERSION:-v3.3.6}
+    image: zot.safehomelan.com/immich-server:v3.3.6
     volumes:
       - ${UPLOAD_LOCATION}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -37,7 +40,7 @@ services:
 
   immich-machine-learning:
     container_name: immich_machine_learning
-    image: zot.safehomelan.com/immich-machine-learning:${IMMICH_VERSION:-v3.3.6}
+    image: zot.safehomelan.com/immich-machine-learning:v3.3.6
     volumes:
       - model-cache:/cache
     env_file:
