@@ -112,7 +112,7 @@ def test_pending_checks_are_waited_for_and_then_the_merge_happens(monkeypatch):
         (['CI / python (pull_request)', 'CI / frontend-syntax (pull_request)'], [], []),
     ])
     f = _forge({**PROTECTED, '/commits/' + 'a' * 40 + '/status': (200, {})})
-    monkeypatch.setattr(f, 'check_report', lambda sha, required: next(states))
+    monkeypatch.setattr(f, 'check_report', lambda sha, required, statuses=None: next(states))
     monkeypatch.setattr(forge_mod.time, 'sleep', lambda s: None)
 
     seen = []
@@ -126,8 +126,8 @@ def test_pending_checks_are_waited_for_and_then_the_merge_happens(monkeypatch):
 def test_a_wait_that_never_ends_names_what_is_still_running(monkeypatch):
     f = _forge({**PROTECTED, '/commits/' + 'a' * 40 + '/status': (200, {})})
     monkeypatch.setattr(f, 'check_report',
-                        lambda sha, required: (['CI / python (pull_request)'],
-                                               ['CI / frontend-syntax (pull_request)'], []))
+                        lambda sha, required, statuses=None: (['CI / python (pull_request)'],
+                                                              ['CI / frontend-syntax (pull_request)'], []))
     monkeypatch.setattr(forge_mod.time, 'sleep', lambda s: None)
 
     with pytest.raises(forge_mod.ForgeError) as err:
@@ -217,3 +217,41 @@ def test_the_wait_is_reported_while_it_waits():
     assert details == ['0/1 green - waiting on CI / python (pull_request)', '1/1 green']
     green = [ok for label, ok, _d in sink.steps if label == 'required checks']
     assert green[-1] is True
+
+
+def test_a_head_with_no_checks_at_all_is_called_uncheckable_not_slow(monkeypatch):
+    """What a CI-pushed commit looks like, and why waiting cannot fix it.
+
+    Gitea does not trigger workflows for a push made with the actions token, so
+    the pin job's commit - "pins: build-317, the tag this run built and
+    deployed" - lands on dev with no statuses, no run, and no prospect of
+    either. If a dev -> main pull request is open, its head moves to that
+    commit and every merge answers 405 "Not all required status checks
+    successful". The old code retried; the newer code waited; both were wrong,
+    because nothing was ever going to report the contexts.
+    """
+    f = _forge({**PROTECTED,
+                '/commits/' + 'a' * 40 + '/status': (200, {'statuses': []})})
+    monkeypatch.setattr(forge_mod.time, 'sleep', lambda s: None)
+
+    with pytest.raises(forge_mod.ForgeError) as err:
+        f.merge_when_ready(7, poll=0, grace=0, runs=lambda sha: 'no run registered yet')
+
+    message = str(err.value)
+    assert 'has no status checks at all' in message
+    assert 'can never be reported' in message
+    assert 'actions token' in message            # the cause
+    assert 'Push the branch again' in message    # and what to do about it
+
+
+def test_a_head_that_has_only_just_been_pushed_is_still_waited_for(monkeypatch):
+    """The run takes a few seconds to appear; silence then is not uncheckable."""
+    f = _forge({**PROTECTED,
+                '/commits/' + 'a' * 40 + '/status': (200, {'statuses': []})})
+    monkeypatch.setattr(forge_mod.time, 'sleep', lambda s: None)
+
+    with pytest.raises(forge_mod.ForgeError) as err:
+        f.merge_when_ready(7, poll=0, timeout=0)
+
+    # it ran out of time waiting, rather than being called uncheckable at once
+    assert 'never finished' in str(err.value)
