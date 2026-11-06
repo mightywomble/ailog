@@ -477,6 +477,33 @@ def api_containers(host_key):
     return jsonify({'success': True, 'containers': rows, 'count': len(rows)})
 
 
+@docker_bp.route('/api/docker/hosts/<path:host_key>/containers/<path:container_id>/shell')
+def api_container_shell(host_key, container_id):
+    """Which shell this container has, if it has one at all.
+
+    Asked before opening a terminal, because "click here to get a prompt" that
+    answers `exec: \"sh\": stat /bin/sh: no such file or directory` is a worse
+    answer than not offering the button. Distroless and scratch images (vikunja
+    is one of ours) genuinely have no shell, and saying so is the honest thing.
+    """
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    from . import updateflow
+    try:
+        _info, run = updateflow._runner(host_key)
+    except RuntimeError as exc:
+        return _error(exc, status=404)
+    quoted = container_id.replace("'", "'\\''")
+    for shell in ('sh', 'bash', 'ash'):
+        ok, out = run(f'{updateflow.PRELUDE}$DK exec {quoted} {shell} -c true 2>&1', timeout=25)
+        if ok:
+            return jsonify({'success': True, 'shell': shell, 'container': container_id})
+    return jsonify({'success': False,
+                    'error': 'this image has no shell (scratch or distroless), so there is '
+                             'nothing to connect a terminal to',
+                    'container': container_id}), 409
+
+
 # --------------------------------------------------------------------------
 # fleet usage, image updates and the sidebar badge
 #

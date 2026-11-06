@@ -134,3 +134,47 @@ def test_a_delete_that_the_registry_refuses_is_reported(monkeypatch):
 
     assert out['deleted'] == []
     assert out['failed'][0]['status'] == 403
+
+
+def test_a_warm_stack_cache_does_not_break_the_plan(monkeypatch):
+    """"'int' object is not iterable" - the scan's summary count is not a list.
+
+    The stack scan caches `{'services': 28, 'stacks': [...]}`: `services` counts
+    them, `stacks[].services[]` holds them. Reading the count raised inside the
+    registry endpoint, but only after a scan had run in that process - in a
+    fresh shell the cache was empty and the same code answered fine.
+    """
+    from dockermon import swarmstack
+
+    with swarmstack._lock:
+        swarmstack._cache.clear()
+        swarmstack._cache['db-11'] = (0.0, {
+            'manager': True,
+            'services': 2,
+            'updates': 0,
+            'stacks': [
+                {'name': 'metamcp', 'updates': 0, 'services': [
+                    {'short': 'app', 'image': 'zot.safehomelan.com/metamcp:build-348@sha256:' + 'b' * 64},
+                ]},
+                {'name': 'dozzle', 'updates': 0, 'services': [
+                    {'short': 'dozzle', 'image': 'zot.safehomelan.com/dozzle:v11.4.1@sha256:' + 'c' * 64},
+                ]},
+            ],
+        })
+    try:
+        refs = gc._swarm_refs()
+    finally:
+        with swarmstack._lock:
+            swarmstack._cache.clear()
+
+    assert 'zot.safehomelan.com/metamcp:build-348@sha256:' + 'b' * 64 in refs
+    assert len(refs) == 2
+
+
+def test_the_registry_endpoint_walks_stacks_not_the_service_count():
+    """The exact shape `_swarm_refs` reads - a regression on the live 502."""
+    import inspect
+
+    source = inspect.getsource(gc._swarm_refs)
+    assert "payload or {}).get('stacks')" in source
+    assert "stack or {}).get('services')" in source

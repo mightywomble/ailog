@@ -1252,6 +1252,10 @@ export function init() {
         let sshFit = null;
         let sshSocket = null;
         let sshConnectedHost = null;
+        // '' means "a shell on the host". Anything else is the container the
+        // terminal is inside, which is what the container panes open.
+        let sshConnectedContainer = '';
+        let sshTargetContainer = '';
 
         // SSH session state
         let sshSessionActive = false;           // Socket/session currently connected
@@ -1554,7 +1558,7 @@ export function init() {
             } catch (_) {}
         };
 
-        const connectSshSocket = (hostId) => {
+        const connectSshSocket = (hostId, container) => {
             if (!sshTerm) return;
             const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
             const wsUrl = `${wsProto}://${window.location.host}/ssh/websocket`;
@@ -1569,6 +1573,7 @@ export function init() {
             sock.onopen = () => {
                 if (!isCurrent()) return;
                 sshConnectedHost = hostId;
+                sshConnectedContainer = container || '';
                 sshSessionActive = true;
                 sshSessionEnded = false;
                 sshExpectingExit = false;
@@ -1578,7 +1583,14 @@ export function init() {
                 setSshStatus('Connected', 'ok');
                 sock.send(JSON.stringify({
                     type: 'connectToHost',
-                    data: { hostId, cols: sshTerm.cols, rows: sshTerm.rows }
+                    data: {
+                        hostId,
+                        cols: sshTerm.cols,
+                        rows: sshTerm.rows,
+                        // Straight into the container: one docker exec deeper on
+                        // the same SSH hop, so keys and known_hosts are unchanged.
+                        ...(container ? { container } : {}),
+                    }
                 }));
             };
             sock.onmessage = (event) => {
@@ -1660,9 +1672,10 @@ export function init() {
             };
         };
 
-        const openSshTerminal = async () => {
+        const openSshTerminal = async (container = '') => {
             const viewToken = ++logsMainViewToken;
             logsMainMode = 'ssh';
+            sshTargetContainer = container || '';
 
             if (!selectedHostId || selectedHostId === 'local') {
                 showToast('Select a remote host for SSH.', 'error');
@@ -1702,7 +1715,9 @@ export function init() {
 
             // If we still have a live socket for this host AND the session hasn't been ended via `exit`,
             // just resume the existing session.
-            if (!sshSessionEnded && sshSocket && sshSocket.readyState === WebSocket.OPEN && sshConnectedHost === selectedHostId) {
+            if (!sshSessionEnded && sshSocket && sshSocket.readyState === WebSocket.OPEN
+                && sshConnectedHost === selectedHostId
+                && sshConnectedContainer === sshTargetContainer) {
                 setSshStatus('Connected', 'ok');
                 sshSessionActive = true;
                 resizeSshTerminal();
@@ -1715,14 +1730,30 @@ export function init() {
             }
 
             // Start a fresh session when the previous one ended via `exit`, or if switching hosts.
-            if (sshSessionEnded || sshConnectedHost !== selectedHostId) {
+            if (sshSessionEnded || sshConnectedHost !== selectedHostId
+                || sshConnectedContainer !== sshTargetContainer) {
                 sshTerm.clear();
             }
 
             resizeSshTerminal();
-            connectSshSocket(selectedHostId);
+            connectSshSocket(selectedHostId, sshTargetContainer);
         };
 
+
+        // A container pane's "ssh into container": pick the host, then open the
+        // same terminal one docker exec deeper. Exported because the pane lives
+        // in its own module (and on the docker page too).
+        window.openContainerShell = async (hostKey, containerId, shell) => {
+            if (!containerId) return;
+            if (hostKey && hostKey !== 'local' && selectedHostId !== hostKey) {
+                if (typeof selectHost === 'function') await selectHost(hostKey);
+            }
+            sshTargetContainer = containerId;
+            await openSshTerminal(containerId);
+            if (shell && sshTerm) {
+                sshTerm.write(`\r\n\x1b[2m# ${shell} inside ${containerId.slice(0, 12)}\x1b[0m\r\n`);
+            }
+        };
 
         const toggleOpenaiKeyVisibilityBtn = document.getElementById('toggle-openai-key-visibility');
         const toggleDiscordWebhookVisibilityBtn = document.getElementById('toggle-discord-webhook-visibility');
