@@ -159,20 +159,28 @@
     const body = () => el('swarmUpdateBody');
     const state = { timer: null, jobId: null, hostKey: '', stack: '', service: '' };
 
+    // The overlay hides with a *class*, because it also sets display:flex with a
+    // utility - and a class rule beats the browser's own `[hidden] {display:none}`.
+    // Toggling the attribute left the empty dialog over the page on load.
+    const showOverlay = (node, on) => {
+        if (!node) return;
+        node.classList.toggle('hidden', !on);
+        if (node.id === 'swarmUpdateModal') node.classList.toggle('flex', on);
+    };
+
     const showModal = (title, sub, html) => {
         const wrap = el('swarmUpdateModal');
         if (!wrap) return;
-        wrap.hidden = false;
+        showOverlay(wrap, true);
         el('swarmUpdateTitle').textContent = title;
         el('swarmUpdateSub').textContent = sub || '';
         body().innerHTML = html;
-        el('swarmUpdateBar').hidden = true;
+        showOverlay(el('swarmUpdateBar'), false);
     };
     const hideModal = () => {
         if (state.timer) clearTimeout(state.timer);
         state.timer = null;
-        const wrap = el('swarmUpdateModal');
-        if (wrap) wrap.hidden = true;
+        showOverlay(el('swarmUpdateModal'), false);
     };
     window.closeSwarmUpdate = hideModal;
 
@@ -180,8 +188,8 @@
         const wrap = el('swarmUpdateBar');
         const fill = el('swarmUpdateFill');
         if (!wrap || !fill) return;
-        if (pct === null || pct === undefined) { wrap.hidden = true; return; }
-        wrap.hidden = false;
+        if (pct === null || pct === undefined) { showOverlay(wrap, false); return; }
+        showOverlay(wrap, true);
         wrap.setAttribute('aria-valuenow', String(Math.round(pct)));
         fill.style.width = `${Math.max(0, Math.min(100, Number(pct) || 0))}%`;
     };
@@ -203,7 +211,7 @@
         }
         if (log) {
             const text = (job.output || []).slice(-40).join('\n');
-            log.hidden = !text;
+            showOverlay(log, Boolean(text));
             log.textContent = text;
             log.scrollTop = log.scrollHeight;
         }
@@ -283,7 +291,7 @@
             ${usable.length || current.behind ? '' : '<div class="text-xs text-amber-300 mt-2">Nothing newer is available to move to.</div>'}
             <div id="swarmUpdateState" class="text-xs termix-muted mt-2">${esc(usable.length || current.behind ? 'ready' : '')}</div>
             <div id="swarmUpdateSteps" class="mt-3 space-y-0.5"></div>
-            <pre id="swarmUpdateLog" hidden class="text-[11px] font-mono whitespace-pre-wrap break-words max-h-40 overflow-auto mt-2 p-2 rounded bg-black/40 border border-white/10 termix-text"></pre>
+            <pre id="swarmUpdateLog" class="hidden text-[11px] font-mono whitespace-pre-wrap break-words max-h-40 overflow-auto mt-2 p-2 rounded bg-black/40 border border-white/10 termix-text"></pre>
             <div class="mt-3 flex items-center justify-end gap-2">
                 <button type="button" data-close class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-xs">cancel</button>
                 <button type="button" data-go class="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-black text-xs font-medium"
