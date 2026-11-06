@@ -14,11 +14,17 @@ import pytest
 from dockermon import swarmstack
 
 
-class FakeRun:
-    """Just enough transport: one command, one answer."""
+REPLICATED = '{"Replicated":{"Replicas":1}}'
+GLOBAL = '{"Global":{}}'
 
-    def __init__(self, output: str, ok: bool = True, manager: bool = True):
+
+class FakeRun:
+    """Just enough transport: inspect answers the services, ls answers the counts."""
+
+    def __init__(self, output: str, ok: bool = True, manager: bool = True,
+                 counts: str = ''):
         self.output = output
+        self.counts = counts
         self.ok = ok
         self.manager = manager
         self.commands: list[str] = []
@@ -27,16 +33,26 @@ class FakeRun:
         self.commands.append(command)
         if 'ControlAvailable' in command:
             return True, 'true' if self.manager else 'false'
+        if 'service inspect' in command:
+            return self.ok, self.output
+        if 'service ls' in command:
+            return True, self.counts
         return self.ok, self.output
 
 
 SERVICES = '\n'.join([
     'metamcp_postgres\tmetamcp\tzot.safehomelan.com/postgres16:16-alpine@sha256:' + 'a' * 64
-    + '\treplicated\t1/1',
+    + '\t' + REPLICATED,
     'metamcp_app\tmetamcp\tzot.safehomelan.com/metamcp:build-348@sha256:' + 'b' * 64
-    + '\treplicated\t1/1',
+    + '\t' + REPLICATED,
     'dozzle_dozzle\tdozzle\tzot.safehomelan.com/dozzle:v11.4.1@sha256:' + 'c' * 64
-    + '\tglobal\t3/3',
+    + '\t' + GLOBAL,
+])
+
+COUNTS = '\n'.join([
+    'metamcp_postgres\t1/1',
+    'metamcp_app\t1/1',
+    'dozzle_dozzle\t3/3',
 ])
 
 
@@ -59,7 +75,7 @@ def test_the_scan_groups_services_into_stacks(monkeypatch):
     _patch_registry(monkeypatch, {'16-alpine': 'sha256:' + 'a' * 64,
                                   'build-348': 'sha256:' + 'b' * 64,
                                   'v11.4.1': 'sha256:' + 'z' * 64})
-    run = FakeRun(SERVICES)
+    run = FakeRun(SERVICES, counts=COUNTS)
     monkeypatch.setattr(swarmstack, '_runner', lambda host: ({}, run))
     swarmstack.clear()
 
@@ -103,7 +119,7 @@ def test_a_hedged_database_tag_is_not_a_bump():
 def test_versions_offer_what_zot_holds_and_what_it_could_hold(monkeypatch):
     _patch_registry(monkeypatch, {'16-alpine': 'sha256:' + 'a' * 64,
                                   '16.4-alpine': 'sha256:' + 'd' * 64})
-    run = FakeRun(SERVICES)
+    run = FakeRun(SERVICES, counts=COUNTS)
     monkeypatch.setattr(swarmstack, '_runner', lambda host: ({}, run))
     monkeypatch.setattr(swarmstack, 'mirror_sources',
                         lambda: {'postgres16': 'docker.io/library/postgres:16-alpine'})
@@ -124,3 +140,35 @@ def test_versions_offer_what_zot_holds_and_what_it_could_hold(monkeypatch):
     assert tags['17-alpine']['blocked']            # the major bump is not offered
     assert tags['16.5-alpine']['in_zot'] is False
     assert any('database' in w for w in out['warnings'])
+
+
+def test_the_template_asks_nothing_a_map_can_refuse():
+    """`{{if .Spec.Mode.Global}}` and `{{.ServiceStatus.…}}` both fail in the field.
+
+    Docker renders --format templates with missingkey=error: a global service
+    has no `Replicated` key and a replicated one has no `Global`, so asking the
+    obvious question kills the whole scan with "map has no entry for key Global"
+    - which is exactly what the manager answered the first time this ran live.
+    Global mode is read out of `json .Spec.Mode`, and the task counts come from
+    `docker service ls`, which always has them.
+    """
+    assert '.Spec.Mode.Global}}' not in swarmstack.SWARM_INSPECT
+    assert 'ServiceStatus' not in swarmstack.SWARM_INSPECT
+    assert 'json .Spec.Mode' in swarmstack.SWARM_INSPECT
+    assert 'Replicas' in swarmstack.SWARM_REPLICAS
+
+
+def test_a_global_service_is_read_as_global_without_its_status(monkeypatch):
+    """A service created seconds ago has no ServiceStatus at all - the scan still runs."""
+    _patch_registry(monkeypatch, {'v11.4.1': 'sha256:' + 'z' * 64})
+    fresh = 'dozzle_dozzle\tdozzle\tzot.safehomelan.com/dozzle:v11.4.1@sha256:' + 'c' * 64 + '\t' + GLOBAL
+    run = FakeRun(fresh, counts='dozzle_dozzle\t3/3')
+    monkeypatch.setattr(swarmstack, '_runner', lambda host: ({}, run))
+    swarmstack.clear()
+
+    out = swarmstack.scan('db-11')
+
+    row = out['stacks'][0]['services'][0]
+    assert row['mode'] == 'global'
+    assert row['replicas'] == '3/3'
+    assert row['update_available'] is True
