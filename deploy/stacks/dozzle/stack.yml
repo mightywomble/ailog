@@ -1,0 +1,63 @@
+# Dozzle (realtime container log viewer) on the swarm, image mirrored into
+# zot by repo1's "Mirror upstream images to zot" workflow
+# (docker.io/amir20/dozzle:v11.4.0). Upstream: https://dozzle.dev
+# - DOZZLE_MODE=swarm + mode: global: one instance per node, each reading
+#   its local docker.sock; the instances form an mTLS mesh over the overlay
+#   network so the UI shows every container on every node, grouped by
+#   stack/service
+# - host port 8081 -> container 8080 (8080 is taken by termix)
+# - /data keeps each instance's local state in a named local volume
+#   (auto-created by swarm on each node; swarm does NOT auto-create bind
+#   sources, so no host path is used here)
+# - NO LOGIN by default - trusted internal network only (upstream supports
+#   optional users.yml auth via a docker secret if ever needed)
+# Access: http://<any swarm node LAN IP>:8081 or http://<any node Tailscale
+# IP>:8081 (routing mesh)
+services:
+  dozzle:
+    image: zot.safehomelan.com/dozzle:v11.4.1
+    environment:
+      DOZZLE_MODE: swarm
+      # MCP server (read-only container log tools) at /api/mcp, used by the
+      # matrix server agents (InfiniGPT/Openclaw/Hermes)
+      DOZZLE_ENABLE_MCP: "true"
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: volume
+        source: dozzle-data
+        target: /data
+    # host mode, NOT the ingress mesh: streamable-HTTP MCP (and UI) sessions
+    # are per-instance, so requests must always reach the SAME dozzle
+    # instance - the mesh round-robins across the 5 global instances and
+    # breaks sessions ("session not found"). With host mode, <node-ip>:8083
+    # always hits that node's own instance (no mesh failover - use another
+    # node's IP if this one is down).
+    # Port 8083 (not 8081): failed host-mode binds permanently wedge that
+    # port in dockerd's allocator (leaked gwbridge endpoint) - 8081 got wedged
+    # on some nodes during the mesh->host transition and only a daemon
+    # restart clears it. 8083 was never bound, so it is clean everywhere.
+    ports:
+      - target: 8080
+        published: 8083
+        mode: host
+        protocol: tcp
+    networks:
+      - dozzle
+    deploy:
+      mode: global
+      # host-mode port release (docker-proxy teardown + gwbridge endpoint
+      # cleanup) lags task restarts; without spacing, a restarting task races
+      # its own teardown and flaps on "port is already allocated". 30s delays
+      # on rolling updates and failure restarts keep the bind clean.
+      update_config:
+        delay: 30s
+      restart_policy:
+        condition: any
+        delay: 30s
+networks:
+  dozzle:
+    driver: overlay
+volumes:
+  dozzle-data:

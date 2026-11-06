@@ -1,0 +1,33 @@
+# cloudflared (Cloudflare Tunnel connector) on the swarm.
+# - runs the remotely-managed "homelab-swarm" tunnel; all routing config lives
+#   in the Cloudflare Zero Trust dashboard (Public Hostnames + Access apps).
+# - the tunnel token is NOT in this file: it is the swarm secret
+#   `cloudflared_token`, mounted at /run/secrets/cloudflared_token and read
+#   with --token-file. Create it once per swarm:
+#       printf '%s' '<token>' | docker secret create cloudflared_token -
+#   Rotate it with: wizard -> settings -> secrets, or
+#       docker secret rm cloudflared_token && printf '%s' '<new>' |
+#       docker secret create cloudflared_token - && docker service update \
+#       --force cloudflared_cloudflared
+# - stateless: no volumes, no published ports; 2 replicas = HA (a
+#   remote-managed tunnel accepts multiple connectors on the same token; both
+#   show up as connectors in the dashboard)
+# - public hostnames point at the swarm routing mesh via swarm1's LAN IP
+#   (192.168.4.42, keep it a DHCP reservation): www.daveknowstech.com ->
+#   :8082 (wordpress), langlearn.daveknowstech.com -> :8199,
+#   grammar.daveknowstech.com -> :8001
+services:
+  cloudflared:
+    image: zot.safehomelan.com/cloudflared:2026.10.7
+    # the image's entrypoint is already `cloudflared`, so command: is its argv
+    command: tunnel --no-autoupdate run --token-file /run/secrets/cloudflared_token
+    secrets:
+    - cloudflared_token
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: any
+
+secrets:
+  cloudflared_token:
+    external: true

@@ -1,0 +1,52 @@
+# homelab-wizard - rendered from wizard.yaml by homelab-wizard.
+# Owned by the wizard: image tag, published ports, replicas, volumes.
+# Everything else here is hand-maintained and survives a re-render.
+services:
+  wizard:
+    image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-209}
+    environment:
+      TZ: Europe/London
+      WIZ_SETTINGS: /data/settings.json
+      WIZ_SSH_KEY: /data/ssh/id_ed25519
+      WIZ_SSH_USER: david
+      ZOT_USER: david
+      OPENROUTER_MODEL: anthropic/claude-sonnet-4.5
+    secrets:
+    - wizard_gitea_token
+    - wizard_zot_password
+    - wizard_openrouter_key
+    volumes:
+    - type: bind
+      source: /opt/docker/data/homelab-wizard
+      target: /data
+    ports:
+    - 8095:8080
+    dns:
+    - 100.122.246.45
+    healthcheck:
+      test:
+      - CMD
+      - python3
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+secrets:
+  wizard_gitea_token:
+    external: true
+  wizard_zot_password:
+    external: true
+  wizard_openrouter_key:
+    external: true

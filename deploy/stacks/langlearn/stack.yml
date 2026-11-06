@@ -1,0 +1,57 @@
+# LangLearn (daily English writing coach) on the swarm, image mirrored into
+# zot by repo1's "Mirror upstream images to zot" workflow.
+# Upstream: https://git.safehomelan.com/david/langlearn (vibecoded app; image
+# docker.io/mightywomble/langlearn:1.0)
+# - single container (FastAPI + built React frontend + SQLite); the app db
+#   persists on the shared NFS (/opt/docker/data/langlearn) so the service
+#   can reschedule to any node
+# - login: one shared password (APP_PASSWORD below); it can be changed in
+#   the app's Settings page (stored in its db, overrides the env value)
+# - SECRET_KEY signs session cookies; the OpenRouter key can be pasted into
+#   the Settings page after first login (or set OPENROUTER_API_KEY here)
+# Access: http://<any swarm node LAN IP>:8199 or http://<any node Tailscale
+# IP>:8199 (routing mesh)
+services:
+  langlearn:
+    image: zot.safehomelan.com/langlearn:1.0
+    environment:
+      TZ: "Europe/London"
+    # This is a mirrored upstream image (docker.io/mightywomble/langlearn:1.0),
+    # so there is no `_FILE` support to switch on and the two credentials were
+    # plaintext in this file. The image has no ENTRYPOINT and a known CMD, so the
+    # command carries the export: swarm mounts the secrets at /run/secrets and sh
+    # reads them into the environment before handing over to the app.
+    # If upstream ever changes that CMD, this line has to change with it - that
+    # is the cost of not owning the image.
+    command:
+      - sh
+      - -c
+      - |
+        export APP_PASSWORD="$$(cat /run/secrets/langlearn_app_password)"
+        export SECRET_KEY="$$(cat /run/secrets/langlearn_secret_key)"
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    secrets:
+      - langlearn_app_password
+      - langlearn_secret_key
+    volumes:
+      - type: bind
+        source: /opt/docker/data/langlearn
+        target: /data
+    ports:
+      - "8199:8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+secrets:
+  langlearn_app_password:
+    external: true
+  langlearn_secret_key:
+    external: true

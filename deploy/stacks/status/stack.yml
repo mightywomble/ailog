@@ -1,0 +1,58 @@
+# status — one page, zero-day view of the estate.
+# PVE nodes -> guests -> docker runtimes -> swarm services -> public apps,
+# assembled every 90s from the MCP servers that already know the infrastructure
+# (managelm, ailog, netdata, patchmon) plus the Proxmox API and HTTP probes.
+# Serves https://status.safehomelan.com with light + dark themes, drill-down
+# per object (stats, facts, logs) and a last-12-hours incident ribbon.
+#
+# - single container; SQLite history on the shared NFS so it can reschedule
+# - read-only by design: every source is queried, nothing is changed. The PVE
+#   token is a dedicated `status@pve` API token with the PVEAuditor role.
+# - PVE_TOKEN is the token id + secret as Proxmox expects after "PVEAPIToken="
+services:
+  status:
+    image: zot.safehomelan.com/status:${IMAGE_TAG:-build-150}
+    environment:
+      TZ: "Europe/London"
+      STATUS_DB: "/data/status.db"
+      STATUS_POLL_SECONDS: "120"
+      STATUS_HISTORY_HOURS: "12"
+      # Proxmox VE (read-only API token: status@pve!read, role PVEAuditor)
+      # tailnet addresses on purpose: the swarm nodes' resolv.conf points at a
+      # public resolver, so bare names like "pve" resolve to the WAN address and
+      # hairpin back through the ingress. Direct IPs are instant and stable.
+      PVE_URL: "https://100.97.170.97:8006"
+      # Credentials are swarm secrets now, read from /run/secrets: the stack file
+      # is in git and the value was not the repository's to publish.
+      # MetaMCP backend on the manager (same endpoints the public hostname proxies)
+      METAMCP_URL: "http://100.79.189.118:8091/metamcp/homelab/mcp"
+    secrets:
+      # status_pve_token: PVE_URL's API token (status@pve!read, PVEAuditor)
+      - status_pve_token
+      # metamcp_api_key: shared with ingest - the same MetaMCP key
+      - metamcp_api_key
+    volumes:
+      - type: bind
+        source: /opt/docker/data/status
+        target: /data
+    ports:
+      - "8094:8080"
+    # Pi-hole first, so *.safehomelan.com and LAN names resolve internally
+    dns:
+      - 100.122.246.45
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+secrets:
+  status_pve_token:
+    external: true
+  metamcp_api_key:
+    external: true

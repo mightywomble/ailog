@@ -1,0 +1,88 @@
+name: Build and test
+# Push to a working branch ('dev', or the legacy 'build'): build every
+# changed app, smoke test it, then clean up the built images. Promotion to
+# main is a PR (dev -> main), which triggers release.yml.
+#
+# Two kinds of app:
+#   apps/<app>/Dockerfile     built with the app dir as context (legacy)
+#   apps/<app>/build.json     external source build: the workflow clones
+#                             {"source","ref"} and builds {"dockerfile"}
+#                             against {"context"} (relative to the clone).
+#                             Used for upstream projects that ship a Dockerfile
+#                             but whose images are not published for our
+#                             architecture (e.g. Folo is arm64-only upstream).
+on:
+  push:
+    branches: [build, dev]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build, smoke test and clean up changed apps
+        run: |
+          set -e
+          git fetch origin main --depth=1 2>/dev/null || true
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only origin/main...HEAD | grep '^apps/' | cut -d/ -f2 | sort -u | grep -v '^$' || true)
+          else
+            CHANGED=$(ls apps 2>/dev/null || true)
+          fi
+          if [ -z "$CHANGED" ]; then
+            echo "No changed apps - nothing to do"
+            exit 0
+          fi
+
+          cfg() { python3 -c "import json,sys;print(json.load(open('apps/$1/build.json')).get('$2',''))"; }
+
+          for APP in $CHANGED; do
+            if [ -f "apps/$APP/build.json" ]; then
+              SRC=$(cfg "$APP" source)
+              REF=$(cfg "$APP" ref)
+              DF=$(cfg "$APP" dockerfile)
+              CTX=$(cfg "$APP" context)
+              CTX=${CTX:-.}
+              WORK="/tmp/homelab-build/$APP"
+              echo "=== Cloning $SRC (ref $REF) for $APP ==="
+              rm -rf "$WORK"
+              git clone --depth 1 --branch "$REF" "$SRC" "$WORK"
+              if [ -f "apps/$APP/patch.sh" ]; then
+                echo "=== Applying apps/$APP/patch.sh to the clone ==="
+                bash "apps/$APP/patch.sh" "$WORK"
+              fi
+              echo "=== Building $APP from $SRC ($DF) ==="
+              docker build -f "$WORK/$DF" -t "$APP:candidate" "$WORK/$CTX"
+            elif [ -f "apps/$APP/Dockerfile" ]; then
+              echo "=== Building apps/$APP ==="
+              docker build -t "$APP:candidate" "apps/$APP"
+            else
+              echo "apps/$APP has no Dockerfile or build.json - skipping"
+              continue
+            fi
+            echo "=== Smoke testing $APP ==="
+            if [ -f "apps/$APP/test.sh" ]; then
+              bash "apps/$APP/test.sh" "$APP:candidate"
+            else
+              docker run -d --name "smoke-$APP" "$APP:candidate"
+              sleep 5
+              if [ -z "$(docker ps --filter name="smoke-$APP" --filter status=running -q)" ]; then
+                echo "logs from failed container:"
+                docker logs "smoke-$APP" || true
+                docker rm -f "smoke-$APP" >/dev/null 2>&1 || true
+                echo "SMOKE TEST FAILED for $APP (container not running after 5s)"
+                exit 1
+              fi
+              docker rm -f "smoke-$APP" >/dev/null
+              echo "smoke test passed for $APP"
+            fi
+            echo "=== Cleaning up $APP ==="
+            docker rmi "$APP:candidate" >/dev/null 2>&1 || true
+            rm -rf "/tmp/homelab-build/$APP"
+          done
+          docker image prune -f >/dev/null 2>&1 || true
+          echo "All changed apps built, tested and cleaned up OK: $CHANGED"

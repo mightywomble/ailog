@@ -1,0 +1,72 @@
+# FreshRSS (self-hosted RSS/Atom aggregator) on the swarm.
+# Upstream: https://github.com/FreshRSS/FreshRSS — official Docker image docs at
+# Docker/README.md. Image freshrss/freshrss:1.30.4 mirrored into zot by
+# homelab_docker_build's "Mirror upstream images to zot" workflow.
+#
+# Swarm adaptations vs the upstream `docker run` example:
+#  - published on 8090 (free on every node: 3000, 3001, 3005, 3456, 4822,
+#    5001, 8000, 8001, 8080, 8082, 8083, 8088, 8089, 8125, 8199, 9000, 9443,
+#    19999 are taken)
+#  - SQLite (no separate database container): data and extensions both bind
+#    mount to the shared NFS at /opt/docker/data/freshrss, so the task can
+#    reschedule to any node and keep its database
+#  - the image runs Apache as www-data (uid 33) on the Debian variant, hence
+#    the NFS dirs are chowned 33:33
+#  - CRON_MIN gives the built-in cron feed refresh; replicas stays at 1 so a
+#    rescheduled task does not leave two refreshers racing on the same SQLite
+#    database
+#
+# Access:
+#   https://news.safehomelan.com   (NPM proxy host -> 100.79.189.118:8090,
+#                                   wildcard *.safehomelan.com cert, websockets)
+#   The name resolves to 100.122.246.45 (casaos/NPM) via the Pi-hole local DNS
+#   records; direct access works on http://<node>:8090 too.
+#
+# First run: FRESHRSS_INSTALL / FRESHRSS_USER below install FreshRSS with
+# SQLite, enable the API and create the account in one go. Those two variables
+# are only honoured on the very first run — if the data volume already holds an
+# installation they are ignored (delete /opt/docker/data/freshrss/data to
+# re-provision).
+services:
+  freshrss:
+    image: zot.safehomelan.com/freshrss:1.30.4
+    environment:
+      TZ: "Europe/London"
+      FRESHRSS_ENV: "production"
+      # refresh feeds twice an hour
+      CRON_MIN: "7,37"
+      # NPM forwards with X-Forwarded-For; trust the proxy hops only
+      TRUSTED_PROXY: "172.16.0.0/12 100.122.246.45/32"
+      FRESHRSS_INSTALL: |-
+        --api-enabled
+        --base-url https://news.safehomelan.com
+        --default-user david
+        --language en
+      FRESHRSS_USER: |-
+        --email david@davidfield.co.uk
+        --language en
+        --password cf3gXdwVDrZPALCNAymq
+        --user david
+    volumes:
+      - type: bind
+        source: /opt/docker/data/freshrss/data
+        target: /var/www/FreshRSS/data
+      - type: bind
+        source: /opt/docker/data/freshrss/extensions
+        target: /var/www/FreshRSS/extensions
+    ports:
+      - "8090:80"
+    healthcheck:
+      test: ["CMD", "cli/health.php"]
+      timeout: 10s
+      start_period: 60s
+      start_interval: 11s
+      interval: 75s
+      retries: 3
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 10s
+      update_config:
+        order: stop-first
