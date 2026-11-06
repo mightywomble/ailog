@@ -190,3 +190,15 @@ def test_the_full_monitor_opens_in_the_docker_dialog():
     assert 'href=' not in block                      # a button, not a link
     assert "window.openDockerModal(hostId, hostName)" in view
     assert 'href="/docker/${encodeURIComponent(hostId)}" target="_blank"' not in view
+
+
+def test_the_page_says_which_build_the_tab_is_running():
+    """A single-page app runs the bundle it was loaded with, forever.
+
+    Twice now "that fix isn't there" has meant "that tab predates the deploy",
+    and there was no way to tell from inside the app. The header carries the
+    server's version, so a stale tab can be seen to be one.
+    """
+    page = _read('templates', 'index.html')
+    assert 'id="app-version-chip"' in page
+    assert 'v{{ app_version }}' in page
