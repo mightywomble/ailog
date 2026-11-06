@@ -219,3 +219,51 @@ def test_the_push_workflows_compare_against_a_real_base():
     assert 'fetch origin main --depth' not in build
     mirror = (ROOT / '.gitea' / 'workflows' / 'mirror.yml').read_text()
     assert 'HEAD^:deploy/mirror-images.json' in mirror
+
+
+def test_an_existing_checkout_is_repointed_at_the_configured_repository(tmp_path, monkeypatch):
+    """A checkout outlives the setting that named it.
+
+    The estate used to be its own repo, so every checkout made before the merge
+    had ``origin`` pointing there. ensure() only set the remote when it cloned,
+    so AILOG_ESTATE_REPO could not take effect - the sync kept succeeding
+    against a repository nobody writes to, and answered every question with
+    last month's pins.
+    """
+    import subprocess
+
+    from estate import git as egit
+
+    directory = tmp_path / 'estate'
+    directory.mkdir()
+
+    def run(*args):
+        return subprocess.run(['git', *args], cwd=directory, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    run('init', '-q')
+    run('remote', 'add', 'origin', 'https://example.invalid/old.git')
+    monkeypatch.setattr(egit.settings, 'authed_url',
+                        lambda: 'https://example.invalid/new.git')
+
+    egit.Repo(directory=str(directory)).ensure()
+
+    assert run('remote', 'get-url', 'origin') == 'https://example.invalid/new.git'
+
+
+def test_ci_writes_the_tag_it_deployed_back_into_the_pins():
+    """The one thing two repositories could never do.
+
+    A build tag exists only after the build, so the pin can only be written
+    after the deploy. ship.yml therefore has a third job - after release and
+    deploy - that pins what it built and pushes it to the working branch.
+    """
+    import yaml
+
+    ship = yaml.safe_load((ROOT / '.gitea' / 'workflows' / 'ship.yml').read_text())
+    jobs = ship['jobs']
+    assert 'pin' in jobs
+    assert set(jobs['pin']['needs']) == {'release', 'deploy'}
+    body = (ROOT / '.gitea' / 'workflows' / 'ship.yml').read_text()
+    assert 'deploy/tools/pin_build_tag.py' in body
+    assert (ROOT / 'deploy' / 'tools' / 'pin_build_tag.py').is_file()
