@@ -134,3 +134,27 @@ def test_it_reads_the_estate_wherever_it_lives(tmp_path):
     rows = projects(FakeRepo(tmp_path, root=''))
 
     assert [r['name'] for r in rows] == ['immich']
+
+
+def test_the_env_checklist_is_actually_in_the_repository():
+    """`.env.example` is the project's checklist, and .gitignore ate it.
+
+    The pattern ``.env.*`` kept every ``.env.example`` out of the tree while
+    ``git add -A`` reported a clean repository - so the file the reader
+    verifies against existed only on the machine that wrote it, and the live
+    section reported the project as missing its own checklist.
+    """
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    examples = sorted((root / 'deploy' / 'compose').glob('*/.env.example'))
+    assert examples, 'the immich import should have brought one'
+
+    for path in examples:
+        relative = path.relative_to(root).as_posix()
+        ignored = subprocess.run(['git', '-C', str(root), 'check-ignore', '-q', relative],
+                                 capture_output=True)
+        assert ignored.returncode != 0, f'{relative} is ignored by .gitignore'
+        tracked = subprocess.run(['git', '-C', str(root), 'ls-files', '--error-unmatch', relative],
+                                 capture_output=True)
+        assert tracked.returncode == 0, f'{relative} is not committed'
