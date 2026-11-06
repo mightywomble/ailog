@@ -28,7 +28,13 @@
         const node = el('estate-run-state');
         if (!node) return;
         node.textContent = text || '';
-        node.className = `text-xs ${tone === 'error' ? 'text-red-400' : tone === 'ok' ? 'text-emerald-300' : 'termix-muted'}`;
+        // A failure is a sentence, not a word: "required checks failed: CI /
+        // python (pull_request): failure - Process completed with exit code 1"
+        // is unreadable on one clipped line, and the old one-liner meant the
+        // only durable record of a refused merge was the branch's job log.
+        node.className = `text-xs ${tone === 'error'
+            ? 'text-red-400 whitespace-pre-wrap break-words leading-relaxed'
+            : tone === 'ok' ? 'text-emerald-300' : 'termix-muted'}`;
     };
 
     const setProgress = (pct) => {
@@ -52,8 +58,14 @@
             const mark = step.ok === true ? '<span class="text-emerald-400">✓</span>'
                 : step.ok === false ? '<span class="text-red-400">✗</span>'
                     : '<span class="text-amber-300">•</span>';
-            const detail = step.detail ? ` <span class="termix-muted">${esc(step.detail)}</span>` : '';
-            return `<div class="flex gap-2">${mark}<span>${esc(step.label)}</span>${detail}</div>`;
+            // A refused merge puts a whole sentence here ("required checks
+            // failed: CI / python (pull_request): failure - Process completed
+            // with exit code 1"). It has to wrap rather than run off the edge,
+            // and a failure has to look like one.
+            const detail = step.detail
+                ? `<span class="ml-1 ${step.ok === false ? 'text-red-300' : 'termix-muted'} whitespace-pre-wrap break-words">${esc(step.detail)}</span>`
+                : '';
+            return `<div class="flex gap-2 items-start"><span class="shrink-0">${mark}</span><div class="min-w-0"><span>${esc(step.label)}</span>${detail}</div></div>`;
         }).join('');
     };
 

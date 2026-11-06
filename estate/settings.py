@@ -149,6 +149,20 @@ def git_timeout() -> int:
         return 180
 
 
+def check_wait() -> int:
+    """How long a merge may wait for the branch's required status checks.
+
+    A protected branch refuses a merge until its required checks have finished,
+    and those checks take as long as a build takes.  This is a *wait*, not a
+    retry budget: the merge is attempted once the checks are green, and the
+    estate job is a background job precisely so it can sit here.
+    """
+    try:
+        return int(_env('AILOG_ESTATE_CHECK_TIMEOUT', '1800'))
+    except ValueError:
+        return 1800
+
+
 def run_wait() -> int:
     """How long a CI job may take before we stop watching it.
 
