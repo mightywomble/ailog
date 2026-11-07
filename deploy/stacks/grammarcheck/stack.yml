@@ -26,5 +26,8 @@ services:
       - "8001:8000"
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w3
       restart_policy:
         condition: any

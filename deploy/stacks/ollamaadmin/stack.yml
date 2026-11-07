@@ -4,6 +4,9 @@ services:
     image: zot.safehomelan.com/ollama-admin:0.15.6
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w2
     ports:
       - target: 8000
         published: 8084

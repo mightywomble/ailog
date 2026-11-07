@@ -6,6 +6,7 @@ A comprehensive, modern web application for viewing and analyzing system logs fr
 
 | Date | Version | Major Changes | Status |
 |------|---------|---------------|--------|
+| 2026-11-07 | v3.28.3 | **The estate is placed on purpose, and vikunja's password is out of git.** After the Proxmox reboot the manager was the first node Ready and took every task, so 22 of 28 services and all four databases landed on one machine while four workers sat idle — swarm never re-balances, so it would have stayed that way. Workers now carry `pool=w1..w4` labels and every stack pins its services to one, pairs (app + database) together, multi-replica services spread across pools, and `ailog` alone stays on its hostname pin because its SQLite WAL cannot be read from two nodes. Vikunja's database password and session secret moved to swarm secrets (`vikunja_config` mounted as `/etc/vikunja/config.yml`, `POSTGRES_PASSWORD_FILE`); `www.daveknowstech.com` came back after its tunnel origin was found to point at an IP that DHCP had since given to another VM. | ✅ Complete |
 | 2026-11-06 | v3.28.2 | **The page now says which build the tab is running.** A single-page app executes the bundle it was loaded with and never asks again, so "that fix isn't there" twice meant "that tab is older than the deploy" - the panes and the prune fix shipped together, and a tab opened before either showed the row list *and* the `'int' object is not iterable`, which reads as "not fixed" rather than "not reloaded". The header carries the server's version beside the brand, so the tab can be seen to be stale instead of argued about. | ✅ Complete |
 | 2026-11-06 | v3.28.1 | **The panes were on the one page that had no terminal.** The container grid lives on `/docker/<host>`, but xterm, the SSH socket and the log panes all live in the main shell, so the pane's guard - only offer a terminal if `window.openContainerShell` exists - quietly hid the button on exactly the page you reach by clicking a host's Docker icon. That page now answers the call by turning it into a link (`/?host=…&container=…&shell=…`, opened in a new tab so the docker page stays put), and the shell consumes it on load: it waits for the host list, selects the host, opens the terminal, and strips the parameters so a refresh cannot silently reconnect you into a container you had already left. | ✅ Complete |
 | 2026-11-06 | v3.28.0 | **Prune zot answered `'int' object is not iterable`, and a container pane can be opened.** The registry endpoint walked `payload['services']` from the last stack scan - which is a *count* ("28 services"), not the services: they are one level down in `stacks[].services[]`. A fresh process had an empty cache and answered fine, so it passed in a shell and failed in the web worker the moment a scan had run, which is why the prune dialog showed a Python error and the automatic prune at the end of every update would have reported failure too. The container list is now panes rather than rows, two or three to a line: name, image version, RAM, CPU, network at a glance, and clicking one opens it in place - three live graphs (CPU, RAM, network, sixty samples each, polled every two seconds while open and every five when not), the full `image:tag`, and **ssh into container**, which asks the host which shell the image actually has (`sh`, `bash`, `ash`) and then opens the terminal one `docker exec` deeper - into the container, not the node it happens to sit on. A distroless or scratch image has no shell, and the answer says that instead of printing `exec: "sh": no such file` after you clicked. | ✅ Complete |
@@ -204,6 +205,39 @@ Container numbers come from the existing Docker collectors (`dockermon.routes.ho
 * **Cost model:** one combined SSH command per node (`docker ps --size` + `docker stats --no-stream` + `docker system df` + `/proc` + `df -B1 /`), fanned out across nodes in parallel and cached for 10 s, so a 5-node cluster refresh is ~6 round trips rather than ~24.
 * **Refresh cadence:** background re-probe every `AILOG_DOCKER_REFRESH_SECONDS` (default `300`, minimum `30`) or on demand with the **Scan Docker** button in the hosts sidebar.
 * **Docker on the target host:** the `docker` CLI must be installed; AILog runs `sudo -n docker …` and falls back to `docker …` (docker group membership also works).
+
+#### Placement: the estate is spread on purpose
+
+Every service in `deploy/stacks/*/stack.yml` carries a `node.labels.pool`
+constraint, and each swarm worker is labelled `pool=w1..w4` (the manager is
+`pool=mgr`). Without it a reboot is a placement event: the manager comes up
+first, is the only Ready node, and takes every task — which is how one node
+ended up running all four databases and 22 of 28 services after the November
+Proxmox reboot. Tasks never migrate on their own; they stay where they landed
+until their spec changes.
+
+The rules are:
+
+| Service kind | Constraint | Why |
+|---|---|---|
+| Single replica, stateful pair (vikunja + db, wordpress + mysql, metamcp + postgres, patchmon's four) | `pool == wN`, both halves on the same node | the pair talks constantly; keeping them together keeps that traffic off the overlay |
+| Single replica, stateless (anchor, freshrss, anythingllm, status, ingest, langlearn, grammarcheck, wizard, termix) | `pool == wN`, round-robin | even spread, ~6 tasks per node |
+| Multi-replica (cloudflared ×2, goodbye ×2) | `pool != mgr` + `spread: node.labels.pool` | different nodes, and the scheduler picks which |
+| `ailog` | `node.hostname == swarm-worker4` | SQLite on NFS: two nodes reading one WAL corrupts it |
+| `dozzle`, `portainer_agent` | `mode: global` | one per node by definition |
+
+Moving a service is a one-line edit in its stack file plus a merge — the pin is
+the intent, and a pin the manager cannot honour is a task that stays `Pending`,
+which is louder than a service quietly sitting on the wrong node.
+
+#### Tunnel origins are dashboard state, not git state
+
+`www.daveknowstech.com` is a Cloudflare tunnel hostname whose origin is an IP
+and a port. The IP was the manager's, named in the Cloudflare Zero Trust
+dashboard and nowhere in this repo, so when DHCP gave `.42` to the photos VM
+after the reboot the site returned 502 while WordPress sat healthy on every
+node. Anything the dashboard holds can drift from the cluster without a commit;
+prefer Tailscale addresses (stable, no DHCP) for origins.
 
 ### 🐋 **Docker Information (per host)**
 

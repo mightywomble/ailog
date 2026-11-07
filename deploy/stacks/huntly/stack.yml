@@ -33,6 +33,9 @@ services:
       - "8088:80"
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w1
       restart_policy:
         condition: any
         delay: 10s
