@@ -68,6 +68,9 @@ services:
       retries: 6
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w2
       restart_policy:
         condition: any
 
@@ -90,6 +93,9 @@ services:
       retries: 7
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w2
       restart_policy:
         condition: any
 
@@ -113,6 +119,9 @@ services:
       retries: 7
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w2
       restart_policy:
         condition: any
 
@@ -128,6 +137,9 @@ services:
       start_period: 10s
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w2
       restart_policy:
         condition: any
 

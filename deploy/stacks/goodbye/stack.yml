@@ -6,6 +6,11 @@ services:
     image: zot.safehomelan.com/goodbye:${IMAGE_TAG:-latest}
     deploy:
       replicas: 2
+      placement:
+        constraints:
+          - node.labels.pool != mgr
+        preferences:
+          - spread: node.labels.pool
       restart_policy:
         condition: any
     ports:

@@ -20,5 +20,8 @@ services:
     - 3005:3001
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w2
       restart_policy:
         condition: any

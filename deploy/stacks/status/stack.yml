@@ -48,6 +48,9 @@ services:
       start_period: 40s
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w2
       restart_policy:
         condition: any
 
