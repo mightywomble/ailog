@@ -71,6 +71,16 @@ services:
       - type: bind
         source: /opt/docker/data/metamcp/uv
         target: /root/.cache/uv
+    # The app talks to itself over its public origin (APP_URL), and the stdio
+    # MCP servers talk to *.safehomelan.com. Without this, the container uses
+    # the node's upstream resolvers - which include OpenDNS - and OpenDNS
+    # NXDOMAIN-redirects names it cannot see in public DNS to 216.40.34.41,
+    # so mcp.safehomelan.com timed out for 10s on every MetaMCP client call.
+    # Pointing the container at Pi-hole makes *.safehomelan.com resolve to
+    # 100.122.246.45 (NPM) like every other host on the estate; Docker's own
+    # 127.0.0.11 still answers service names (postgres) first.
+    dns:
+      - 100.122.246.45
     ports:
       - "8091:12008"
     healthcheck:
@@ -81,6 +91,9 @@ services:
       start_period: 90s
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w1
       restart_policy:
         condition: any
         delay: 10s
@@ -108,6 +121,9 @@ services:
       retries: 10
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w1
       restart_policy:
         condition: any
       update_config:

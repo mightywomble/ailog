@@ -12,10 +12,22 @@
 # - stateless: no volumes, no published ports; 2 replicas = HA (a
 #   remote-managed tunnel accepts multiple connectors on the same token; both
 #   show up as connectors in the dashboard)
-# - public hostnames point at the swarm routing mesh via swarm1's LAN IP
-#   (192.168.4.42, keep it a DHCP reservation): www.daveknowstech.com ->
-#   :8082 (wordpress), langlearn.daveknowstech.com -> :8199,
-#   grammar.daveknowstech.com -> :8001
+# - public hostnames point at a fixed IP and a port the routing mesh publishes
+#   on every node: www.daveknowstech.com -> 192.168.4.42:8082 (wordpress),
+#   langlearn.daveknowstech.com -> :8199, grammar.daveknowstech.com -> :8001
+#
+#   That IP used to be the manager. After the Proxmox reboot DHCP handed .42 to
+#   the photos VM and the manager came up on .21, so every tunnel hostname that
+#   named .42 answered 502 while the services behind them were healthy. The
+#   origin is a value in the dashboard, not in git, which is why nothing here
+#   could have caught it. Until the origin is pointed at a Tailscale address
+#   (100.79.189.118:8082 works from any connector, and Tailscale IPs do not
+#   shuffle), the photos VM relays .42:8082 to the swarm:
+#       docker run -d --name wp-tunnel-bridge --restart unless-stopped \
+#         -p 192.168.4.42:8082:8082 alpine/socat \
+#         tcp-listen:8082,fork,reuseaddr tcp-connect:100.79.189.118:8082
+#   Remove it as soon as the tunnel names a stable origin - a bridge on a host
+#   that is not part of the estate is a workaround wearing a service's clothes.
 services:
   cloudflared:
     image: zot.safehomelan.com/cloudflared:2026.10.7
@@ -25,6 +37,11 @@ services:
     - cloudflared_token
     deploy:
       replicas: 2
+      placement:
+        constraints:
+          - node.labels.pool != mgr
+        preferences:
+          - spread: node.labels.pool
       restart_policy:
         condition: any
 

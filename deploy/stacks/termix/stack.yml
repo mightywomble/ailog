@@ -14,6 +14,9 @@ services:
       target: /app/data
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w3
       restart_policy:
         condition: any
   guacd:
@@ -30,5 +33,8 @@ services:
       start_period: 10s
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w3
       restart_policy:
         condition: any

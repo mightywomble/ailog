@@ -30,7 +30,9 @@ services:
     image: zot.safehomelan.com/vikunja:2.8.0
     environment:
       VIKUNJA_SERVICE_PUBLICURL: "https://tasks.safehomelan.com/"
-      VIKUNJA_SERVICE_SECRET: "***REMOVED-SAF-94***"
+      # the session secret and the database password are mounted from docker
+      # secrets as /etc/vikunja/config.yml - a value in this file is a value in
+      # git, and this one has been in git before
       VIKUNJA_SERVICE_TIMEZONE: "Europe/London"
       # Every swarm node answers on 3456 through the routing mesh, so allow each
       # node's Tailscale origin as well as the PUBLICURL above.
@@ -39,9 +41,12 @@ services:
       VIKUNJA_DATABASE_HOST: "db"
       VIKUNJA_DATABASE_DATABASE: "vikunja"
       VIKUNJA_DATABASE_USER: "vikunja"
-      VIKUNJA_DATABASE_PASSWORD: "<redacted>"
       VIKUNJA_DATABASE_SSLMODE: "disable"
       TZ: "Europe/London"
+    secrets:
+      - source: vikunja_config
+        target: /etc/vikunja/config.yml
+        mode: 0440
     volumes:
       - type: bind
         source: /opt/docker/data/vikunja/files
@@ -50,6 +55,9 @@ services:
       - "3456:3456"
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w3
       restart_policy:
         condition: any
         delay: 10s
@@ -60,10 +68,12 @@ services:
     image: zot.safehomelan.com/postgres:17-alpine
     environment:
       POSTGRES_USER: "vikunja"
-      POSTGRES_PASSWORD: "<redacted>"
+      POSTGRES_PASSWORD_FILE: /run/secrets/vikunja_db_password
       POSTGRES_DB: "vikunja"
       PGDATA: "/var/lib/postgresql/data/pgdata"
       TZ: "Europe/London"
+    secrets:
+      - vikunja_db_password
     volumes:
       - type: bind
         source: /opt/docker/data/vikunja/db
@@ -75,7 +85,16 @@ services:
       retries: 10
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w3
       restart_policy:
         condition: any
       update_config:
         order: stop-first
+
+secrets:
+  vikunja_db_password:
+    external: true
+  vikunja_config:
+    external: true
