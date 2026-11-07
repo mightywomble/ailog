@@ -19,7 +19,7 @@
     },
     {
       "name": "patchmon-server",
-      "source": "ghcr.io/patchmon/patchmon-server:2.1.7"
+      "source": "ghcr.io/patchmon/patchmon-server:2.1.8"
     },
     {
       "name": "ollama-admin",
