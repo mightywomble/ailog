@@ -57,7 +57,11 @@
     window.renderSwarmUpdates = async function (mount, hostKey, options) {
         if (!mount) return;
         const opts = options || {};
-        lastOpts.set(mount, { all: Boolean(opts.all) });
+        // The pane owns a re-check button in its own header; the full docker
+        // page does not, so only the pane passes recheck: false. Remembered
+        // with the rest of the options so a later re-check re-asks the same
+        // question with the same shape.
+        lastOpts.set(mount, { all: Boolean(opts.all), recheck: opts.recheck !== false });
         mount.innerHTML = '<div class="text-xs termix-muted py-2">Reading the cluster…</div>';
         let data;
         try {
@@ -77,7 +81,7 @@
                 <span class="flex items-center gap-2">
                     <button type="button" data-swarm-all class="px-2 py-1 rounded bg-white/10 hover:bg-white/20">${opts.all ? 'only updates' : 'every service'}</button>
                     <button type="button" data-swarm-prune class="px-2 py-1 rounded bg-white/10 hover:bg-white/20">prune zot</button>
-                    <button type="button" data-swarm-recheck class="px-2 py-1 rounded bg-white/10 hover:bg-white/20">re-check</button>
+                    ${opts.recheck === false ? '' : '<button type="button" data-swarm-recheck class="px-2 py-1 rounded bg-white/10 hover:bg-white/20">re-check</button>'}
                 </span>
             </div>`;
         if (!stacks.length) {
@@ -115,7 +119,12 @@
                 mount, hostKey, { refresh: false, all: !opts.all }));
         });
         mount.querySelectorAll('[data-swarm-recheck]').forEach((button) => {
-            button.addEventListener('click', () => window.renderSwarmUpdates(mount, hostKey, { refresh: true, all: opts.all }));
+            button.addEventListener('click', () => {
+                // Same reason as the pane's button: the scan is about to block
+                // for a couple of seconds, so put it on the strip now.
+                document.dispatchEvent(new CustomEvent('ailog:activity'));
+                window.renderSwarmUpdates(mount, hostKey, { refresh: true, all: opts.all });
+            });
         });
         mount.querySelectorAll('[data-swarm-prune]').forEach((button) => {
             button.addEventListener('click', () => openPrune(mount, hostKey, opts));
