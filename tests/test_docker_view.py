@@ -136,6 +136,19 @@ def test_the_updates_pane_updates_the_container_you_clicked():
     assert "document.getElementById('docker-updates-list')?.addEventListener('click'" in view
 
 
+def test_the_panes_re_check_wakes_the_activity_strip():
+    """re-check scans this host against its registries; that takes long enough
+    to look frozen, and the strip that reports it polls every eight seconds
+    when idle - so the button has to say "now" rather than wait it out."""
+    view = _docker_view()
+    block = view[view.index("document.getElementById('docker-updates-refresh')"):]
+    block = block[:block.index("document.getElementById('docker-log-select')")]
+    assert "new CustomEvent('ailog:activity')" in block
+    # dispatched after the scan is queued, before the blocking re-read
+    assert block.index('/updates/refresh') < block.index("CustomEvent('ailog:activity')")
+    assert block.index("CustomEvent('ailog:activity')") < block.index('/updates?refresh=1')
+
+
 def test_the_log_pane_tails_follows_and_filters():
     view = _docker_view()
     assert 'id="docker-log-select"' in view

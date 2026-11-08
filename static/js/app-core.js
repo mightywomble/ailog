@@ -3842,6 +3842,10 @@ const showHostInfoMain = async () => {
                         return;
                     }
                     await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates/refresh`, { method: 'POST' });
+                    // The scan reports itself on the activity strip along the
+                    // bottom; kick it so it is on screen while this host is
+                    // being compared rather than after the answer has landed.
+                    document.dispatchEvent(new CustomEvent('ailog:activity'));
                     const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates?refresh=1`, { headers: { Accept: 'application/json' } });
                     const data = await res.json();
                     if (viewToken !== logsMainViewToken || logsMainMode !== 'docker') return;
