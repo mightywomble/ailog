@@ -2,9 +2,11 @@
 # Upstream: https://github.com/metatool-ai/metamcp — app on :12008, needs
 # postgres. Images mirrored/built into zot:
 #   metamcp:2.4.22      mirrored by "Mirror upstream images to zot"
-#   metamcp:build-NN    apps/metamcp in homelab_docker_build — thin layer that
-#                       adds the pihole-mcp Go binary (not on npm/PyPI) so every
-#                       homelab MCP server can run as a stdio server
+#   metamcp:build-NN    deploy/apps/metamcp — built from upstream v2.4.22 plus
+#                       patches/0001-session-and-process-lifecycle.patch (session
+#                       and process lifecycle fixes); also adds the pihole-mcp Go
+#                       binary (not on npm/PyPI) so every homelab MCP server can
+#                       run as a stdio server
 #   postgres16:16-alpine mirrored (16 = the major version MetaMCP expects)
 #
 # Swarm adaptations vs the upstream compose:
@@ -41,6 +43,16 @@ services:
       NEXT_PUBLIC_APP_URL: "https://mcp.safehomelan.com"
       # don't rewrite localhost: we point at tailnet addresses, not host.docker.internal
       TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL: "false"
+      # One STDIO process per server, shared by every client. Without it every
+      # client session spawns its own copy of npm/uvx-backed servers (#272) and
+      # the process count grows with the number of connected agents.
+      METAMCP_SHARED_STDIO_PROCESSES: "1"
+      # Sessions (and the idle warm processes behind them) expire after this
+      # long; 0 disables expiry, unset defaults to 30 minutes.
+      # METAMCP_SESSION_LIFETIME_MS: "1800000"
+      # Stay below the 2G cgroup limit so V8 collects instead of the kernel
+      # killing the container (the old unbounded growth ended in exit 137).
+      NODE_OPTIONS: "--max-old-space-size=1536"
       # bootstrap the admin account on first boot
       BOOTSTRAP_USER_EMAIL: "david@davidfield.co.uk"
       # BOOTSTRAP_USER_PASSWORD comes from /run/secrets/metamcp_bootstrap_password
@@ -99,6 +111,13 @@ services:
         delay: 10s
       update_config:
         order: stop-first
+      # Limits cover the whole cgroup (node + all STDIO children). Steady state
+      # is ~0.5-0.9 GB with one shared process per server; 2 GB is headroom.
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
   postgres:
     image: zot.safehomelan.com/postgres16:16-alpine
