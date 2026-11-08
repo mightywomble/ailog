@@ -130,16 +130,22 @@ def test_fleet_reports_the_docker_share_of_the_host(client, fake_host):
     assert body['docker']['running'] == 2
 
 
-def test_fleet_net_is_a_share_of_host_traffic(client, fake_host):
+def test_fleet_net_is_a_share_of_host_traffic(client, fake_host, monkeypatch):
     host, snap = fake_host
     # Container counters are cumulative, so a rate only exists between two
     # samples. Seed the previous sample one second back with zero counters.
+    # The clock is frozen at exactly that second because the percentage is the
+    # rate divided by the host's: seeded at `time.time() - 1.0` the elapsed time
+    # the route actually measured included the request's own overhead, so a
+    # slower machine moved the answer (30.5% instead of 33.3% on the build
+    # server) and the test failed for being built, not for being broken.
+    monkeypatch.setattr(routes.time, 'time', lambda: 1000.0)
     snap['stats']['net_rx_bps'] = 9000.0
     snap['stats']['net_tx_bps'] = 4500.0
-    routes._fleet_rate_cache[host] = (time.time() - 1.0, 0, 0)
-    # 3000 rx + 1500 tx over ~1s = 4500 B/s of a 13500 B/s host = 33.3%
+    routes._fleet_rate_cache[host] = (999.0, 0, 0)
+    # 3000 rx + 1500 tx over exactly 1s = 4500 B/s of a 13500 B/s host = 33.3%
     body = client.get(f'/api/docker/hosts/{host}/fleet').get_json()
-    assert body['pct']['net'] == pytest.approx(33.3, abs=1.0)
+    assert body['pct']['net'] == pytest.approx(33.3, abs=0.5)
     assert body['docker']['net_rx_bps'] > 0
 
 
