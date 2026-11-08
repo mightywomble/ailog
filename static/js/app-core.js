@@ -3515,7 +3515,10 @@ const showHostInfoMain = async () => {
                         }
                         window.swarmPanelTarget = { mount: list, hostKey: hostId };
                         if (list && typeof window.renderSwarmUpdates === 'function') {
-                            window.renderSwarmUpdates(list, hostId, { all: false });
+                            // recheck: false -- this card already has a re-check
+                            // button in its own header, and the panel used to
+                            // draw a second one directly under it.
+                            window.renderSwarmUpdates(list, hostId, { all: false, recheck: false });
                         }
                         const res = await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates`, { headers: { Accept: 'application/json' } });
                         const data = await res.json();
@@ -3815,7 +3818,8 @@ const showHostInfoMain = async () => {
         document.addEventListener('ailog:swarm-updated', () => {
             const target = window.swarmPanelTarget;
             if (target && target.mount && typeof window.renderSwarmUpdates === 'function') {
-                window.renderSwarmUpdates(target.mount, target.hostKey, { refresh: true, all: false });
+                window.renderSwarmUpdates(target.mount, target.hostKey,
+                    { refresh: true, all: false, recheck: false });
             }
         });
 
@@ -3838,6 +3842,12 @@ const showHostInfoMain = async () => {
                     const target = window.swarmPanelTarget;
                     if (target && target.hostKey === hostId
                         && typeof window.recheckSwarmUpdates === 'function') {
+                        // The stack scan reports itself on the strip too now
+                        // (reading the cluster, then one registry question per
+                        // tag), so wake it before the blocking read: on a
+                        // manager this is the same wait as a container scan and
+                        // it used to show nothing but a placeholder.
+                        document.dispatchEvent(new CustomEvent('ailog:activity'));
                         await window.recheckSwarmUpdates(target.mount, hostId);
                         return;
                     }

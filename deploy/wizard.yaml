@@ -35,9 +35,9 @@ services:
   kind: build
   release: manual
   service: ailog
-  image: zot.safehomelan.com/ailog:v3.29.1
+  image: zot.safehomelan.com/ailog:v3.29.2
   repo: ailog
-  version: v3.29.1
+  version: v3.29.2
   source: ''
   ports:
   - host: 5001

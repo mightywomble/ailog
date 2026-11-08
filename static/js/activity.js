@@ -26,7 +26,9 @@
     let busy = false;
 
     // "checking b, c" beats "checking a" when three hosts run at once: the bar
-    // counts host *batches*, so the names are what make it legible.
+    // counts host *batches*, so the names are what make it legible. A stack
+    // scan has no batches and no host list -- it has a stage and a service
+    // count -- so it says those instead.
     const hostLabel = (name, data, done, total) => {
         const hosts = Array.isArray(data.hosts) ? data.hosts.filter(Boolean) : [];
         if (hosts.length) {
@@ -35,6 +37,10 @@
             return hosts.length > 3 ? `${verb} ${shown} +${hosts.length - 3}` : `${verb} ${shown}`;
         }
         const one = data.current || data.host;
+        if (name === 'swarm') {
+            const where = one ? ` on ${one}` : '';
+            return `${data.stage || 'reading the cluster'}${where}`;
+        }
         if (one) return `${name === 'docker' ? 'checking' : 'contacting'} ${one}`;
         // Between batches there is no host in flight yet - say where we are
         // rather than leaving the last name on screen.
@@ -42,6 +48,9 @@
         if (left) return `${left} host${left === 1 ? '' : 's'} to go`;
         return '';
     };
+
+    // What the counter counts: hosts for a host sweep, tags for a stack scan.
+    const unitFor = (name) => (name === 'swarm' ? 'tags' : 'hosts');
 
     const render = (name, data, idleLabel) => {
         const row = rowFor(name);
@@ -56,7 +65,7 @@
         const pct = total ? Math.min(100, Math.round((100 * done) / total)) : null;
 
         const count = row.querySelector('[data-count]');
-        if (count) count.textContent = total ? `${done} of ${total} hosts` : '';
+        if (count) count.textContent = total ? `${done} of ${total} ${unitFor(name)}` : '';
 
         const fill = row.querySelector('[data-fill]');
         if (fill) {
@@ -93,7 +102,8 @@
             const data = await res.json();
             render('metrics', data.metrics, 'collecting');
             render('docker', data.docker, 'scanning');
-            active = !!(data.metrics?.active || data.docker?.active);
+            render('swarm', data.swarm, 'reading the cluster');
+            active = !!(data.metrics?.active || data.docker?.active || data.swarm?.active);
             const host = strip();
             if (host) host.classList.toggle('hidden', !active);
         } catch (err) {

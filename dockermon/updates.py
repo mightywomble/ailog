@@ -51,7 +51,13 @@ _digest_cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
 
 _state: dict[str, dict] = {}
-_state_lock = threading.Lock()
+# Reentrant on purpose. `scan_host` holds this while it decides whether a host
+# is already being scanned, and its "someone else has it" branch asks `state()`
+# for the cached answer - which takes the same lock. With a plain Lock that is
+# a self-deadlock: the thread waits for itself forever, every other scanner
+# queues behind it, and the whole process wedges (CI saw exactly this: pytest
+# parked at 42% until it was killed).
+_state_lock = threading.RLock()
 _inflight: set[str] = set()
 
 

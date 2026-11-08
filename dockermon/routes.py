@@ -683,7 +683,13 @@ def api_updates_refresh(host_key):
     # Through scan_async, not a thread of its own: one queue keeps the scan
     # concurrency (and therefore the connections it can pin) bounded, and it is
     # what the activity strip reads its progress from.
-    started = dupdates.scan_async(app, [host_key])
+    #
+    # Forced, because pressing re-check means "do not trust the cache". Without
+    # it the 1s staleness test above let the request through while scan_async's
+    # 30-minute TTL refused every host it had scanned recently, so the button
+    # answered `started: null`, queued nothing, and the strip had no work to
+    # show - which is what "the progress bar is gone" looked like.
+    started = dupdates.scan_async(app, [host_key], force=True)
     return jsonify({'success': True, 'started': started[0] if started else None})
 
 
