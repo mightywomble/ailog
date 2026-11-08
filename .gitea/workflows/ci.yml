@@ -8,16 +8,17 @@ on:
 jobs:
   python:
     runs-on: ubuntu-latest
+    # Python 3.12, git, node (for actions/checkout) and the linters come from
+    # this image, built by ship.yml into zot. setup-python downloaded the
+    # interpreter from github.com/actions/python-versions/releases/download/...,
+    # which answers HTTP 504 from the build server, so the job failed at random.
+    container: zot.safehomelan.com/ci-python:latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov ruff
+        # only the repo's own dependencies: the tools are baked into the image,
+        # pinned there, so a lint failure means the code changed
+        run: pip install -r requirements.txt
       - name: Lint (bugs only)
         run: ruff check --select F,E9 .
       - name: Tests
@@ -36,16 +37,13 @@ jobs:
 
   remediation-catalog:
     runs-on: ubuntu-latest
+    # same toolchain image as the python job: python 3.12, pytest, yamllint,
+    # ansible-lint + ansible-core, and no interpreter download at run time
+    container: zot.safehomelan.com/ci-python:latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest yamllint ansible-lint
+        run: pip install -r requirements.txt
       - name: Catalog validates
         # The catalog is the trust boundary: a malformed entry must fail here,
         # never halfway through a fleet run.
