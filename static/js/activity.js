@@ -7,7 +7,13 @@
 // /api/activity, which only reads progress dicts -- so polling it every couple
 // of seconds costs nothing and can never queue behind the work it describes.
 //
-// Polling backs off when idle, and pauses entirely while the tab is hidden.
+// The strip is a full-width bar along the bottom, the same shape as the other
+// progress bars in the app, and its detail line names the work in progress:
+// which hosts are being contacted, which images are being compared, how long
+// it has been running and how far along it is.
+//
+// Polling backs off when idle, pauses entirely while the tab is hidden, and can
+// be kicked immediately by whoever starts a job (`ailog:activity` on document).
 
 (function () {
     const ACTIVE_POLL_MS = 1500;
@@ -18,6 +24,24 @@
 
     let timer = null;
     let busy = false;
+
+    // "checking b, c" beats "checking a" when three hosts run at once: the bar
+    // counts host *batches*, so the names are what make it legible.
+    const hostLabel = (name, data, done, total) => {
+        const hosts = Array.isArray(data.hosts) ? data.hosts.filter(Boolean) : [];
+        if (hosts.length) {
+            const verb = name === 'docker' ? 'comparing image tags on' : 'contacting';
+            const shown = hosts.slice(0, 3).join(', ');
+            return hosts.length > 3 ? `${verb} ${shown} +${hosts.length - 3}` : `${verb} ${shown}`;
+        }
+        const one = data.current || data.host;
+        if (one) return `${name === 'docker' ? 'checking' : 'contacting'} ${one}`;
+        // Between batches there is no host in flight yet - say where we are
+        // rather than leaving the last name on screen.
+        const left = total ? Math.max(0, total - done) : 0;
+        if (left) return `${left} host${left === 1 ? '' : 's'} to go`;
+        return '';
+    };
 
     const render = (name, data, idleLabel) => {
         const row = rowFor(name);
@@ -48,10 +72,11 @@
         const detail = row.querySelector('[data-detail]');
         if (detail) {
             const parts = [];
-            if (data.host) parts.push(`${name === 'docker' ? 'checking' : 'contacting'} ${data.host}`);
+            const what = hostLabel(name, data, done, total);
+            if (what) parts.push(what);
             if (data.elapsed !== undefined) parts.push(`${Math.round(data.elapsed)}s`);
             if (pct !== null) parts.push(`${pct}%`);
-            detail.textContent = parts.length ? parts.join(' · ') : idleLabel;
+            detail.textContent = parts.length ? parts.join(' \u00b7 ') : idleLabel;
         }
     };
 
@@ -91,6 +116,12 @@
         tick();
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) tick();
+        });
+        // A job that has just been queued should appear now, not on the next
+        // idle poll eight seconds later.
+        document.addEventListener('ailog:activity', () => {
+            if (timer) clearTimeout(timer);
+            tick();
         });
     });
 })();
