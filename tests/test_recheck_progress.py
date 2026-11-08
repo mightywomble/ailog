@@ -17,7 +17,6 @@ the build server saw as a job frozen at 42% until it was killed.
 from __future__ import annotations
 
 import re
-import threading
 from pathlib import Path
 
 import pytest
