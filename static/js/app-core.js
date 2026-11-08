@@ -3674,10 +3674,6 @@ const showHostInfoMain = async () => {
                                 <span>Analyse Docker Logs</span>
                             </button>
                             <p class="text-[11px] termix-muted">Container logs on ${escapeHtml(hostName)} only — the host's files and journal are left out of this report.</p>
-                            <button id="docker-add-btn" type="button"
-                                    class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">
-                                Add a container…
-                            </button>
                             <button id="docker-estate-btn" type="button"
                                     class="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors">
                                 The estate…
@@ -3753,18 +3749,6 @@ const showHostInfoMain = async () => {
                 openServerReportModal();
             });
 
-            // ---- wizard hand-off -------------------------------------------------
-            // Everything that *changes* the estate happens in the wizard, and it
-            // opens here, in a dialog, on the row that was clicked. A blank tab
-            // used to drop the user on the wizard's full service list.
-            const openWizard = (href, label) => {
-                if (typeof window.openWizardModal === 'function') {
-                    window.openWizardModal(href, label);
-                } else {
-                    window.open(href, '_blank', 'noopener');
-                }
-            };
-
             // The full /docker/<host> page (charts, apps, cluster) belongs in the
             // same dialog family as the other embedded views: it polls and has
             // its own EventSource, so a tab is worse than a closable frame.
@@ -3774,10 +3758,6 @@ const showHostInfoMain = async () => {
                 } else {
                     window.open(`/docker/${encodeURIComponent(hostId)}?embed=1`, '_blank', 'noopener');
                 }
-            });
-
-            document.getElementById('docker-add-btn')?.addEventListener('click', () => {
-                openWizard(wizardLink('new', { host: hostName, host_key: hostId }), `${hostName} · new service`);
             });
 
             // The estate owns the swarm's intent; the Docker pane only ever sees
