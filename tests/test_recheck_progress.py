@@ -179,9 +179,27 @@ def test_the_strip_has_a_row_for_the_stack_scan():
 def test_the_strip_renders_it_and_keeps_the_bar_up_for_it():
     js = _read(JS, 'activity.js')
     assert "render('swarm', data.swarm" in js
-    assert 'data.swarm?.active' in js
+    # a row on screen keeps the strip up, including one being held on its way out
+    assert '].some(Boolean)' in js
     # the counter counts the thing the row is counting
     assert "unitFor" in js and "'tags' : 'hosts'" in js
+
+
+def test_a_scan_that_finishes_inside_one_poll_is_still_seen():
+    """The single-host re-check against a warm cache takes well under a second.
+
+    Polling every 1.5s, an honest bar therefore appeared and vanished between
+    two frames: the press looked like it had done nothing. A finished row is
+    held on screen briefly, and while it is held the strip keeps polling fast
+    instead of dropping to the eight-second idle cadence.
+    """
+    js = _read(JS, 'activity.js')
+    assert 'MIN_VISIBLE_MS = 2500' in js
+    hold = js[js.index('const last = lastPaint[name]'):js.index('row.hidden = true')]
+    assert 'Date.now() - last.at < MIN_VISIBLE_MS' in hold
+    assert 'lastPaint[name] = { at: Date.now(), data }' in js
+    # the strip stays up while a row is being held
+    assert '].some(Boolean)' in js
 
 
 # ------------------------------------------------------- one button, not two --
