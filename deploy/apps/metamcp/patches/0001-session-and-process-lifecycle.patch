@@ -1,0 +1,2169 @@
+diff --git a/apps/backend/src/index.ts b/apps/backend/src/index.ts
+index 6b4ce54..31a4811 100644
+--- a/apps/backend/src/index.ts
++++ b/apps/backend/src/index.ts
+@@ -1,7 +1,10 @@
+ import express from "express";
+ 
+ import { auth } from "./auth";
++import { mcpServerPool } from "./lib/metamcp/mcp-server-pool";
++import { metaMcpServerPool } from "./lib/metamcp/metamcp-server-pool";
+ import { initializeIdleServers } from "./lib/startup";
++import { processGroupRegistry } from "./lib/stdio-transport/process-registry";
+ import mcpProxyRouter from "./routers/mcp-proxy";
+ import oauthRouter from "./routers/oauth";
+ import publicEndpointsRouter from "./routers/public-metamcp";
+@@ -101,6 +104,19 @@ app.listen(12009, async () => {
+   await new Promise((resolve) => setTimeout(resolve, 3000)).then(
+     initializeIdleServers,
+   );
++
++  // A previous app process inside this container may have left process groups
++  // behind (detached children survive their parent); reap them at startup too.
++  void processGroupRegistry
++    .sweep({ minAgeMs: 0 })
++    .then((result) => {
++      if (result.reaped.length > 0) {
++        console.log(
++          `[startup] reaped ${result.reaped.length} orphaned process group(s) left by a previous run`,
++        );
++      }
++    })
++    .catch((error) => console.error("[startup] orphan sweep failed:", error));
+ });
+ 
+ app.get("/health", (req, res) => {
+@@ -108,3 +124,104 @@ app.get("/health", (req, res) => {
+     status: "ok",
+   });
+ });
++
++/**
++ * Pool/session/process observability. Answers "is it leaking right now?":
++ * `liveSessions` (created - closed) should stay flat, `oldestIdleSessionAgeMs`
++ * should never exceed SESSION_LIFETIME by much, and `liveChildRssBytes` is the
++ * memory the STDIO MCP servers are holding.
++ */
++app.get("/health/pool", async (req, res) => {
++  const [metrics, mcpPool, metaPool] = await Promise.all([
++    mcpServerPool.getMetricsSnapshot(),
++    Promise.resolve(mcpServerPool.getPoolStatus()),
++    Promise.resolve(metaMcpServerPool.getPoolStatus()),
++  ]);
++  res.json({
++    timestamp: new Date().toISOString(),
++    metrics,
++    mcpServerPool: mcpPool,
++    metaMcpServerPool: metaPool,
++    trackedProcessGroups: processGroupRegistry.list().length,
++  });
++});
++
++const ORPHAN_SWEEP_INTERVAL_MS = Number.parseInt(
++  process.env.METAMCP_ORPHAN_SWEEP_INTERVAL_MS ?? "60000",
++  10,
++);
++
++const sweepTimer = setInterval(
++  () => {
++    void (async () => {
++      try {
++        const result = await processGroupRegistry.sweep();
++        if (result.reaped.length > 0) {
++          console.warn(
++            `[sweep] reaped ${result.reaped.length} orphaned process group(s): ` +
++              result.reaped
++                .map(
++                  (g) =>
++                    `${g.pid} (${g.label}, age ${Math.round(g.ageMs / 1000)}s)`,
++                )
++                .join(", "),
++          );
++        }
++      } catch (error) {
++        console.error("[sweep] orphan sweep failed:", error);
++      }
++    })();
++  },
++  Number.isNaN(ORPHAN_SWEEP_INTERVAL_MS) ? 60000 : ORPHAN_SWEEP_INTERVAL_MS,
++);
++sweepTimer.unref();
++
++/**
++ * Graceful shutdown: without this nothing signalled the detached MCP process
++ * groups, so every `docker stop` (and every `kill` of the app) left the STDIO
++ * servers running until the container's PID 1 went away (#128 residuals).
++ */
++let shuttingDown = false;
++const shutdown = async (signal: string) => {
++  if (shuttingDown) return;
++  shuttingDown = true;
++  console.log(
++    `[shutdown] received ${signal}, closing sessions and process groups…`,
++  );
++
++  const timeout = setTimeout(() => {
++    console.error("[shutdown] timed out after 10s, exiting anyway");
++    // eslint-disable-next-line no-process-exit -- shutdown path
++    process.exit(1);
++  }, 10_000);
++  timeout.unref();
++
++  try {
++    await metaMcpServerPool.cleanupAll();
++  } catch (error) {
++    console.error("[shutdown] error cleaning up MetaMCP pool:", error);
++  }
++
++  try {
++    // Anything the pools lost track of, plus groups still alive.
++    const result = await processGroupRegistry.sweep({ minAgeMs: 0 });
++    for (const group of processGroupRegistry.list()) {
++      await processGroupRegistry.terminateGroup(group.pid, 2000);
++      processGroupRegistry.unregister(group.pid);
++    }
++    if (result.reaped.length > 0) {
++      console.log(
++        `[shutdown] reaped ${result.reaped.length} orphaned group(s)`,
++      );
++    }
++  } catch (error) {
++    console.error("[shutdown] error sweeping process groups:", error);
++  }
++
++  clearTimeout(timeout);
++  // eslint-disable-next-line no-process-exit -- shutdown path
++  process.exit(0);
++};
++
++process.once("SIGTERM", () => void shutdown("SIGTERM"));
++process.once("SIGINT", () => void shutdown("SIGINT"));
+diff --git a/apps/backend/src/lib/config.service.ts b/apps/backend/src/lib/config.service.ts
+index 2ae51a8..f282109 100644
+--- a/apps/backend/src/lib/config.service.ts
++++ b/apps/backend/src/lib/config.service.ts
+@@ -1,6 +1,10 @@
+ import { ConfigKey, ConfigKeyEnum } from "@repo/zod-types";
+ 
+ import { configRepo } from "../db/repositories/config.repo";
++import {
++  resolveSessionLifetime,
++  SESSION_LIFETIME_ENV,
++} from "./session-lifetime-policy";
+ 
+ export const configService = {
+   async isSignupDisabled(): Promise<boolean> {
+@@ -106,26 +110,38 @@ export const configService = {
+     );
+   },
+ 
++  /**
++   * Effective session lifetime in milliseconds, or `null` for "never expire".
++   *
++   * An absent row used to mean "infinite", which disabled every reaper on a
++   * default install (issue #324). The default is now finite — see
++   * `lib/session-lifetime-policy.ts`; store `0` to opt back into infinite
++   * sessions.
++   */
+   async getSessionLifetime(): Promise<number | null> {
+     const config = await configRepo.getConfig(
+       ConfigKeyEnum.Enum.SESSION_LIFETIME,
+     );
+-    if (!config?.value) {
+-      return null; // No session lifetime set - infinite sessions
+-    }
+-    const lifetime = parseInt(config.value, 10);
+-    return isNaN(lifetime) ? null : lifetime;
++    return resolveSessionLifetime(
++      config?.value,
++      process.env[SESSION_LIFETIME_ENV],
++    );
+   },
+ 
+   async setSessionLifetime(lifetime?: number | null): Promise<void> {
+     if (lifetime === null || lifetime === undefined) {
+-      // Remove the config to indicate infinite session lifetime
+-      await configRepo.deleteConfig(ConfigKeyEnum.Enum.SESSION_LIFETIME);
++      // Persist an explicit opt-out: 0 means "never expire". Deleting the row
++      // would now fall back to the finite default instead.
++      await configRepo.setConfig(
++        ConfigKeyEnum.Enum.SESSION_LIFETIME,
++        "0",
++        "Session lifetime in milliseconds before automatic cleanup (0 = never expire)",
++      );
+     } else {
+       await configRepo.setConfig(
+         ConfigKeyEnum.Enum.SESSION_LIFETIME,
+         lifetime.toString(),
+-        "Session lifetime in milliseconds before automatic cleanup",
++        "Session lifetime in milliseconds before automatic cleanup (0 = never expire)",
+       );
+     }
+   },
+diff --git a/apps/backend/src/lib/metamcp/client-retry-leak.test.ts b/apps/backend/src/lib/metamcp/client-retry-leak.test.ts
+new file mode 100644
+index 0000000..40f791d
+--- /dev/null
++++ b/apps/backend/src/lib/metamcp/client-retry-leak.test.ts
+@@ -0,0 +1,105 @@
++import { describe, expect, it, vi } from "vitest";
++
++import { processGroupRegistry } from "../stdio-transport/process-registry";
++import { connectMetaMcpClient } from "./client";
++import { serverErrorTracker } from "./server-error-tracker";
++
++/**
++ * Regression test for the failed-connect leak (#324 / #128 residuals).
++ *
++ * `client.connect()` spawns the STDIO server *before* the MCP handshake
++ * completes. When the handshake fails (cold `npx`/`uvx` start is the common
++ * case) the old code caught the error and retried without closing the transport,
++ * leaving a detached ~95 MB `npm exec` process that nothing tracked.
++ */
++describe("connectMetaMcpClient failed attempts", () => {
++  it("closes the transport of every failed attempt before retrying", async () => {
++    vi.spyOn(serverErrorTracker, "getServerMaxAttempts").mockResolvedValue(3);
++    vi.spyOn(serverErrorTracker, "isServerInErrorState").mockResolvedValue(
++      false,
++    );
++    const closes: number[] = [];
++    let attempt = 0;
++
++    const createClient = vi.fn(() => {
++      attempt += 1;
++      const transport = {
++        start: vi.fn(),
++        close: vi.fn(async () => {
++          closes.push(attempt);
++        }),
++        send: vi.fn(),
++      };
++      const client = {
++        connect: vi.fn(async () => {
++          throw new Error("handshake timed out");
++        }),
++        close: vi.fn(async () => undefined),
++      };
++      return {
++        client: client as never,
++        transport: transport as never,
++      };
++    });
++
++    await connectMetaMcpClient(
++      {
++        uuid: "11111111-1111-1111-1111-111111111111",
++        name: "mock-stdio",
++        type: "STDIO",
++        command: "npx",
++        args: ["--yes", "some-mcp"],
++        env: {},
++        createdAt: new Date(),
++        status: "ACTIVE",
++      } as never,
++      undefined,
++      { createClient: createClient as never, retryDelayMs: 1 },
++    );
++
++    // Three attempts, one close each. Before the fix `closes` was empty: the
++    // transport from every failed attempt was simply abandoned.
++    expect(createClient.mock.calls.length).toBe(3);
++    expect(closes).toEqual([1, 2, 3]);
++  });
++
++  it("does not close anything when the first attempt succeeds", async () => {
++    const closeSpy = vi.fn(async () => undefined);
++
++    vi.spyOn(serverErrorTracker, "getServerMaxAttempts").mockResolvedValue(3);
++    vi.spyOn(serverErrorTracker, "isServerInErrorState").mockResolvedValue(
++      false,
++    );
++    const createClient = vi.fn(() => ({
++      client: {
++        connect: vi.fn(async () => undefined),
++        close: vi.fn(async () => undefined),
++      } as never,
++      transport: {
++        start: vi.fn(),
++        close: closeSpy,
++        send: vi.fn(),
++        pid: undefined,
++      } as never,
++    }));
++
++    const connected = await connectMetaMcpClient(
++      {
++        uuid: "22222222-2222-2222-2222-222222222222",
++        name: "mock-stdio-ok",
++        type: "STDIO",
++        command: "npx",
++        args: [],
++        env: {},
++        createdAt: new Date(),
++        status: "ACTIVE",
++      } as never,
++      undefined,
++      { createClient: createClient as never, retryDelayMs: 1 },
++    );
++
++    expect(connected).toBeDefined();
++    expect(closeSpy).not.toHaveBeenCalled();
++    expect(processGroupRegistry.size).toBe(0);
++  });
++});
+diff --git a/apps/backend/src/lib/metamcp/client.ts b/apps/backend/src/lib/metamcp/client.ts
+index 8febfad..7697528 100644
+--- a/apps/backend/src/lib/metamcp/client.ts
++++ b/apps/backend/src/lib/metamcp/client.ts
+@@ -17,6 +17,10 @@ export interface ConnectedClient {
+   client: Client;
+   cleanup: () => Promise<void>;
+   onProcessCrash?: (exitCode: number | null, signal: string | null) => void;
++  /** pid of the spawned STDIO process (undefined for SSE / streamable HTTP) */
++  pid?: number;
++  /** human-readable origin, used in logs and by the process registry */
++  label: string;
+ }
+ 
+ /**
+@@ -157,11 +161,20 @@ export const createMetaMcpClient = (
+   return { client, transport };
+ };
+ 
++export interface ConnectDeps {
++  /** seam for tests; defaults to the real transport factory */
++  createClient?: typeof createMetaMcpClient;
++  /** delay between retries, overridable in tests */
++  retryDelayMs?: number;
++}
++
+ export const connectMetaMcpClient = async (
+   serverParams: ServerParameters,
+   onProcessCrash?: (exitCode: number | null, signal: string | null) => void,
++  deps: ConnectDeps = {},
+ ): Promise<ConnectedClient | undefined> => {
+-  const waitFor = 5000;
++  const createClient = deps.createClient ?? createMetaMcpClient;
++  const waitFor = deps.retryDelayMs ?? 5000;
+ 
+   // Get max attempts from server error tracker instead of hardcoding
+   const maxAttempts = await serverErrorTracker.getServerMaxAttempts(
+@@ -175,6 +188,12 @@ export const connectMetaMcpClient = async (
+   );
+ 
+   while (retry) {
++    // Declared outside the try so a failed attempt can always be cleaned up:
++    // `client.connect()` spawns the server before the MCP handshake finishes,
++    // so a handshake failure used to leave a detached child behind that nothing
++    // tracked or ever killed (#324, orphaned `npm exec` / `uvx` processes).
++    let client: Client | undefined;
++    let transport: Transport | undefined;
+     try {
+       // Check if server is already in error state before attempting connection
+       const isInErrorState = await serverErrorTracker.isServerInErrorState(
+@@ -188,7 +207,9 @@ export const connectMetaMcpClient = async (
+       }
+ 
+       // Create fresh client and transport for each attempt
+-      const { client, transport } = createMetaMcpClient(serverParams);
++      const created = createClient(serverParams);
++      client = created.client;
++      transport = created.transport;
+       if (!client || !transport) {
+         return undefined;
+       }
+@@ -221,9 +242,14 @@ export const connectMetaMcpClient = async (
+ 
+       return {
+         client,
++        pid:
++          transport instanceof ProcessManagedStdioTransport
++            ? (transport.pid ?? undefined)
++            : undefined,
++        label: `${serverParams.name || "unknown"} (${serverParams.uuid})`,
+         cleanup: async () => {
+-          await transport.close();
+-          await client.close();
++          await transport?.close();
++          await client?.close();
+         },
+         onProcessCrash: (exitCode, signal) => {
+           console.warn(
+@@ -243,6 +269,30 @@ export const connectMetaMcpClient = async (
+         `Error connecting to MetaMCP client (attempt ${count + 1}/${maxAttempts})`,
+         error,
+       );
++
++      // Close the half-open attempt before retrying or giving up. `close()`
++      // SIGTERMs the process group and escalates to SIGKILL, so the failed
++      // spawn cannot become an orphan.
++      if (transport) {
++        try {
++          await transport.close();
++        } catch (closeError) {
++          metamcpLogStore.addLog(
++            "client",
++            "error",
++            `Error closing failed transport for ${serverParams.name}`,
++            closeError,
++          );
++        }
++      }
++      if (client) {
++        try {
++          await client.close();
++        } catch {
++          // already closed by transport.close()
++        }
++      }
++
+       count++;
+       retry = count < maxAttempts;
+       if (retry) {
+diff --git a/apps/backend/src/lib/metamcp/mcp-server-pool.test.ts b/apps/backend/src/lib/metamcp/mcp-server-pool.test.ts
+new file mode 100644
+index 0000000..d89b253
+--- /dev/null
++++ b/apps/backend/src/lib/metamcp/mcp-server-pool.test.ts
+@@ -0,0 +1,266 @@
++import type { ServerParameters } from "@repo/zod-types";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import { configService } from "../config.service";
++import type { ConnectedClient } from "./client";
++import { McpServerPool } from "./mcp-server-pool";
++
++const SERVER_UUID = "aaaaaaaa-0000-0000-0000-000000000001";
++
++const params: ServerParameters = {
++  uuid: SERVER_UUID,
++  name: "mock-stdio",
++  type: "STDIO",
++  command: "npx",
++  args: ["--yes", "mock-mcp"],
++  env: {},
++  createdAt: new Date(),
++  status: "ACTIVE",
++} as unknown as ServerParameters;
++
++interface Harness {
++  pool: McpServerPool;
++  connectors: number;
++  cleanups: number;
++}
++
++function makeConnector(): {
++  connect: () => Promise<ConnectedClient>;
++  stats: Harness;
++} {
++  const stats = { connectors: 0, cleanups: 0 } as Harness;
++  return {
++    stats,
++    connect: async () => {
++      stats.connectors += 1;
++      return {
++        client: {
++          request: vi.fn(),
++          getServerCapabilities: vi.fn(() => ({ tools: {} })),
++          close: vi.fn(async () => undefined),
++        } as never,
++        cleanup: async () => {
++          stats.cleanups += 1;
++        },
++        label: "mock-stdio",
++      };
++    },
++  };
++}
++
++let harness: Harness;
++let pool: McpServerPool;
++
++beforeEach(() => {
++  // Cap = 1 keeps the warm-pool warm-up out of the connection counts.
++  process.env.METAMCP_MAX_SESSIONS_PER_SERVER = "1";
++  const connector = makeConnector();
++  pool = McpServerPool.createForTest({
++    connectClient: connector.connect as never,
++  });
++  harness = connector.stats as unknown as Harness;
++  harness.pool = pool;
++});
++
++afterEach(async () => {
++  await pool.cleanupAll();
++  delete process.env.METAMCP_MAX_SESSIONS_PER_SERVER;
++  vi.restoreAllMocks();
++});
++
++describe("McpServerPool transient sessions", () => {
++  it("opens exactly one connection for 20 parallel users of the same session", async () => {
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(60_000);
++
++    const sessionId = "session-1";
++    const results = await Promise.all(
++      Array.from({ length: 20 }, (_, i) =>
++        pool.withTransientSession(sessionId, SERVER_UUID, params, async () => {
++          await new Promise((resolve) => setTimeout(resolve, 5));
++          return i;
++        }),
++      ),
++    );
++
++    expect(results).toHaveLength(20);
++    expect(harness.connectors).toBe(1);
++    // everyone released: refCount back to zero
++    expect(pool.getPoolStatus().active).toBe(1);
++  });
++
++  it("does not close a session while a request is in flight", async () => {
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(0);
++    const sessionId = "session-2";
++
++    let release!: () => void;
++    const gate = new Promise<void>((resolve) => {
++      release = resolve;
++    });
++
++    const inflight = pool.withTransientSession(
++      sessionId,
++      SERVER_UUID,
++      params,
++      async () => {
++        await gate;
++      },
++    );
++
++    // let acquire() complete
++    await new Promise((resolve) => setTimeout(resolve, 20));
++    await pool.cleanupSession(sessionId, "test");
++    expect(harness.cleanups).toBe(0);
++
++    release();
++    await inflight;
++    await pool.cleanupSession(sessionId, "test");
++    expect(harness.cleanups).toBe(1);
++  });
++});
++
++describe("McpServerPool eviction", () => {
++  it("evicts an idle session once it outlives the lifetime", async () => {
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(50);
++
++    await pool.getSession("session-3", SERVER_UUID, params);
++    expect(harness.connectors).toBe(1);
++
++    await new Promise((resolve) => setTimeout(resolve, 120));
++    await pool.runCleanupNow();
++
++    expect(harness.cleanups).toBe(1);
++    expect(pool.getPoolStatus().active).toBe(0);
++    expect(pool.getPoolStatus().idle).toBe(0);
++  });
++
++  it("never evicts when the lifetime is explicitly infinite", async () => {
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(null);
++
++    await pool.getSession("session-4", SERVER_UUID, params);
++    await new Promise((resolve) => setTimeout(resolve, 60));
++    await pool.runCleanupNow();
++
++    expect(harness.cleanups).toBe(0);
++    expect(pool.getPoolStatus().active).toBe(1);
++  });
++});
++
++describe("McpServerPool per-server cap", () => {
++  it("refuses a fourth session for the same server and logs it", async () => {
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(60_000);
++    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
++
++    const first = await pool.getSession("cap-1", SERVER_UUID, params);
++    expect(first).toBeDefined();
++    // cap is 1 in this harness: the second session must be refused
++    const second = await pool.getSession("cap-2", SERVER_UUID, params);
++
++    expect(second).toBeUndefined();
++    expect(warn).toHaveBeenCalledWith(
++      expect.stringContaining("cap of 1 concurrent sessions reached"),
++    );
++    expect(harness.connectors).toBe(1);
++  });
++});
++
++describe("McpServerPool stale active sessions", () => {
++  it("expires an active session whose client never sent DELETE", async () => {
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(50);
++
++    await pool.getSession("session-5", SERVER_UUID, params);
++    expect(pool.getPoolStatus().active).toBe(1);
++    expect(harness.cleanups).toBe(0);
++
++    await new Promise((resolve) => setTimeout(resolve, 120));
++    await pool.runCleanupNow();
++
++    // Without aging, this connection pins a per-server slot forever and the
++    // cap ends up refusing every new client.
++    expect(pool.getPoolStatus().active).toBe(0);
++    expect(harness.cleanups).toBe(1);
++  });
++
++  it("does not expire an old session that is still being used", async () => {
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(300);
++
++    await pool.getSession("session-6", SERVER_UUID, params);
++    // outlive the lifetime of the *session*, but keep using it
++    await new Promise((resolve) => setTimeout(resolve, 400));
++    await pool.withTransientSession(
++      "session-6",
++      SERVER_UUID,
++      params,
++      async () => "used",
++    );
++
++    await pool.runCleanupNow();
++
++    expect(pool.getPoolStatus().active).toBe(1);
++    expect(harness.cleanups).toBe(0);
++  });
++});
++
++describe("McpServerPool shared STDIO processes (phase 4)", () => {
++  it("serves three clients from one process per server", async () => {
++    const connector = makeConnector();
++    process.env.METAMCP_SHARED_STDIO_PROCESSES = "1";
++    const shared = McpServerPool.createForTest({
++      connectClient: connector.connect as never,
++    });
++    delete process.env.METAMCP_SHARED_STDIO_PROCESSES;
++
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(60_000);
++    await shared.getSession("c1", SERVER_UUID, params);
++    await shared.getSession("c2", SERVER_UUID, params);
++    await shared.getSession("c3", SERVER_UUID, params);
++
++    expect(connector.stats.connectors).toBe(1);
++    await shared.cleanupAll();
++    expect(connector.stats.cleanups).toBe(1);
++  });
++
++  it("expires a shared session that has been idle past the lifetime", async () => {
++    const connector = makeConnector();
++    process.env.METAMCP_SHARED_STDIO_PROCESSES = "1";
++    const shared = McpServerPool.createForTest({
++      connectClient: connector.connect as never,
++    });
++    delete process.env.METAMCP_SHARED_STDIO_PROCESSES;
++
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(50);
++    await shared.getSession("c1", SERVER_UUID, params);
++    expect(connector.stats.connectors).toBe(1);
++
++    await new Promise((resolve) => setTimeout(resolve, 120));
++    await shared.runCleanupNow();
++
++    // A shared session is never released by its clients, so it must expire on
++    // idleness or it would hold a process for the life of the container.
++    expect(connector.stats.cleanups).toBe(1);
++    await shared.cleanupAll();
++  });
++});
++
++describe("McpServerPool cap scope", () => {
++  it("never refuses HTTP transports, which hold no process", async () => {
++    const connector = makeConnector();
++    const pooled = McpServerPool.createForTest({
++      connectClient: connector.connect as never,
++    });
++    vi.spyOn(configService, "getSessionLifetime").mockResolvedValue(60_000);
++
++    const httpParams: ServerParameters = {
++      ...params,
++      type: "STREAMABLE_HTTP",
++      command: undefined,
++      url: "http://127.0.0.1:9/mcp",
++    } as unknown as ServerParameters;
++
++    for (const id of ["h1", "h2", "h3", "h4", "h5"]) {
++      const s = await pooled.getSession(id, "http-server", httpParams);
++      expect(s).toBeDefined();
++    }
++    expect(pooled.getPoolStatus().active).toBe(5);
++    await pooled.cleanupAll();
++  });
++});
+diff --git a/apps/backend/src/lib/metamcp/mcp-server-pool.ts b/apps/backend/src/lib/metamcp/mcp-server-pool.ts
+index e8d68c6..cf8c3bf 100644
+--- a/apps/backend/src/lib/metamcp/mcp-server-pool.ts
++++ b/apps/backend/src/lib/metamcp/mcp-server-pool.ts
+@@ -1,8 +1,14 @@
+ import { ServerParameters } from "@repo/zod-types";
+ 
+ import { configService } from "../config.service";
++import {
++  processGroupRegistry,
++  readRssBytes,
++} from "../stdio-transport/process-registry";
+ import { ConnectedClient, connectMetaMcpClient } from "./client";
+ import { serverErrorTracker } from "./server-error-tracker";
++import { sessionMetrics } from "./session-metrics";
++import { toolsSyncCache } from "./tools-sync-cache";
+ 
+ export interface McpServerPoolStatus {
+   idle: number;
+@@ -11,6 +17,40 @@ export interface McpServerPoolStatus {
+   idleServerUuids: string[];
+ }
+ 
++/** Per-session bookkeeping used for eviction, reference counting and metrics. */
++export interface SessionMeta {
++  createdAt: number;
++  lastUsedAt: number;
++  /** in-flight users; a session with refCount > 0 must never be closed */
++  refCount: number;
++  state: "in-use" | "idle" | "transient";
++}
++
++interface SharedSession {
++  client: ConnectedClient;
++  refCount: number;
++  lastUsedAt: number;
++}
++
++/** Cap on concurrently open sessions per MCP server (idle ones included). */
++const DEFAULT_MAX_SESSIONS_PER_SERVER = 4;
++
++function readPositiveIntEnv(name: string, fallback: number): number {
++  const raw = process.env[name];
++  if (!raw) return fallback;
++  const parsed = Number.parseInt(raw, 10);
++  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
++}
++
++function isStdioParams(params: ServerParameters): boolean {
++  return !params.type || params.type === "STDIO";
++}
++
++function formatBytes(bytes: number | undefined): string {
++  if (bytes === undefined) return "rss=unknown";
++  return `rss=${(bytes / (1024 * 1024)).toFixed(1)}MB`;
++}
++
+ export class McpServerPool {
+   // Singleton instance
+   private static instance: McpServerPool | null = null;
+@@ -33,17 +73,65 @@ export class McpServerPool {
+   // Track ongoing idle session creation to prevent duplicates
+   private creatingIdleSessions: Set<string> = new Set();
+ 
++  // Session metadata: sessionId -> bookkeeping (see SessionMeta)
++  private sessionMeta: Record<string, SessionMeta> = {};
++
++  // When a session became idle: serverUuid -> timestamp
++  private idleTimestamps: Record<string, number> = {};
++
++  // Phase 4 (opt-in): one STDIO process per server, shared by all sessions
++  private readonly sharedStdioEnabled: boolean =
++    process.env.METAMCP_SHARED_STDIO_PROCESSES === "1";
++  private sharedSessions: Record<string, SharedSession> = {};
++
+   // Session cleanup timer
+   private cleanupTimer: NodeJS.Timeout | null = null;
+ 
+   // Default number of idle sessions per server UUID
+   private readonly defaultIdleCount: number;
+ 
+-  private constructor(defaultIdleCount: number = 1) {
++  /** Hard cap on sessions per server; protects against runaway session growth. */
++  private readonly maxSessionsPerServer: number = readPositiveIntEnv(
++    "METAMCP_MAX_SESSIONS_PER_SERVER",
++    DEFAULT_MAX_SESSIONS_PER_SERVER,
++  );
++
++  /** In-flight session creations, keyed `${sessionId}:${serverUuid}`. */
++  private readonly inflightCreations: Map<
++    string,
++    Promise<ConnectedClient | undefined>
++  > = new Map();
++
++  /** Injectable for tests; production uses the real connector. */
++  private readonly connectClient: typeof connectMetaMcpClient;
++
++  private constructor(
++    defaultIdleCount: number = 1,
++    deps: { connectClient?: typeof connectMetaMcpClient } = {},
++  ) {
+     this.defaultIdleCount = defaultIdleCount;
++    this.connectClient = deps.connectClient ?? connectMetaMcpClient;
+     this.startCleanupTimer();
+   }
+ 
++  /**
++   * Test-only: a fresh pool with an injected connector (the singleton is
++   * module-scoped and shared with the running app).
++   */
++  static createForTest(deps: {
++    connectClient?: typeof connectMetaMcpClient;
++    defaultIdleCount?: number;
++  }): McpServerPool {
++    return new McpServerPool(deps.defaultIdleCount ?? 1, {
++      connectClient: deps.connectClient,
++    });
++  }
++
++  /** Run an eviction pass now (tests, and `VERIFY.md`). */
++  async runCleanupNow(): Promise<void> {
++    await this.cleanupExpiredSessions();
++  }
++
+   /**
+    * Get the singleton instance
+    */
+@@ -66,16 +154,60 @@ export class McpServerPool {
+     // Update server params cache
+     this.serverParamsCache[serverUuid] = params;
+ 
++    // Phase 4: one shared process per server, reference counted.
++    if (this.sharedStdioEnabled && isStdioParams(params)) {
++      return this.getSharedSession(serverUuid, params, namespaceUuid);
++    }
++
+     // Check if we already have an active session for this sessionId and server
+     if (this.activeSessions[sessionId]?.[serverUuid]) {
++      this.touchSession(sessionId);
+       return this.activeSessions[sessionId][serverUuid];
+     }
+ 
++    // Concurrent requests for the same (session, server) must share one
++    // connection: without this guard N parallel tool calls each spawned a
++    // separate STDIO process (#324).
++    const inflightKey = `${sessionId}:${serverUuid}`;
++    const pending = this.inflightCreations.get(inflightKey);
++    if (pending) {
++      const shared = await pending;
++      if (shared) this.touchSession(sessionId);
++      return shared;
++    }
++
++    const creation = this.createAndRegisterSession(
++      sessionId,
++      serverUuid,
++      params,
++      namespaceUuid,
++    );
++    this.inflightCreations.set(inflightKey, creation);
++    try {
++      return await creation;
++    } finally {
++      this.inflightCreations.delete(inflightKey);
++    }
++  }
++
++  /** Convert an idle session or spawn a new one, then register it. */
++  private async createAndRegisterSession(
++    sessionId: string,
++    serverUuid: string,
++    params: ServerParameters,
++    namespaceUuid?: string,
++  ): Promise<ConnectedClient | undefined> {
+     // Initialize session if it doesn't exist
+     if (!this.activeSessions[sessionId]) {
+       this.activeSessions[sessionId] = {};
+       this.sessionToServers[sessionId] = new Set();
+       this.sessionTimestamps[sessionId] = Date.now();
++      this.sessionMeta[sessionId] = {
++        createdAt: Date.now(),
++        lastUsedAt: Date.now(),
++        refCount: 0,
++        state: "in-use",
++      };
+     }
+ 
+     // Check if we have an idle session for this server that we can convert
+@@ -83,19 +215,45 @@ export class McpServerPool {
+     if (idleClient) {
+       // Convert idle session to active session
+       delete this.idleSessions[serverUuid];
++      delete this.idleTimestamps[serverUuid];
+       this.activeSessions[sessionId][serverUuid] = idleClient;
+       this.sessionToServers[sessionId].add(serverUuid);
++      this.touchSession(sessionId);
+ 
+       console.log(
+         `Converted idle session to active for server ${serverUuid}, session ${sessionId}`,
+       );
+ 
+-      // Create a new idle session to replace the one we just used (ASYNC - NON-BLOCKING)
+-      this.createIdleSessionAsync(serverUuid, params, namespaceUuid);
++      // Warm a replacement only when we are below the cap; otherwise the next
++      // request creates one on demand (avoids spawn churn under load).
++      if (this.countSessionsForServer(serverUuid) < this.maxSessionsPerServer) {
++        this.createIdleSessionAsync(serverUuid, params, namespaceUuid);
++      }
+ 
+       return idleClient;
+     }
+ 
++    // Enforce the per-server cap before spawning anything new. The cap exists
++    // to bound *processes*: HTTP transports are cheap and shared STDIO mode
++    // already keeps one process per server, so neither may be throttled here
++    // (doing so silently removed every tool when many clients connected).
++    const capApplies = isStdioParams(params) && !this.sharedStdioEnabled;
++    if (
++      capApplies &&
++      this.countSessionsForServer(serverUuid) >= this.maxSessionsPerServer
++    ) {
++      // Make room by evicting this server's oldest idle session; if there is
++      // none, refuse rather than growing without bound.
++      if (!(await this.evictOldestIdleSession(serverUuid))) {
++        sessionMetrics.recordCapRejection();
++        console.warn(
++          `[mcp-pool] refusing new session for server ${params.name || serverUuid}: ` +
++            `cap of ${this.maxSessionsPerServer} concurrent sessions reached`,
++        );
++        return undefined;
++      }
++    }
++
+     // No idle session available, create a new connection
+     const newClient = await this.createNewConnection(params, namespaceUuid);
+     if (!newClient) {
+@@ -104,17 +262,43 @@ export class McpServerPool {
+ 
+     this.activeSessions[sessionId][serverUuid] = newClient;
+     this.sessionToServers[sessionId].add(serverUuid);
++    this.touchSession(sessionId);
++
++    sessionMetrics.recordCreated();
++
++    // Invariant: a session that exists but is not registered cannot be evicted
++    // afterwards, which is exactly how #324 leaked. Log loudly if it happens.
++    if (
++      !this.sessionMeta[sessionId] ||
++      !this.sessionToServers[sessionId]?.has(serverUuid)
++    ) {
++      console.error(
++        `[mcp-pool] INVARIANT VIOLATION: session ${sessionId} server ${serverUuid} ` +
++          `was created but is not registered (pid=${newClient.pid ?? "n/a"})`,
++      );
++    }
+ 
+     console.log(
+-      `Created new active session for server ${serverUuid}, session ${sessionId}`,
++      `Created new active session for server ${serverUuid}, session ${sessionId} ` +
++        `(pid=${newClient.pid ?? "n/a"})`,
+     );
+ 
+-    // Also create an idle session for future use (ASYNC - NON-BLOCKING)
+-    this.createIdleSessionAsync(serverUuid, params, namespaceUuid);
++    // Also warm an idle session for future use, still respecting the cap.
++    if (this.countSessionsForServer(serverUuid) < this.maxSessionsPerServer) {
++      this.createIdleSessionAsync(serverUuid, params, namespaceUuid);
++    }
+ 
+     return newClient;
+   }
+ 
++  private touchSession(sessionId: string): void {
++    const meta = this.sessionMeta[sessionId];
++    if (meta) {
++      meta.lastUsedAt = Date.now();
++      meta.state = meta.refCount > 0 ? "in-use" : "in-use";
++    }
++  }
++
+   /**
+    * Create a new connection for a server
+    */
+@@ -126,7 +310,7 @@ export class McpServerPool {
+       `Creating new connection for server ${params.name} (${params.uuid}) with namespace: ${namespaceUuid || "none"}`,
+     );
+ 
+-    const connectedClient = await connectMetaMcpClient(
++    const connectedClient = await this.connectClient(
+       params,
+       (exitCode, signal) => {
+         console.log(
+@@ -185,7 +369,11 @@ export class McpServerPool {
+     const newClient = await this.createNewConnection(params, namespaceUuid);
+     if (newClient) {
+       this.idleSessions[serverUuid] = newClient;
+-      console.log(`Created idle session for server ${serverUuid}`);
++      this.idleTimestamps[serverUuid] = Date.now();
++      sessionMetrics.recordCreated();
++      console.log(
++        `Created idle session for server ${serverUuid} (pid=${newClient.pid ?? "n/a"})`,
++      );
+     }
+   }
+ 
+@@ -213,8 +401,11 @@ export class McpServerPool {
+       .then((newClient) => {
+         if (newClient && !this.idleSessions[serverUuid]) {
+           this.idleSessions[serverUuid] = newClient;
++          this.idleTimestamps[serverUuid] = Date.now();
++          sessionMetrics.recordCreated();
+           console.log(
+-            `Created background idle session for server [${params.name}] ${serverUuid}`,
++            `Created background idle session for server [${params.name}] ${serverUuid} ` +
++              `(pid=${newClient.pid ?? "n/a"})`,
+           );
+         } else if (newClient) {
+           // We already have an idle session, cleanup the extra one
+@@ -259,42 +450,55 @@ export class McpServerPool {
+   /**
+    * Cleanup a session by sessionId
+    */
+-  async cleanupSession(sessionId: string): Promise<void> {
++  async cleanupSession(
++    sessionId: string,
++    reason: string = "close",
++  ): Promise<void> {
+     const activeSession = this.activeSessions[sessionId];
+     if (!activeSession) {
+       return;
+     }
+ 
++    const meta = this.sessionMeta[sessionId];
++    if (meta && meta.refCount > 0) {
++      // A request is still using this session (tool call in flight). Closing it
++      // here would produce a use-after-close; leave it to the next eviction pass.
++      console.warn(
++        `[mcp-pool] deferring cleanup of session ${sessionId}: ${meta.refCount} in-flight request(s)`,
++      );
++      return;
++    }
++
++    const ageMs = meta ? Date.now() - meta.createdAt : undefined;
++
+     // Cleanup all connections for this session
+     await Promise.allSettled(
+       Object.entries(activeSession).map(async ([_serverUuid, client]) => {
++        console.log(
++          `[mcp-pool] closing session ${sessionId} server=${client.label} pid=${client.pid ?? "n/a"} ` +
++            `${formatBytes(client.pid ? readRssBytes(client.pid) : undefined)} ` +
++            `age=${ageMs === undefined ? "unknown" : `${Math.round(ageMs / 1000)}s`} reason=${reason}`,
++        );
+         await client.cleanup();
++        sessionMetrics.recordClosed();
+       }),
+     );
+ 
+     // Remove from active sessions
+     delete this.activeSessions[sessionId];
+ 
+-    // Clean up session timestamp
++    // Clean up session bookkeeping
+     delete this.sessionTimestamps[sessionId];
++    delete this.sessionMeta[sessionId];
+ 
+-    // Clean up session to servers mapping
+-    const serverUuids = this.sessionToServers[sessionId];
+-    if (serverUuids) {
+-      // For each server this session was using, create new idle sessions if needed (ASYNC - NON-BLOCKING)
+-      Array.from(serverUuids).forEach((serverUuid) => {
+-        const params = this.serverParamsCache[serverUuid];
+-        if (params) {
+-          // Note: We don't have namespaceUuid here, so we can't track crashes properly
+-          // This is a limitation of the current design - we'll need to pass namespaceUuid from the caller
+-          this.createIdleSessionAsync(serverUuid, params);
+-        }
+-      });
+-
+-      delete this.sessionToServers[sessionId];
+-    }
++    // NOTE: we deliberately do NOT re-create idle sessions here. Doing so made
++    // every eviction spawn a fresh process (the churn behind #324); the next
++    // getSession() warms one on demand.
++    delete this.sessionToServers[sessionId];
+ 
+-    console.log(`Cleaned up MCP server pool session ${sessionId}`);
++    console.log(
++      `Cleaned up MCP server pool session ${sessionId} (reason=${reason})`,
++    );
+   }
+ 
+   /**
+@@ -314,13 +518,25 @@ export class McpServerPool {
+       }),
+     );
+ 
++    // Phase 4 shared processes, if enabled
++    await Promise.allSettled(
++      Object.entries(this.sharedSessions).map(async ([_uuid, shared]) => {
++        await shared.client.cleanup();
++        sessionMetrics.recordClosed();
++      }),
++    );
++
+     // Clear all state
+     this.idleSessions = {};
+     this.activeSessions = {};
+     this.sessionToServers = {};
+     this.sessionTimestamps = {};
++    this.sessionMeta = {};
++    this.idleTimestamps = {};
++    this.sharedSessions = {};
+     this.serverParamsCache = {};
+     this.creatingIdleSessions.clear();
++    this.inflightCreations.clear();
+ 
+     // Clear cleanup timer
+     if (this.cleanupTimer) {
+@@ -395,6 +611,7 @@ export class McpServerPool {
+         );
+       }
+       delete this.idleSessions[serverUuid];
++      delete this.idleTimestamps[serverUuid];
+     }
+ 
+     // Remove from creating set if it's in progress
+@@ -438,6 +655,7 @@ export class McpServerPool {
+         );
+       }
+       delete this.idleSessions[serverUuid];
++      delete this.idleTimestamps[serverUuid];
+     }
+ 
+     // Remove from creating set if it's in progress
+@@ -553,6 +771,10 @@ export class McpServerPool {
+ 
+     // Remove from creating set
+     this.creatingIdleSessions.delete(serverUuid);
++
++    // The tool list belongs to a process that no longer exists: drop the cached
++    // hash so the next tools/list re-syncs instead of trusting stale state.
++    toolsSyncCache.clear(serverUuid);
+   }
+ 
+   /**
+@@ -572,6 +794,202 @@ export class McpServerPool {
+     console.log(`Reset error state for server ${serverUuid}`);
+   }
+ 
++  /**
++   * Acquire a session for a request. Returns the session and marks it in use so
++   * eviction cannot close it underneath the caller. Always pair with
++   * `releaseSession` (or use `withTransientSession`).
++   */
++  async acquireSession(
++    sessionId: string,
++    serverUuid: string,
++    params: ServerParameters,
++    namespaceUuid?: string,
++  ): Promise<ConnectedClient | undefined> {
++    const session = await this.getSession(
++      sessionId,
++      serverUuid,
++      params,
++      namespaceUuid,
++    );
++    if (!session) return undefined;
++
++    const meta = this.sessionMeta[sessionId];
++    if (meta) {
++      meta.refCount += 1;
++      meta.lastUsedAt = Date.now();
++      meta.state = "transient";
++    }
++    return session;
++  }
++
++  releaseSession(sessionId: string): void {
++    const meta = this.sessionMeta[sessionId];
++    if (!meta) return;
++    meta.refCount = Math.max(0, meta.refCount - 1);
++    meta.lastUsedAt = Date.now();
++    meta.state = meta.refCount > 0 ? "transient" : "idle";
++  }
++
++  /**
++   * Run `fn` against a short-lived use of a pooled session. The session is
++   * reference counted, so a transient user can never close it out from under a
++   * live one, and it is always released on error.
++   */
++  async withTransientSession<T>(
++    sessionId: string,
++    serverUuid: string,
++    params: ServerParameters,
++    fn: (client: ConnectedClient) => Promise<T>,
++    namespaceUuid?: string,
++  ): Promise<T | undefined> {
++    const session = await this.acquireSession(
++      sessionId,
++      serverUuid,
++      params,
++      namespaceUuid,
++    );
++    if (!session) return undefined;
++    try {
++      return await fn(session);
++    } finally {
++      this.releaseSession(sessionId);
++    }
++  }
++
++  /** Sessions (idle + active + shared) currently open for a server. */
++  countSessionsForServer(serverUuid: string): number {
++    let count = 0;
++    if (this.idleSessions[serverUuid]) count += 1;
++    if (this.sharedSessions[serverUuid]) count += 1;
++    for (const sessionServers of Object.values(this.activeSessions)) {
++      if (sessionServers[serverUuid]) count += 1;
++    }
++    return count;
++  }
++
++  /** Evict the oldest idle session for a server. Returns true if one was closed. */
++  private async evictOldestIdleSession(serverUuid: string): Promise<boolean> {
++    const idle = this.idleSessions[serverUuid];
++    if (!idle) {
++      const shared = this.sharedSessions[serverUuid];
++      if (shared && shared.refCount === 0) {
++        delete this.sharedSessions[serverUuid];
++        await shared.client.cleanup();
++        sessionMetrics.recordClosed();
++        sessionMetrics.recordEviction();
++        console.log(
++          `[mcp-pool] evicted shared session for server ${serverUuid} to make room (pid=${shared.client.pid ?? "n/a"})`,
++        );
++        return true;
++      }
++      return false;
++    }
++
++    const idleSince = this.idleTimestamps[serverUuid];
++    delete this.idleSessions[serverUuid];
++    delete this.idleTimestamps[serverUuid];
++    await idle.cleanup();
++    sessionMetrics.recordClosed();
++    sessionMetrics.recordEviction();
++    console.log(
++      `[mcp-pool] evicted idle session for server ${serverUuid} (cap) ` +
++        `pid=${idle.pid ?? "n/a"} ${formatBytes(idle.pid ? readRssBytes(idle.pid) : undefined)} ` +
++        `idleFor=${idleSince ? Math.round((Date.now() - idleSince) / 1000) : "?"}s`,
++    );
++    return true;
++  }
++
++  /** Phase 4: shared, reference-counted STDIO process per server (opt-in). */
++  private async getSharedSession(
++    serverUuid: string,
++    params: ServerParameters,
++    namespaceUuid?: string,
++  ): Promise<ConnectedClient | undefined> {
++    const existing = this.sharedSessions[serverUuid];
++    if (existing) {
++      existing.refCount += 1;
++      existing.lastUsedAt = Date.now();
++      return existing.client;
++    }
++
++    const client = await this.createNewConnection(params, namespaceUuid);
++    if (!client) return undefined;
++
++    this.sharedSessions[serverUuid] = {
++      client,
++      refCount: 1,
++      lastUsedAt: Date.now(),
++    };
++    sessionMetrics.recordCreated();
++    console.log(
++      `[mcp-pool] created shared STDIO session for server ${serverUuid} ` +
++        `(pid=${client.pid ?? "n/a"})`,
++    );
++    return client;
++  }
++
++  /** Drop a reference on a shared session; closes it when the last user goes. */
++  async releaseSharedSession(serverUuid: string): Promise<void> {
++    const shared = this.sharedSessions[serverUuid];
++    if (!shared) return;
++    shared.refCount = Math.max(0, shared.refCount - 1);
++    shared.lastUsedAt = Date.now();
++  }
++
++  /** Observability snapshot (also feeds `/health/pool`). */
++  async getMetricsSnapshot(): Promise<
++    ReturnType<typeof sessionMetrics.getSnapshot>
++  > {
++    const sessionLifetime = await configService.getSessionLifetime();
++    const now = Date.now();
++
++    let oldestIdleAgeMs: number | null = null;
++    for (const since of Object.values(this.idleTimestamps)) {
++      const age = now - since;
++      if (oldestIdleAgeMs === null || age > oldestIdleAgeMs) {
++        oldestIdleAgeMs = age;
++      }
++    }
++    if (sessionLifetime !== null && oldestIdleAgeMs !== null) {
++      // nothing to do; age is reported as measured
++    }
++
++    const tracked = processGroupRegistry.list();
++    let childRssBytes = 0;
++    for (const group of tracked) {
++      childRssBytes += readRssBytes(group.pid) ?? 0;
++    }
++
++    sessionMetrics.setObservedState({
++      oldestIdleAgeMs,
++      childCount: tracked.length,
++      childRssBytes,
++    });
++
++    const snapshot = sessionMetrics.getSnapshot();
++
++    // WARN thresholds: make a leak visible in the logs before the host dies.
++    const sessionBudget = readPositiveIntEnv("METAMCP_MAX_LEAKED_SESSIONS", 50);
++    if (snapshot.liveSessions > sessionBudget) {
++      console.warn(
++        `[mcp-pool] WARN: ${snapshot.liveSessions} live sessions ` +
++          `(created ${snapshot.sessionsCreated}, closed ${snapshot.sessionsClosed}) — ` +
++          `exceeds METAMCP_MAX_LEAKED_SESSIONS=${sessionBudget}`,
++      );
++    }
++
++    const rssBudgetMb = readPositiveIntEnv("METAMCP_CHILD_RSS_BUDGET_MB", 2048);
++    if (childRssBytes > rssBudgetMb * 1024 * 1024) {
++      console.warn(
++        `[mcp-pool] WARN: STDIO MCP servers hold ` +
++          `${(childRssBytes / (1024 * 1024)).toFixed(0)}MB RSS across ` +
++          `${tracked.length} process groups — exceeds budget of ${rssBudgetMb}MB`,
++      );
++    }
++
++    return snapshot;
++  }
++
+   /**
+    * Start the automatic cleanup timer for expired sessions
+    */
+@@ -583,6 +1001,8 @@ export class McpServerPool {
+       },
+       5 * 60 * 1000,
+     ); // 5 minutes
++    // Never keep the event loop alive just for the reaper.
++    this.cleanupTimer.unref?.();
+   }
+ 
+   /**
+@@ -591,12 +1011,12 @@ export class McpServerPool {
+   private async cleanupExpiredSessions(): Promise<void> {
+     try {
+       const sessionLifetime = await configService.getSessionLifetime();
+-      
++
+       // If session lifetime is null, sessions are infinite - skip cleanup
+       if (sessionLifetime === null) {
+         return;
+       }
+-      
++
+       const now = Date.now();
+       const expiredSessionIds: string[] = [];
+ 
+@@ -604,9 +1024,13 @@ export class McpServerPool {
+       for (const [sessionId, timestamp] of Object.entries(
+         this.sessionTimestamps,
+       )) {
+-        if (now - timestamp > sessionLifetime) {
+-          expiredSessionIds.push(sessionId);
+-        }
++        // A session that is still in use must never be killed just because it
++        // is old; expire on idleness. `lastUsedAt` is bumped on every request.
++        const meta = this.sessionMeta[sessionId];
++        const lastUsedAt = meta?.lastUsedAt ?? timestamp;
++        if (now - lastUsedAt <= sessionLifetime) continue;
++        if (meta && meta.refCount > 0) continue;
++        expiredSessionIds.push(sessionId);
+       }
+ 
+       // Clean up expired sessions
+@@ -616,14 +1040,59 @@ export class McpServerPool {
+         );
+ 
+         await Promise.allSettled(
+-          expiredSessionIds.map((sessionId) => this.cleanupSession(sessionId)),
++          expiredSessionIds.map((sessionId) =>
++            this.cleanupSession(sessionId, "expired"),
++          ),
+         );
+       }
++
++      // Idle warm sessions were previously invisible to the reaper: they are
++      // not part of sessionTimestamps, so they lived until shutdown.
++      await this.cleanupExpiredIdleSessions(sessionLifetime);
+     } catch (error) {
+       console.error("Error during automatic session cleanup:", error);
+     }
+   }
+ 
++  /** Evict warm/idle sessions older than the configured lifetime. */
++  private async cleanupExpiredIdleSessions(
++    sessionLifetime: number,
++  ): Promise<void> {
++    const now = Date.now();
++    for (const [serverUuid, since] of Object.entries(this.idleTimestamps)) {
++      if (now - since <= sessionLifetime) continue;
++
++      const idle = this.idleSessions[serverUuid];
++      delete this.idleSessions[serverUuid];
++      delete this.idleTimestamps[serverUuid];
++      if (!idle) continue;
++
++      await idle.cleanup();
++      sessionMetrics.recordClosed();
++      sessionMetrics.recordEviction();
++      console.log(
++        `[mcp-pool] evicted idle session for server ${serverUuid} (expired) ` +
++          `pid=${idle.pid ?? "n/a"} ${formatBytes(idle.pid ? readRssBytes(idle.pid) : undefined)} ` +
++          `idleFor=${Math.round((now - since) / 1000)}s`,
++      );
++    }
++
++    // Shared sessions (Phase 4) are shared by every client, so their refcount
++    // never drops back to zero: expire them on idleness instead.
++    for (const [serverUuid, shared] of Object.entries(this.sharedSessions)) {
++      if (now - shared.lastUsedAt <= sessionLifetime) continue;
++
++      delete this.sharedSessions[serverUuid];
++      await shared.client.cleanup();
++      sessionMetrics.recordClosed();
++      sessionMetrics.recordEviction();
++      console.log(
++        `[mcp-pool] evicted shared session for server ${serverUuid} (expired) ` +
++          `pid=${shared.client.pid ?? "n/a"} idleFor=${Math.round((now - shared.lastUsedAt) / 1000)}s`,
++      );
++    }
++  }
++
+   /**
+    * Get session age in milliseconds
+    */
+@@ -640,6 +1109,9 @@ export class McpServerPool {
+     if (age === undefined) return false;
+ 
+     const sessionLifetime = await configService.getSessionLifetime();
++    // `null` means "never expire" — comparing against it would make every
++    // session look expired (age > 0).
++    if (sessionLifetime === null) return false;
+     return age > sessionLifetime;
+   }
+ }
+diff --git a/apps/backend/src/lib/metamcp/metamcp-server-pool.ts b/apps/backend/src/lib/metamcp/metamcp-server-pool.ts
+index 48051cd..9a416f2 100644
+--- a/apps/backend/src/lib/metamcp/metamcp-server-pool.ts
++++ b/apps/backend/src/lib/metamcp/metamcp-server-pool.ts
+@@ -558,12 +558,12 @@ export class MetaMcpServerPool {
+   private async cleanupExpiredSessions(): Promise<void> {
+     try {
+       const sessionLifetime = await configService.getSessionLifetime();
+-      
++
+       // If session lifetime is null, sessions are infinite - skip cleanup
+       if (sessionLifetime === null) {
+         return;
+       }
+-      
++
+       const now = Date.now();
+       const expiredSessionIds: string[] = [];
+ 
+@@ -607,6 +607,8 @@ export class MetaMcpServerPool {
+     if (age === undefined) return false;
+ 
+     const sessionLifetime = await configService.getSessionLifetime();
++    // `null` means "never expire".
++    if (sessionLifetime === null) return false;
+     return age > sessionLifetime;
+   }
+ }
+diff --git a/apps/backend/src/lib/metamcp/session-metrics.ts b/apps/backend/src/lib/metamcp/session-metrics.ts
+new file mode 100644
+index 0000000..8e6e5e4
+--- /dev/null
++++ b/apps/backend/src/lib/metamcp/session-metrics.ts
+@@ -0,0 +1,94 @@
++/**
++ * Lightweight in-process counters for MCP sessions and their child processes.
++ *
++ * Motivation: issue #324 was invisible for weeks because "sessions created"
++ * and "sessions closed" were only visible as log lines. Keeping the delta makes
++ * a leak self-evident (and `getSnapshot()` is what `/health/pool` reports).
++ */
++
++export interface SessionMetricsSnapshot {
++  sessionsCreated: number;
++  sessionsClosed: number;
++  /** created - closed; > 0 means sessions are accumulating */
++  liveSessions: number;
++  evictions: number;
++  rejectedByCap: number;
++  orphanSweeps: number;
++  orphansReaped: number;
++  oldestIdleSessionAgeMs: number | null;
++  liveChildProcesses: number;
++  liveChildRssBytes: number;
++}
++
++export class SessionMetrics {
++  private created = 0;
++  private closed = 0;
++  private evictions = 0;
++  private rejectedByCap = 0;
++  private orphanSweeps = 0;
++  private orphansReaped = 0;
++  private oldestIdleAgeMs: number | null = null;
++  private childCount = 0;
++  private childRssBytes = 0;
++
++  recordCreated(count = 1): void {
++    this.created += count;
++  }
++
++  recordClosed(count = 1): void {
++    this.closed += count;
++  }
++
++  recordEviction(): void {
++    this.evictions += 1;
++  }
++
++  recordCapRejection(): void {
++    this.rejectedByCap += 1;
++  }
++
++  recordSweep(reaped: number): void {
++    this.orphanSweeps += 1;
++    this.orphansReaped += reaped;
++  }
++
++  /** Sampled by the pool every time it reports status. */
++  setObservedState(state: {
++    oldestIdleAgeMs: number | null;
++    childCount: number;
++    childRssBytes: number;
++  }): void {
++    this.oldestIdleAgeMs = state.oldestIdleAgeMs;
++    this.childCount = state.childCount;
++    this.childRssBytes = state.childRssBytes;
++  }
++
++  getSnapshot(): SessionMetricsSnapshot {
++    return {
++      sessionsCreated: this.created,
++      sessionsClosed: this.closed,
++      liveSessions: Math.max(0, this.created - this.closed),
++      evictions: this.evictions,
++      rejectedByCap: this.rejectedByCap,
++      orphanSweeps: this.orphanSweeps,
++      orphansReaped: this.orphansReaped,
++      oldestIdleSessionAgeMs: this.oldestIdleAgeMs,
++      liveChildProcesses: this.childCount,
++      liveChildRssBytes: this.childRssBytes,
++    };
++  }
++
++  reset(): void {
++    this.created = 0;
++    this.closed = 0;
++    this.evictions = 0;
++    this.rejectedByCap = 0;
++    this.orphanSweeps = 0;
++    this.orphansReaped = 0;
++    this.oldestIdleAgeMs = null;
++    this.childCount = 0;
++    this.childRssBytes = 0;
++  }
++}
++
++export const sessionMetrics = new SessionMetrics();
+diff --git a/apps/backend/src/lib/session-lifetime-policy.test.ts b/apps/backend/src/lib/session-lifetime-policy.test.ts
+new file mode 100644
+index 0000000..496b8a9
+--- /dev/null
++++ b/apps/backend/src/lib/session-lifetime-policy.test.ts
+@@ -0,0 +1,47 @@
++import { describe, expect, it } from "vitest";
++
++import {
++  DEFAULT_SESSION_LIFETIME_MS,
++  resolveSessionLifetime,
++  SESSION_LIFETIME_ENV,
++} from "./session-lifetime-policy";
++
++describe("resolveSessionLifetime", () => {
++  it("defaults to a finite lifetime when no row exists", () => {
++    // Regression: an absent SESSION_LIFETIME row used to mean `null`
++    // ("never expire"), which disabled every reaper (#324).
++    expect(resolveSessionLifetime(undefined, undefined)).toBe(
++      DEFAULT_SESSION_LIFETIME_MS,
++    );
++    expect(resolveSessionLifetime(null, undefined)).toBe(
++      DEFAULT_SESSION_LIFETIME_MS,
++    );
++    expect(resolveSessionLifetime("", undefined)).toBe(
++      DEFAULT_SESSION_LIFETIME_MS,
++    );
++    expect(resolveSessionLifetime("not-a-number", undefined)).toBe(
++      DEFAULT_SESSION_LIFETIME_MS,
++    );
++    expect(DEFAULT_SESSION_LIFETIME_MS).toBe(30 * 60 * 1000);
++  });
++
++  it("honours a stored value", () => {
++    expect(resolveSessionLifetime("60000", undefined)).toBe(60_000);
++  });
++
++  it("treats 0 / negative as an explicit opt-out (never expire)", () => {
++    expect(resolveSessionLifetime("0", undefined)).toBeNull();
++    expect(resolveSessionLifetime("-5", undefined)).toBeNull();
++  });
++
++  it("lets the env var win over the stored row", () => {
++    expect(resolveSessionLifetime("60000", "120000")).toBe(120_000);
++    expect(resolveSessionLifetime("60000", "0")).toBeNull();
++    // an empty env var must not clobber the stored value
++    expect(resolveSessionLifetime("60000", "")).toBe(60_000);
++  });
++
++  it("exposes the env var name it reads", () => {
++    expect(SESSION_LIFETIME_ENV).toBe("METAMCP_SESSION_LIFETIME_MS");
++  });
++});
+diff --git a/apps/backend/src/lib/session-lifetime-policy.ts b/apps/backend/src/lib/session-lifetime-policy.ts
+new file mode 100644
+index 0000000..01ecc18
+--- /dev/null
++++ b/apps/backend/src/lib/session-lifetime-policy.ts
+@@ -0,0 +1,62 @@
++/**
++ * Session lifetime policy.
++ *
++ * Until 2.4.22 the lifetime came straight from the `config` row and an absent
++ * row meant "infinite" — which silently disabled every session reaper (see
++ * issues #324 and the idle-session cleanup added in 2.4.15). A missing row is
++ * the normal state of a fresh install, so in practice nothing was ever evicted
++ * and sessions accumulated for the lifetime of the container.
++ *
++ * The policy below keeps an explicit opt-out but makes the default finite:
++ *
++ *   row absent / empty / unparsable  -> DEFAULT_SESSION_LIFETIME_MS (30 min)
++ *   row = 0 or negative              -> null (never expire, previous behaviour)
++ *
++ * `METAMCP_SESSION_LIFETIME_MS` overrides the stored row (same semantics) so an
++ * operator can change the value without editing the database.
++ */
++export const DEFAULT_SESSION_LIFETIME_MS = 30 * 60 * 1000; // 30 minutes
++
++export const SESSION_LIFETIME_ENV = "METAMCP_SESSION_LIFETIME_MS";
++
++/**
++ * Resolve the effective session lifetime in milliseconds.
++ *
++ * @param storedValue raw `SESSION_LIFETIME` value from the config table, if any
++ * @param envValue    raw `METAMCP_SESSION_LIFETIME_MS` value, if any
++ * @returns lifetime in ms, or `null` for "sessions never expire"
++ */
++export function resolveSessionLifetime(
++  storedValue?: string | null,
++  envValue?: string | null,
++): number | null {
++  const explicit = parseLifetime(envValue);
++  if (explicit !== undefined) {
++    return explicit;
++  }
++
++  const stored = parseLifetime(storedValue);
++  if (stored !== undefined) {
++    return stored;
++  }
++
++  return DEFAULT_SESSION_LIFETIME_MS;
++}
++
++/**
++ * @returns the parsed lifetime, `null` for the infinite opt-out, or
++ *          `undefined` when the input carries no usable value.
++ */
++function parseLifetime(raw?: string | null): number | null | undefined {
++  if (raw === undefined || raw === null) return undefined;
++  const trimmed = raw.trim();
++  if (trimmed === "") return undefined;
++
++  const parsed = Number.parseInt(trimmed, 10);
++  if (Number.isNaN(parsed)) return undefined;
++
++  // 0 / negative is the documented opt-out: keep sessions forever.
++  if (parsed <= 0) return null;
++
++  return parsed;
++}
+diff --git a/apps/backend/src/lib/stdio-transport/process-managed-transport.test.ts b/apps/backend/src/lib/stdio-transport/process-managed-transport.test.ts
+new file mode 100644
+index 0000000..4efc067
+--- /dev/null
++++ b/apps/backend/src/lib/stdio-transport/process-managed-transport.test.ts
+@@ -0,0 +1,97 @@
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++
++import { afterAll, describe, expect, it } from "vitest";
++
++import { ProcessManagedStdioTransport } from "./process-managed-transport";
++import { isProcessAlive, processGroupRegistry } from "./process-registry";
++
++const isLinux = process.platform === "linux";
++const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "metamcp-stdio-test-"));
++const stubbornScript = path.join(tmpDir, "stubborn.sh");
++
++// Parent and grandchild both ignore SIGTERM, so only SIGKILL can reap the group.
++fs.writeFileSync(
++  stubbornScript,
++  `#!/bin/sh
++trap '' TERM
++sh -c 'trap "" TERM; sleep 300' &
++wait
++`,
++  { mode: 0o755 },
++);
++
++afterAll(() => {
++  fs.rmSync(tmpDir, { recursive: true, force: true });
++});
++
++describe.skipIf(!isLinux)("ProcessManagedStdioTransport.close", () => {
++  it("kills the whole process group, not just the direct child (#128)", async () => {
++    const transport = new ProcessManagedStdioTransport(
++      { command: "/bin/sh", args: [stubbornScript], stderr: "pipe" },
++      { killGraceMs: 400 },
++    );
++
++    await transport.start();
++    const pid = transport.pid ?? 0;
++    expect(pid).toBeGreaterThan(0);
++    expect(processGroupRegistry.has(pid)).toBe(true);
++
++    // Give the script a moment to fork its stubborn grandchild.
++    await new Promise((resolve) => setTimeout(resolve, 300));
++    expect(processGroupRegistry.isGroupAlive(pid)).toBe(true);
++
++    const startedAt = Date.now();
++    await transport.close();
++    const elapsed = Date.now() - startedAt;
++
++    // Only SIGTERM was sent before; both processes ignore it, so close() must
++    // have escalated to SIGKILL — which also means it waited for the grace.
++    expect(elapsed).toBeGreaterThanOrEqual(350);
++    expect(processGroupRegistry.isGroupAlive(pid)).toBe(false);
++    expect(processGroupRegistry.has(pid)).toBe(false);
++  });
++
++  it("closes quickly when the child honours SIGTERM", async () => {
++    const transport = new ProcessManagedStdioTransport(
++      { command: "/bin/sh", args: ["-c", "sleep 300"], stderr: "pipe" },
++      { killGraceMs: 3000 },
++    );
++
++    await transport.start();
++    const pid = transport.pid ?? 0;
++    const startedAt = Date.now();
++    await transport.close();
++
++    expect(Date.now() - startedAt).toBeLessThan(1500);
++    expect(processGroupRegistry.isGroupAlive(pid)).toBe(false);
++  });
++
++  it("sweeps a group whose leader died but whose members survive", async () => {
++    // Leader exits immediately, grandchild stays in the same process group.
++    const transport = new ProcessManagedStdioTransport(
++      {
++        command: "/bin/sh",
++        args: ["-c", "sh -c 'sleep 300' & exit 0"],
++        stderr: "pipe",
++      },
++      { killGraceMs: 400 },
++    );
++
++    await transport.start();
++    const pid = transport.pid ?? 0;
++    await new Promise((resolve) => setTimeout(resolve, 400));
++
++    // Leader is gone, group members remain: exactly the orphan case.
++    expect(isProcessAlive(pid)).toBe(false);
++    const sweep = await processGroupRegistry.sweep({
++      minAgeMs: 0,
++      graceMs: 400,
++    });
++
++    expect(sweep.reaped.map((group) => group.pid)).toContain(pid);
++    expect(processGroupRegistry.isGroupAlive(pid)).toBe(false);
++    processGroupRegistry.unregister(pid);
++  });
++});
+diff --git a/apps/backend/src/lib/stdio-transport/process-managed-transport.ts b/apps/backend/src/lib/stdio-transport/process-managed-transport.ts
+index 750ec07..87b10d3 100644
+--- a/apps/backend/src/lib/stdio-transport/process-managed-transport.ts
++++ b/apps/backend/src/lib/stdio-transport/process-managed-transport.ts
+@@ -6,8 +6,18 @@ import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+ import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+ import spawn from "cross-spawn";
+ 
++import { processGroupRegistry } from "./process-registry";
+ import { ReadBuffer, serializeMessage } from "./shared";
+ 
++/**
++ * How long a process group gets to honour SIGTERM before it is SIGKILLed.
++ * Overridable so tests (and impatient operators) do not have to wait.
++ */
++export const DEFAULT_KILL_GRACE_MS = Number.parseInt(
++  process.env.METAMCP_STDIO_KILL_GRACE_MS ?? "3000",
++  10,
++);
++
+ export type StdioServerParameters = {
+   /**
+    * The executable to run to start the server.
+@@ -123,14 +133,25 @@ export class ProcessManagedStdioTransport implements Transport {
+   private _serverParams: StdioServerParameters;
+   private _stderrStream: PassThrough | null = null;
+   private _isCleanup: boolean = false;
++  /** Pid of the group leader, kept after exit so close() can still reap. */
++  private _lastPid: number | null = null;
++  private _killGraceMs: number = Number.isNaN(DEFAULT_KILL_GRACE_MS)
++    ? 3000
++    : DEFAULT_KILL_GRACE_MS;
+ 
+   onclose?: () => void;
+   onerror?: (error: Error) => void;
+   onmessage?: (message: JSONRPCMessage) => void;
+   onprocesscrash?: (exitCode: number | null, signal: string | null) => void;
+ 
+-  constructor(server: StdioServerParameters) {
++  constructor(
++    server: StdioServerParameters,
++    options?: { killGraceMs?: number },
++  ) {
+     this._serverParams = server;
++    if (options?.killGraceMs !== undefined) {
++      this._killGraceMs = options.killGraceMs;
++    }
+     if (server.stderr === "pipe" || server.stderr === "overlapped") {
+       this._stderrStream = new PassThrough();
+     }
+@@ -180,6 +201,14 @@ export class ProcessManagedStdioTransport implements Transport {
+       });
+ 
+       this._process.on("spawn", () => {
++        this._lastPid = this._process?.pid ?? null;
++        if (this._lastPid) {
++          // Own process group: `kill(-pid)` reaches npm/uvx grandchildren.
++          processGroupRegistry.register(
++            this._lastPid,
++            `stdio:${this._serverParams.command}`,
++          );
++        }
+         resolve();
+       });
+ 
+@@ -258,19 +287,27 @@ export class ProcessManagedStdioTransport implements Transport {
+   async close(): Promise<void> {
+     this._isCleanup = true;
+     this._abortController.abort();
++    this._readBuffer.clear();
+ 
+-    // Kill the entire process group to ensure full cleanup
+-    if (this._process?.pid) {
+-      try {
+-        process.kill(-this._process.pid, "SIGTERM");
+-      } catch (error) {
+-        // Process might already be terminated, ignore errors
+-        console.warn("Failed to kill process group:", error);
+-      }
+-    }
+-
++    const pid = this._process?.pid ?? this._lastPid;
+     this._process = undefined;
+-    this._readBuffer.clear();
++    if (!pid) return;
++
++    // SIGTERM the group, then SIGKILL whatever is left after the grace period.
++    // Without the escalation a `npm exec`/`uvx` grandchild that ignores SIGTERM
++    // survived as PPID=1 and was unreachable afterwards (#128).
++    const gone = await processGroupRegistry.terminateGroup(
++      pid,
++      this._killGraceMs,
++    );
++    if (!gone) {
++      console.warn(
++        `[stdio] process group ${pid} survived SIGKILL; leaving it registered for the orphan sweep`,
++      );
++      return;
++    }
++    processGroupRegistry.unregister(pid);
++    this._lastPid = null;
+   }
+ 
+   send(message: JSONRPCMessage): Promise<void> {
+diff --git a/apps/backend/src/lib/stdio-transport/process-registry.ts b/apps/backend/src/lib/stdio-transport/process-registry.ts
+new file mode 100644
+index 0000000..1e06824
+--- /dev/null
++++ b/apps/backend/src/lib/stdio-transport/process-registry.ts
+@@ -0,0 +1,182 @@
++import fs from "node:fs";
++import process from "node:process";
++
++/**
++ * Registry of the process groups we created for STDIO MCP servers.
++ *
++ * Every child is spawned `detached`, so it leads its own process group and
++ * `kill(-pid)` reaches the whole tree (`npm exec` → `node`, `uvx` → `python`).
++ * That only helps if we still know the pid: `ProcessManagedStdioTransport`
++ * used to drop the reference the moment it sent SIGTERM, so a grandchild that
++ * ignored the signal became unreachable and survived as PPID=1 (#128).
++ *
++ * The registry keeps those pids (and a label for logging) so the transport can
++ * escalate to SIGKILL and a periodic sweep can reap leftovers. It never kills a
++ * pid it did not register itself.
++ */
++
++export interface TrackedProcessGroup {
++  /** pid of the process-group leader (the direct child we spawned) */
++  pid: number;
++  /** human-readable origin, e.g. `server=git-mcp session=…` */
++  label: string;
++  /** epoch ms when the group was spawned */
++  startedAt: number;
++}
++
++export interface SweepResult {
++  /** groups whose leader was gone but which still had members: killed */
++  reaped: Array<{ pid: number; label: string; ageMs: number }>;
++  /** entries dropped because the whole group was already gone */
++  forgotten: number[];
++}
++
++const DEFAULT_SWEEP_MIN_AGE_MS = 30_000;
++
++export class ProcessGroupRegistry {
++  private groups = new Map<number, TrackedProcessGroup>();
++
++  register(pid: number, label: string): void {
++    if (!Number.isInteger(pid) || pid <= 0) return;
++    this.groups.set(pid, { pid, label, startedAt: Date.now() });
++  }
++
++  unregister(pid: number): void {
++    this.groups.delete(pid);
++  }
++
++  has(pid: number): boolean {
++    return this.groups.has(pid);
++  }
++
++  list(): TrackedProcessGroup[] {
++    return Array.from(this.groups.values());
++  }
++
++  get size(): number {
++    return this.groups.size;
++  }
++
++  clear(): void {
++    this.groups.clear();
++  }
++
++  /**
++   * Is any process left in the group? `process.kill(-pid, 0)` succeeds as long
++   * as at least one member exists, which is exactly what we need: the leader may
++   * be a zombie (reaped by node shortly after) while grandchildren still run.
++   */
++  isGroupAlive(pid: number): boolean {
++    try {
++      process.kill(-pid, 0);
++      return true;
++    } catch (error) {
++      return (error as NodeJS.ErrnoException).code === "EPERM";
++    }
++  }
++
++  /**
++   * Kill the whole group: SIGTERM, wait up to `graceMs`, then SIGKILL.
++   * Resolves true when the group is gone afterwards.
++   */
++  async terminateGroup(pid: number, graceMs: number): Promise<boolean> {
++    if (!this.isGroupAlive(pid)) return true;
++
++    this.signalGroup(pid, "SIGTERM");
++    if (await this.waitForGroupExit(pid, graceMs)) return true;
++
++    this.signalGroup(pid, "SIGKILL");
++    return this.waitForGroupExit(pid, Math.max(1000, graceMs));
++  }
++
++  /**
++   * Reap groups whose leader has exited but whose members are still running.
++   * This is the "direct child exited but grandchildren survived" case from
++   * #128, plus anything a failed connect attempt left behind.
++   */
++  async sweep(options?: {
++    minAgeMs?: number;
++    graceMs?: number;
++  }): Promise<SweepResult> {
++    const minAgeMs = options?.minAgeMs ?? DEFAULT_SWEEP_MIN_AGE_MS;
++    const graceMs = options?.graceMs ?? 3000;
++    const now = Date.now();
++    const result: SweepResult = { reaped: [], forgotten: [] };
++
++    for (const group of Array.from(this.groups.values())) {
++      const ageMs = now - group.startedAt;
++
++      if (!this.isGroupAlive(group.pid)) {
++        this.groups.delete(group.pid);
++        result.forgotten.push(group.pid);
++        continue;
++      }
++
++      // Never touch a group younger than the grace window: it may still be
++      // starting up and its leader alive but slow to appear.
++      if (ageMs < minAgeMs) continue;
++
++      const leaderAlive = isProcessAlive(group.pid);
++      if (leaderAlive) continue;
++
++      await this.terminateGroup(group.pid, graceMs);
++      this.groups.delete(group.pid);
++      result.reaped.push({ pid: group.pid, label: group.label, ageMs });
++    }
++
++    return result;
++  }
++
++  private signalGroup(pid: number, signal: NodeJS.Signals): void {
++    try {
++      process.kill(-pid, signal);
++    } catch (error) {
++      const code = (error as NodeJS.ErrnoException).code;
++      if (code !== "ESRCH") {
++        console.warn(
++          `[process-registry] failed to send ${signal} to group ${pid}:`,
++          (error as Error).message,
++        );
++      }
++    }
++  }
++
++  private async waitForGroupExit(
++    pid: number,
++    timeoutMs: number,
++  ): Promise<boolean> {
++    const deadline = Date.now() + timeoutMs;
++    while (Date.now() < deadline) {
++      if (!this.isGroupAlive(pid)) return true;
++      await new Promise((resolve) => setTimeout(resolve, 50));
++    }
++    return !this.isGroupAlive(pid);
++  }
++}
++
++/** `kill(pid, 0)` — true when the process exists (zombies included). */
++export function isProcessAlive(pid: number): boolean {
++  try {
++    process.kill(pid, 0);
++    return true;
++  } catch (error) {
++    return (error as NodeJS.ErrnoException).code === "EPERM";
++  }
++}
++
++/**
++ * Resident set size of a pid in bytes, read from /proc (Linux only).
++ * Returns undefined when unavailable — callers must not treat 0 as "dead".
++ */
++export function readRssBytes(pid: number): number | undefined {
++  try {
++    const status = fs.readFileSync(`/proc/${pid}/status`, "utf8");
++    const match = /VmRSS:\s+(\d+)\s+kB/.exec(status);
++    if (!match) return undefined;
++    return Number.parseInt(match[1], 10) * 1024;
++  } catch {
++    return undefined;
++  }
++}
++
++export const processGroupRegistry = new ProcessGroupRegistry();
+diff --git a/apps/backend/vitest.config.ts b/apps/backend/vitest.config.ts
+index 50981ae..aa5137f 100644
+--- a/apps/backend/vitest.config.ts
++++ b/apps/backend/vitest.config.ts
+@@ -4,6 +4,14 @@ export default defineConfig({
+   test: {
+     globals: true,
+     environment: "node",
++    // `src/db/index.ts` throws at import time when DATABASE_URL is missing.
++    // Unit tests never connect (no queries are issued), so a placeholder is
++    // enough — without it any test that imports a service fails to even load.
++    env: {
++      DATABASE_URL:
++        process.env.DATABASE_URL ??
++        "postgres://unused:unused@127.0.0.1:5432/unused",
++    },
+     coverage: {
+       provider: "v8",
+       reporter: ["text", "json", "html"],
+@@ -17,7 +25,3 @@ export default defineConfig({
+     },
+   },
+ });
+-
+-
+-
+-
+diff --git a/example.env b/example.env
+index b4ffec8..cb66e22 100644
+--- a/example.env
++++ b/example.env
+@@ -34,3 +34,19 @@ BETTER_AUTH_SECRET=your-super-secret-key-change-this-in-production
+ 
+ # Docker networking fix
+ TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL=true
++
++# --- Session / process lifecycle (see RECON.md) -----------------------------
++# Session lifetime in ms before a session (and its STDIO processes) is evicted.
++# Unset -> 30 minutes. Set to 0 to keep sessions forever (old behaviour).
++# METAMCP_SESSION_LIFETIME_MS=1800000
++# How long a process group gets to honour SIGTERM before SIGKILL.
++# METAMCP_STDIO_KILL_GRACE_MS=3000
++# Max concurrent sessions per MCP server (idle warm sessions included).
++# METAMCP_MAX_SESSIONS_PER_SERVER=4
++# Share one STDIO process per server across namespaces (default off).
++# METAMCP_SHARED_STDIO_PROCESSES=0
++# WARN when created-closed exceeds this, or child RSS exceeds the budget.
++# METAMCP_MAX_LEAKED_SESSIONS=50
++# METAMCP_CHILD_RSS_BUDGET_MB=2048
++# Interval of the orphaned-process-group sweep.
++# METAMCP_ORPHAN_SWEEP_INTERVAL_MS=60000
+diff --git a/turbo.json b/turbo.json
+index 9ebdec5..6bac18b 100644
+--- a/turbo.json
++++ b/turbo.json
+@@ -16,7 +16,14 @@
+     "OIDC_PROVIDER_ID",
+     "TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL",
+     "NODE_ENV",
+-    "POSTGRES_CA_CERT"
++    "POSTGRES_CA_CERT",
++    "METAMCP_SESSION_LIFETIME_MS",
++    "METAMCP_STDIO_KILL_GRACE_MS",
++    "METAMCP_MAX_SESSIONS_PER_SERVER",
++    "METAMCP_SHARED_STDIO_PROCESSES",
++    "METAMCP_MAX_LEAKED_SESSIONS",
++    "METAMCP_CHILD_RSS_BUDGET_MB",
++    "METAMCP_ORPHAN_SWEEP_INTERVAL_MS"
+   ],
+   "tasks": {
+     "build": {
