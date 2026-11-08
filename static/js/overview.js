@@ -493,6 +493,11 @@
                 // The scans land over the next few seconds; drop the ETag so the
                 // next poll is a full read rather than a 304 of the old answer.
                 etag = null;
+                // The scan itself is reported by the activity strip along the
+                // bottom of the window (host by host, three at a time). Kick it
+                // so the person who pressed the button sees the work start now
+                // instead of on the next idle poll.
+                document.dispatchEvent(new CustomEvent('ailog:activity'));
                 await refresh();
             } catch (error) {
                 window.showToast?.('Could not queue a scan', 'error');
