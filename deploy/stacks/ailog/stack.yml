@@ -16,7 +16,7 @@
 # IP>:5001 (routing mesh)
 services:
   ailog:
-    image: zot.safehomelan.com/ailog:v3.29.2
+    image: zot.safehomelan.com/ailog:v3.29.3
     environment:
       DATABASE_URL: "sqlite:////var/lib/ailog/ailog.db"
       # Registry credentials for the update checker (dockermon/updates.py).
