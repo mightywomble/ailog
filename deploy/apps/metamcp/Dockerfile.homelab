@@ -1,0 +1,76 @@
+# MetaMCP image used by the swarm stack — built from the patched upstream source.
+#
+# Upstream v2.4.22 leaks sessions and STDIO processes (issues #128/#272/#324):
+# every client session keeps per-(server × namespace) `npm exec` / `uvx` children
+# and the reaper is disabled by default, so RSS climbs until the node is OOM
+# killed. The fix lives in `patches/0001-session-and-process-lifecycle.patch`
+# (source: david/metamcp branch fix/session-process-leaks, RECON.md/TESTS.md in
+# that tree); it touches apps/backend only.
+#
+# Build strategy:
+#   1. builder: the mirrored upstream image already has Node 20, pnpm 10.12 and
+#      uv, so no apt/nodesource is needed (the NodeSource key is rejected by
+#      Debian trixie's sqv policy — `apt-get update` fails). We copy the patched
+#      source and rebuild ONLY apps/backend (tsup); the frontend and the
+#      workspace packages are identical to upstream and are inherited.
+#   2. runtime: the mirrored upstream image again, with the freshly built
+#      backend dist plus the two stdio MCP servers that are not on npm/PyPI:
+#        pihole-mcp   — Go binary, only on GitHub releases
+#        patchmon-mcp — locally written FastMCP wrapper (vendored)
+#
+# Everything else is fetched at runtime by MetaMCP itself:
+#   npx  gitea-mcp, @hexsleeves/tailscale-mcp-server
+#   uvx  nextcloud-mcp-server, nginx-proxy-manager-mcp (pinned mcp==1.30.0)
+# MetaMCP caches those on the NFS-backed /root/.npm and /root/.cache/uv.
+
+FROM zot.safehomelan.com/metamcp:2.4.22 AS backend-build
+
+USER root
+WORKDIR /src
+
+# Whole (patched) source tree; node_modules/dist are gitignored upstream.
+COPY . /src
+
+# Rebuild the backend and the workspace packages it depends on. The frontend is
+# not touched by the patch and is expensive, so it is left alone.
+RUN pnpm install --frozen-lockfile \
+  && pnpm turbo run build --filter=./apps/backend \
+  && test -f /src/apps/backend/dist/index.js
+
+
+FROM zot.safehomelan.com/metamcp:2.4.22
+
+ARG PIHOLE_MCP_VERSION=0.9.0
+
+USER root
+
+# Patched backend (the only JS the fix changes)
+COPY --from=backend-build /src/apps/backend/dist /app/apps/backend/dist
+
+# pihole-mcp (Go binary from GitHub releases)
+RUN set -eu; \
+    curl -fsSL -o /tmp/pihole-mcp.tar.gz \
+      "https://github.com/hexamatic/pihole-mcp/releases/download/v${PIHOLE_MCP_VERSION}/pihole-mcp-slim_${PIHOLE_MCP_VERSION}_linux_amd64.tar.gz"; \
+    mkdir -p /tmp/pihole-mcp-extract; \
+    tar -xzf /tmp/pihole-mcp.tar.gz -C /tmp/pihole-mcp-extract; \
+    BIN=$(find /tmp/pihole-mcp-extract -maxdepth 2 -type f -name 'pihole-mcp*' ! -name '*.tar.gz' | head -1); \
+    test -n "$BIN"; \
+    install -m 0755 "$BIN" /usr/local/bin/pihole-mcp; \
+    rm -rf /tmp/pihole-mcp.tar.gz /tmp/pihole-mcp-extract; \
+    /usr/local/bin/pihole-mcp --version
+
+# patchmon-mcp (vendored python package) + a console-script-equivalent wrapper
+COPY vendor/patchmon_mcp /opt/patchmon/patchmon_mcp
+RUN set -eu; \
+    uv pip install --system --break-system-packages "fastmcp==3.4.7" "httpx" "pydantic" "structlog"; \
+    printf '%s\n' '#!/bin/sh' \
+      'exec python3 -c "import sys; sys.path.insert(0, \"/opt/patchmon\"); from patchmon_mcp.server import main; main()" "$@"' \
+      > /usr/local/bin/patchmon-mcp; \
+    chmod 0755 /usr/local/bin/patchmon-mcp; \
+    PYTHONPATH=/opt/patchmon python3 -c "import patchmon_mcp.server" && echo "patchmon_mcp import OK"
+
+# Prove the patch is in the image: this knob only exists in the fixed backend.
+RUN grep -q "METAMCP_MAX_SESSIONS_PER_SERVER" /app/apps/backend/dist/index.js \
+  || { echo "patched backend missing from image"; exit 1; }
+
+EXPOSE 12008

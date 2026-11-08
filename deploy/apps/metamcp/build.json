@@ -1,0 +1,6 @@
+{
+  "source": "https://github.com/metatool-ai/metamcp.git",
+  "ref": "v2.4.22",
+  "dockerfile": "Dockerfile.homelab",
+  "context": "."
+}
