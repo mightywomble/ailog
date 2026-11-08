@@ -143,10 +143,15 @@ def test_the_panes_re_check_wakes_the_activity_strip():
     view = _docker_view()
     block = view[view.index("document.getElementById('docker-updates-refresh')"):]
     block = block[:block.index("document.getElementById('docker-log-select')")]
+    # Both branches of the button say "now" before they block: the manager's
+    # stack scan, and the per-host image scan.
+    manager = block[:block.index("await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates/refresh`")]
+    assert manager.index("CustomEvent('ailog:activity')") < manager.index('recheckSwarmUpdates(')
     assert "new CustomEvent('ailog:activity')" in block
     # dispatched after the scan is queued, before the blocking re-read
-    assert block.index('/updates/refresh') < block.index("CustomEvent('ailog:activity')")
-    assert block.index("CustomEvent('ailog:activity')") < block.index('/updates?refresh=1')
+    host_block = block[block.index("await fetch(`/api/docker/hosts/${encodeURIComponent(hostId)}/updates/refresh`"):]
+    assert host_block.index('/updates/refresh') < host_block.index("CustomEvent('ailog:activity')")
+    assert host_block.index("CustomEvent('ailog:activity')") < host_block.index('/updates?refresh=1')
 
 
 def test_the_log_pane_tails_follows_and_filters():

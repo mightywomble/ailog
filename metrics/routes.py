@@ -530,8 +530,10 @@ def api_activity():
     activity strip polls it every couple of seconds.
     """
     from dockermon import updates as dupdates
+    from dockermon import swarmstack
     return jsonify({'success': True, 'metrics': activity(),
-                    'docker': dupdates.activity(), 'ts': time.time()})
+                    'docker': dupdates.activity(),
+                    'swarm': swarmstack.activity(), 'ts': time.time()})
 
 
 @metrics_bp.get('/api/metrics/servers')

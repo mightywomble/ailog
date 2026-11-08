@@ -110,7 +110,8 @@ def test_the_strip_says_what_and_how_far():
     assert 'Collecting host metrics' in _read(TEMPLATES, 'partials', 'activity-strip.html')
     assert 'Scanning containers for updates' in _read(TEMPLATES, 'partials', 'activity-strip.html')
     # done / total drives the bar, and the host being contacted is shown
-    assert 'of ${total} hosts' in js
+    assert '${done} of ${total} ${unitFor(name)}' in js
+    assert "'tags' : 'hosts'" in js
     assert 'contacting' in js and 'checking' in js
 
 
