@@ -4,8 +4,6 @@ These all sit on top of the SSH/socket transports the rest of dockermon tests,
 so every test fakes the snapshot and asserts the endpoint layer's contract.
 """
 
-import time
-
 import pytest
 
 import dockermon.endpoints as ep
