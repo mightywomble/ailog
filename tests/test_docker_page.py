@@ -189,14 +189,23 @@ def test_updates_refresh_queues_a_scan(client, fake_host, monkeypatch):
     import dockermon.updates as dupdates
     host, _ = fake_host
     seen = []
+    forced = []
     monkeypatch.setattr(dupdates, 'stale', lambda key, max_age=0: True)
     # refresh must go through the queue, not a thread of its own: that is what
     # bounds the scan concurrency (and feeds the activity strip)
-    monkeypatch.setattr(dupdates, 'scan_async', lambda app, keys: seen.extend(keys) or list(keys))
+    def fake_scan(app, keys, force=False):
+        seen.extend(keys)
+        forced.append(force)
+        return list(keys)
+
+    monkeypatch.setattr(dupdates, 'scan_async', fake_scan)
     res = client.post(f'/api/docker/hosts/{host}/updates/refresh')
     assert res.status_code == 200
     assert res.get_json()['success'] is True
     assert seen == [host]
+    # and forced: pressing re-check means "do not trust the cache". Without it
+    # the queue's 30-minute TTL dropped the host and the button scanned nothing.
+    assert forced == [True]
 
 
 def test_updates_refresh_unknown_host_is_404(client):

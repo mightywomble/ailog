@@ -18,22 +18,26 @@ jobs:
       - name: Install
         # only the repo's own dependencies: the tools are baked into the image,
         # pinned there, so a lint failure means the code changed
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest-timeout
       - name: Lint (bugs only)
         run: ruff check --select F,E9 .
       - name: Tests
-        run: pytest -q --cov=. --cov-report=term
+        # A timeout, because a deadlock used to look like a slow test: the job
+        # sat at 42% of the bar for twenty minutes and was killed by the runner
+        # with `exit code 134`, which says nothing about the code. Two minutes
+        # of no progress now fails the run with a traceback instead.
+        run: pytest -q --timeout=120 --cov=. --cov-report=term
       - name: Tests are isolated (same suite twice)
         # Guards the conftest: every pytest process must get a throwaway
         # SQLite file, so a second run cannot collide with the first.
         run: |
-          pytest -q --no-header tests/test_inventory.py tests/test_dockermon.py
-          pytest -q --no-header tests/test_inventory.py tests/test_dockermon.py
+          pytest -q --timeout=120 --no-header tests/test_inventory.py tests/test_dockermon.py
+          pytest -q --timeout=120 --no-header tests/test_inventory.py tests/test_dockermon.py
       - name: Coverage floor
         # app.py is still the un-split monolith (3.3k statements at ~16%);
         # the floor is the current measured total and is meant to ratchet up
         # as the phase-3 split lands. Raise it, never lower it.
-        run: pytest -q --cov=. --cov-fail-under=30 --no-header
+        run: pytest -q --timeout=120 --cov=. --cov-fail-under=30 --no-header
 
   remediation-catalog:
     runs-on: ubuntu-latest

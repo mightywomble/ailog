@@ -49,6 +49,43 @@ TTL = 60.0
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, dict]] = {}
 
+# What a stack scan is doing right now, in the same shape as the per-host scan
+# in `updates` -- the activity strip reads both, and a manager's re-check is as
+# slow as the per-container one (a registry lookup per service) but used to say
+# nothing at all: only a silent "Reading the cluster…" placeholder for two or
+# three seconds.
+_progress: dict = {'active': False, 'stage': '', 'host': '', 'done': 0,
+                   'total': 0, 'started': 0.0}
+_progress_lock = threading.Lock()
+
+
+def _progress_begin(host_key: str, stage: str, total: int = 0) -> None:
+    with _progress_lock:
+        _progress.update(active=True, stage=stage, host=host_key, done=0,
+                         total=int(total or 0), started=time.time())
+
+
+def _progress_step(_key: str = '') -> None:
+    with _progress_lock:
+        if _progress['active']:
+            _progress['done'] += 1
+
+
+def _progress_end() -> None:
+    with _progress_lock:
+        _progress.update(active=False, stage='', host='', done=0, total=0,
+                         started=0.0)
+
+
+def activity() -> dict | None:
+    """The stack scan in flight, or None. No SSH, no registry, no work."""
+    with _progress_lock:
+        if not _progress['active']:
+            return None
+        row = dict(_progress)
+    row['elapsed'] = round(time.time() - row['started'], 1)
+    return row
+
 # The images that cannot survive a major bump on the same data directory.
 DATABASES = ('postgres', 'postgres16', 'mysql', 'mariadb', 'mongo', 'redis',
              'valkey', 'clickhouse', 'timescale', 'couchdb')
@@ -198,7 +235,25 @@ def _zot_digest(repo: str, tag: str) -> str:
 # the scan
 # --------------------------------------------------------------------------
 
-def _compare(rows: list[dict], refresh: bool) -> list[dict]:
+def _tag_keys(rows: list[dict]) -> list[str]:
+    """The distinct zot tags this scan will ask the registry about.
+
+    The bar counts *these*, because these are the round trips: a cluster with
+    40 services can still be 12 registry questions, and it is the questions
+    that take the time.
+    """
+    zot_host = _zot_host()
+    seen: list[str] = []
+    for row in rows:
+        if row.get('host') != zot_host:
+            continue
+        key = f'{row["repo"]}:{row["tag"]}'
+        if key not in seen:
+            seen.append(key)
+    return seen
+
+
+def _compare(rows: list[dict], refresh: bool, on_step=None) -> list[dict]:
     """Attach the registry's current digest for each service's tag.
 
     Only for images zot actually serves.  ``portainer_portainer`` runs
@@ -215,6 +270,8 @@ def _compare(rows: list[dict], refresh: bool) -> list[dict]:
             continue
         info = reg.remote_digest(f'{zot_host}/{row["repo"]}:{row["tag"]}', refresh=refresh)
         by_tag[key] = info.get('digest') or ''
+        if on_step:
+            on_step(key)
     for row in rows:
         row['from_zot'] = row.get('host') == zot_host
         if not row['from_zot']:
@@ -239,42 +296,53 @@ def scan(host_key: str, refresh: bool = False) -> dict:
     if hit and not refresh and (now - hit[0]) < TTL:
         return dict(hit[1])
 
-    _info, run = _runner(host_key)
-    if not is_manager(run):
-        out = {'host_key': host_key, 'manager': False, 'swarm': is_swarm_node(run),
-               'stacks': [], 'ts': now,
-               'note': 'this node is not a swarm manager, so it cannot see the cluster'}
+    # Two stages, because they fail and stall differently: reading the cluster
+    # is one SSH round trip, comparing tags is one registry round trip per
+    # distinct image. The strip shows the stage and, once the service list is
+    # known, how many comparisons are left.
+    _progress_begin(host_key, 'reading the cluster')
+    try:
+        _info, run = _runner(host_key)
+        if not is_manager(run):
+            out = {'host_key': host_key, 'manager': False, 'swarm': is_swarm_node(run),
+                   'stacks': [], 'ts': now,
+                   'note': 'this node is not a swarm manager, so it cannot see the cluster'}
+            with _lock:
+                _cache[host_key] = (now, dict(out))
+            return out
+
+        services = read_services(run)
+        _progress_begin(host_key, 'comparing tags', total=len(_tag_keys(services)))
+        rows = _compare(services, refresh, on_step=_progress_step)
+        stacks: dict[str, dict] = {}
+        for row in rows:
+            stack = stacks.setdefault(row['stack'], {
+                'name': row['stack'], 'services': [], 'updates': 0,
+            })
+            stack['services'].append(row)
+            if row['update_available']:
+                stack['updates'] += 1
+        for stack in stacks.values():
+            stack['services'].sort(key=lambda r: r['short'])
+        out = {
+            'host_key': host_key,
+            'manager': True,
+            'swarm': True,
+            'stacks': sorted(stacks.values(),
+                             key=lambda s: (-s['updates'], s['name'].lower())),
+            'services': len(rows),
+            'updates': sum(1 for r in rows if r['update_available']),
+            'ts': now,
+        }
         with _lock:
             _cache[host_key] = (now, dict(out))
+            if len(_cache) > 32:
+                for stale in [k for k, v in _cache.items() if now - v[0] > TTL * 10]:
+                    _cache.pop(stale, None)
         return out
-
-    rows = _compare(read_services(run), refresh)
-    stacks: dict[str, dict] = {}
-    for row in rows:
-        stack = stacks.setdefault(row['stack'], {
-            'name': row['stack'], 'services': [], 'updates': 0,
-        })
-        stack['services'].append(row)
-        if row['update_available']:
-            stack['updates'] += 1
-    for stack in stacks.values():
-        stack['services'].sort(key=lambda r: r['short'])
-    out = {
-        'host_key': host_key,
-        'manager': True,
-        'swarm': True,
-        'stacks': sorted(stacks.values(),
-                         key=lambda s: (-s['updates'], s['name'].lower())),
-        'services': len(rows),
-        'updates': sum(1 for r in rows if r['update_available']),
-        'ts': now,
-    }
-    with _lock:
-        _cache[host_key] = (now, dict(out))
-        if len(_cache) > 32:
-            for stale in [k for k, v in _cache.items() if now - v[0] > TTL * 10]:
-                _cache.pop(stale, None)
-    return out
+    finally:
+        # A failed scan must not leave the strip saying it is still reading.
+        _progress_end()
 
 
 def clear(host_key: str = '') -> None:
