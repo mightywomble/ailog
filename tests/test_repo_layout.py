@@ -205,6 +205,31 @@ def test_a_stack_absent_from_the_swarm_is_not_created_by_a_push():
     assert 'create_stacks' in ship      # the dispatch input that opts in
 
 
+def test_a_comment_is_not_an_image_when_the_deploy_checks_the_registry():
+    """The registry check reads images with a regex, and prose matched it.
+
+    The ailog stack's header explained which tag gets pushed - "... as
+    zot.safehomelan.com/ailog:v<APP_VERSION> ..." - and the deploy job's
+    missing_images() found two references in that file: the real image and the
+    sentence. The second one is not in zot, so the deploy refused the stack with
+    "image(s) missing from zot: zot.safehomelan.com/ailog:v" and nothing shipped.
+    Comments are stripped now, and no header may look like a reference anyway.
+    """
+    import re
+
+    ship = (ROOT / '.gitea' / 'workflows' / 'ship.yml').read_text()
+    block = ship[ship.index('missing_images()'):ship.index('FAILED=""')]
+    assert "grep -vE '^[[:space:]]*#'" in block, 'ship.yml must ignore commented lines'
+
+    ref = re.compile(r'zot\.safehomelan\.com/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+')
+    offenders = []
+    for stack in sorted((ROOT / 'deploy' / 'stacks').glob('*/stack.yml')):
+        for number, line in enumerate(stack.read_text().splitlines(), 1):
+            if line.lstrip().startswith('#') and ref.search(line):
+                offenders.append(f'{stack.parent.name}:{number}: {line.strip()}')
+    assert offenders == [], offenders
+
+
 def test_the_push_workflows_compare_against_a_real_base():
     """Both build and mirror once "did nothing" and reported success.
 

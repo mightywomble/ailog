@@ -176,7 +176,12 @@ jobs:
           }
 
           missing_images() {   # echoes zot images in $1 that are not in the registry
-            grep -oE 'zot\.safehomelan\.com/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+' "deploy/stacks/$1/stack.yml" \
+            # Comments are not images. A stack header that named the tag pattern
+            # ("pushed as the ailog repository tagged v<APP_VERSION>") matched the
+            # regex below, so the deploy refused a stack whose only missing image
+            # was prose - and the error named a tag that does not exist.
+            grep -vE '^[[:space:]]*#' "deploy/stacks/$1/stack.yml" \
+              | grep -oE 'zot\.safehomelan\.com/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+' \
               | sed 's/\${IMAGE_TAG:-[^}]*}/'"${IMAGE_TAG:-latest}"'/' | sort -u \
               | while read -r IMG; do
                   docker manifest inspect "$IMG" >/dev/null 2>&1 || echo "$IMG"

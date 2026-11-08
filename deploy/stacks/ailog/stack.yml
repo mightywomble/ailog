@@ -1,8 +1,11 @@
 # AILog (multi-host log analysis platform) on the swarm.
 # Upstream: https://git.safehomelan.com/david/ailog (vibecoded app). The image
-# is built from that repo's docker/Dockerfile for linux/amd64, pushed into zot
-# as zot.safehomelan.com/ailog:v<APP_VERSION> (APP_VERSION in app.py is the
-# release), and pinned here; bump the tag to upgrade.
+# is built from that repo's docker/Dockerfile for linux/amd64 and pushed into
+# zot as the ailog repository tagged v<APP_VERSION>, where APP_VERSION in app.py
+# is the release; it is pinned below. Bump the tag to upgrade. (The tag is
+# written without a colon here on purpose: ship.yml reads image references out
+# of this file with a regex, and a comment that looks like one is a comment
+# that fails the registry check.)
 # - single container; the SQLite app db persists on the shared NFS
 #   (/opt/docker/data/ailog) so the service can reschedule to any node
 # - NO LOGIN: the app is unauthenticated by design - trusted internal
