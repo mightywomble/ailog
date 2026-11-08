@@ -15,7 +15,17 @@ docker run --rm --entrypoint sh "$IMG" -eu -c '
   test -x /usr/local/bin/patchmon-mcp         || { echo "missing patchmon-mcp"; exit 1; }
   PYTHONPATH=/opt/patchmon python3 -c "import patchmon_mcp.server" || { echo "patchmon_mcp import failed"; exit 1; }
   test -f /app/docker-entrypoint.sh           || { echo "missing entrypoint"; exit 1; }
+  # the session/process lifecycle patch (RECON.md in the source branch) must be
+  # in the bundle this image actually runs, not just in the git patch
+  grep -q METAMCP_MAX_SESSIONS_PER_SERVER /app/apps/backend/dist/index.js \
+    || { echo "patched backend missing (no METAMCP_MAX_SESSIONS_PER_SERVER)"; exit 1; }
+  grep -q METAMCP_SESSION_LIFETIME_MS /app/apps/backend/dist/index.js \
+    || { echo "patched backend missing (no METAMCP_SESSION_LIFETIME_MS)"; exit 1; }
+  grep -q METAMCP_SHARED_STDIO_PROCESSES /app/apps/backend/dist/index.js \
+    || { echo "patched backend missing (no METAMCP_SHARED_STDIO_PROCESSES)"; exit 1; }
+  grep -q 'health/pool' /app/apps/backend/dist/index.js \
+    || { echo "patched backend missing (/health/pool)"; exit 1; }
   echo "node: $(node --version)"; echo "uvx: $(uvx --version)"
 '
 
-echo "smoke test passed for metamcp (entrypoint + pihole-mcp + node/npx + uvx present)"
+echo "smoke test passed for metamcp (entrypoint, stdio servers, patched backend)"
