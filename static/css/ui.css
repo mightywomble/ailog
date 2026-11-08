@@ -1405,19 +1405,22 @@ body.mh-sheet-open { overflow: hidden; }
 .ov-nd-anom { color: var(--accent); font-weight: 650; }
 
 /* ---------------------------------------------------------- activity strip --
-   Bottom-left, above the phone tab bar. Two rows at most: metric collection
-   and the docker update scan. It is the only thing on screen that says the app
-   is working, so it must not look like a dialog: small, quiet, self-hiding. */
+   A full-width bar along the bottom, above the phone tab bar: the same shape as
+   the other progress bars in the app (message, then a bar that spans the width)
+   rather than the small bottom-left box it used to be. Two rows at most: metric
+   collection and the docker update scan. It is the only thing on screen that
+   says the app is working, so it stays quiet and hides itself when idle. */
 .activity-strip {
     position: fixed;
     left: 1rem;
+    right: 1rem;
     bottom: 1rem;
     z-index: 45;
-    width: min(22rem, calc(100vw - 2rem));
+    width: auto;
     display: flex;
     flex-direction: column;
     gap: .6rem;
-    padding: .7rem .8rem;
+    padding: .6rem .9rem;
     border-radius: .75rem;
     border: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg) 92%, transparent);
@@ -1437,7 +1440,7 @@ body.mh-sheet-open { overflow: hidden; }
 
 .activity-bar {
     position: relative;
-    height: .35rem;
+    height: .5rem;
     border-radius: 999px;
     overflow: hidden;
     background: color-mix(in srgb, var(--text) 12%, transparent);
@@ -1461,7 +1464,15 @@ body.mh-sheet-open { overflow: hidden; }
     to { transform: translateX(100%); }
 }
 
-.activity-detail { color: var(--faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.activity-detail {
+    color: var(--faint);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    /* A full-width strip has room for the whole sentence, but never for a
+       wrapped second line on a phone: clamp it and keep the bar in view. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 .activity-spinner {
     width: .7rem;
@@ -1475,7 +1486,7 @@ body.mh-sheet-open { overflow: hidden; }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 640px) {
-    .activity-strip { bottom: 4.6rem; left: .6rem; right: .6rem; width: auto; }
+    .activity-strip { bottom: 4.6rem; left: .6rem; right: .6rem; }
 }
 @media (prefers-reduced-motion: reduce) {
     .activity-fill[data-indeterminate] { animation: none; }

@@ -577,7 +577,7 @@ SCAN_THREADS = 3
 _scan_queue: list[str] = []
 _scan_queue_lock = threading.Lock()
 _scan_progress = {'active': False, 'done': 0, 'total': 0, 'started': 0.0,
-                  'host': ''}
+                  'host': '', 'hosts': []}
 
 
 def activity() -> dict | None:
@@ -595,11 +595,16 @@ def _scan_worker(app) -> None:
     while True:
         with _scan_queue_lock:
             if not _scan_queue:
-                _scan_progress.update(active=False, done=0, total=0, host='')
+                _scan_progress.update(active=False, done=0, total=0, host='',
+                                      hosts=[])
                 return
             batch = _scan_queue[:SCAN_THREADS]
             del _scan_queue[:SCAN_THREADS]
             _scan_progress['host'] = batch[0]
+            # The whole batch, not just its first member: the strip says which
+            # hosts are being compared right now, which is what "three at a
+            # time" looks like from outside.
+            _scan_progress['hosts'] = list(batch)
         threads = [threading.Thread(target=scan_host, args=(app, key),
                                     name=f'docker-scan-{key}', daemon=True)
                    for key in batch]
@@ -610,6 +615,7 @@ def _scan_worker(app) -> None:
         with _scan_queue_lock:
             _scan_progress['done'] += len(batch)
             _scan_progress['host'] = ''
+            _scan_progress['hosts'] = []
 
 
 def scan_async(app, host_keys, force: bool = False) -> list[str]:
@@ -636,7 +642,7 @@ def scan_async(app, host_keys, force: bool = False) -> list[str]:
         _scan_progress['total'] += len(due)
         if start:
             _scan_progress.update(active=True, done=0, started=time.time(),
-                                  host=due[0])
+                                  host=due[0], hosts=list(due[:SCAN_THREADS]))
     if start:
         threading.Thread(target=_scan_worker, args=(app,),
                          name='docker-scan-batch', daemon=True).start()
@@ -660,4 +666,5 @@ def clear(host_key: str | None = None) -> None:
         # reload) starts from a clean queue and a blank progress strip.
         with _scan_queue_lock:
             _scan_queue.clear()
-            _scan_progress.update(active=False, done=0, total=0, started=0.0, host='')
+            _scan_progress.update(active=False, done=0, total=0, started=0.0,
+                                  host='', hosts=[])

@@ -96,7 +96,7 @@ def test_the_view_reuses_the_host_banner():
 def test_analyse_is_scoped_to_container_logs_only():
     view = _docker_view()
     button = view[view.index("document.getElementById('docker-analyse-btn')"):]
-    button = button[:button.index('docker-add-btn')]
+    button = button[:button.index('docker-estate-btn')]
     # files and journal are switched off, docker and stopped are switched on
     assert "files.checked = false" in button
     assert "journal.checked = false" in button
@@ -159,25 +159,32 @@ def test_leaving_the_view_stops_its_timers():
     assert 'stopDockerView()' in pull
 
 
-def test_adding_a_container_goes_to_the_wizard():
+def test_the_pane_does_not_offer_to_add_a_container():
+    """The "Add a container" button is gone: nothing was added here.
+
+    It sat with the update and estate actions and deep-linked the wizard with
+    this host preselected - a form with no image to start from, two clicks from
+    the thing it claimed to do. Adding a service is the estate's job, and the
+    estate hand-offs are where it is reached from this pane.
+    """
     view = _docker_view()
-    assert "WIZARD_URL" in view
-    assert 'wizard.safehomelan.com' in view
-    add = view[view.index("document.getElementById('docker-add-btn')"):]
-    add = add[:add.index('docker-updates-refresh')]
-    assert "wizardLink('new'" in add
+    assert 'docker-add-btn' not in view
+    assert 'Add a container' not in view
+    assert 'Add a container\u2026' not in view
+    # the remaining hand-offs are the estate and the full monitor, dialogs both
+    assert "document.getElementById('docker-estate-btn')" in view
+    assert 'window.openEstateModal' in view
+    assert 'window.openDockerModal(hostId, hostName)' in view
 
 
-def test_the_wizard_opens_in_the_dialog_not_a_new_tab():
+def test_nothing_in_the_docker_pane_hands_off_to_the_wizard():
     view = _docker_view()
-    # the remaining hand-off (a new service) goes through the frame helper,
-    # which is what keeps the user in the app and carries the Exit button;
-    # updates no longer go to the wizard at all
-    assert 'window.openWizardModal' in view
-    assert "openWizard(wizardLink('new'" in view
-    assert "window.open(wizardLink('new'" not in view
-    assert "wizardLink('update'" not in view
-    # and a deploy the wizard finished refreshes what the pane shows
+    # updates run here, on the container that was clicked; nothing that changes
+    # the estate is launched from this pane any more
+    for gone in ('openWizardModal', "wizardLink('new'", "wizardLink('update'",
+                 'wizardLink('):
+        assert gone not in view, gone
+    # and a deploy the wizard finished still refreshes what the pane shows
     assert 'window.onWizardDeployed = refreshAfterWizard' in view
     assert 'window.onWizardClosed = refreshAfterWizard' in view
 

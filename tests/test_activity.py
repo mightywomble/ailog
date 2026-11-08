@@ -114,6 +114,58 @@ def test_the_strip_says_what_and_how_far():
     assert 'contacting' in js and 'checking' in js
 
 
+def test_the_strip_spans_the_window_like_the_other_progress_bars():
+    """Across the whole width, as the other progress bars in the app are.
+
+    It used to be a 22rem box in the bottom-left: the same information, but
+    reading as a floating dialog rather than the app's status bar.
+    """
+    css = _strip_css()
+    block = css[:css.index('.activity-strip.hidden')]
+    assert 'left: 1rem' in block and 'right: 1rem' in block
+    assert 'width: auto' in block
+    assert 'min(22rem' not in block                # the old fixed-width box
+    strip = block[:block.index('}')]
+    assert 'position: fixed' in strip
+    assert 'bottom:' in strip                      # still out of the content's way
+
+
+def test_the_bar_names_the_work_in_progress():
+    """A bar alone does not say what is happening; the detail line does."""
+    js = _strip_js()
+    block = js[js.index('const hostLabel'):js.index('const render =')]
+    # the docker scan runs three hosts at a time - name the batch, not its first
+    assert 'data.hosts' in block
+    assert 'comparing image tags on' in block
+    # metrics collection reports a single host per step
+    assert 'data.current || data.host' in block
+    # between batches say what is left rather than leaving the last name up
+    assert 'to go' in block
+    assert 'data.elapsed' in js and 'pct' in js
+
+
+def test_the_backend_reports_the_batch_that_is_in_flight():
+    source = _read(os.path.join(ROOT, 'dockermon', 'updates.py'))
+    assert "'hosts': []" in source
+    worker = source[source.index('def _scan_worker'):source.index('def scan_async')]
+    # the batch is published while it runs and cleared when it lands
+    assert "_scan_progress['hosts'] = list(batch)" in worker
+    assert "_scan_progress['hosts'] = []" in worker
+    started = source[source.index('def scan_async'):source.index('def clear')]
+    assert 'hosts=list(due[:SCAN_THREADS])' in started
+
+
+def test_starting_a_job_kicks_the_strip_instead_of_waiting_for_the_idle_poll():
+    js = _strip_js()
+    assert "document.addEventListener('ailog:activity'" in js
+    overview = _read(STATIC, 'js', 'overview.js')
+    block = overview[overview.index("mount.querySelector('[data-ov-check-all]')"):]
+    block = block[:block.index("mount.querySelector('[data-ov-open-reports]')")]
+    assert "new CustomEvent('ailog:activity')" in block
+    # and the card still drops its ETag so the next poll is a full read
+    assert 'etag = null;' in block
+
+
 def test_the_strip_hides_when_idle_and_backs_off():
     js = _strip_js()
     assert "classList.toggle('hidden', !active)" in js
