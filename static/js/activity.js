@@ -18,12 +18,17 @@
 (function () {
     const ACTIVE_POLL_MS = 1500;
     const IDLE_POLL_MS = 8000;
+    // How long a finished job stays on screen. A single-host scan can beat the
+    // poll interval, and a bar that appears and vanishes unseen is the same as
+    // no bar at all.
+    const MIN_VISIBLE_MS = 2500;
 
     const strip = () => document.getElementById('activity-strip');
     const rowFor = (name) => strip()?.querySelector(`[data-activity="${name}"]`);
 
     let timer = null;
     let busy = false;
+    const lastPaint = {};
 
     // "checking b, c" beats "checking a" when three hosts run at once: the bar
     // counts host *batches*, so the names are what make it legible. A stack
@@ -52,14 +57,7 @@
     // What the counter counts: hosts for a host sweep, tags for a stack scan.
     const unitFor = (name) => (name === 'swarm' ? 'tags' : 'hosts');
 
-    const render = (name, data, idleLabel) => {
-        const row = rowFor(name);
-        if (!row) return;
-        if (!data || !data.active) {
-            row.hidden = true;
-            return;
-        }
-        row.hidden = false;
+    const paint = (row, name, data, idleLabel) => {
         const total = Number(data.total) || 0;
         const done = Number(data.done) || 0;
         const pct = total ? Math.min(100, Math.round((100 * done) / total)) : null;
@@ -89,6 +87,33 @@
         }
     };
 
+    // Returns true when the row is on screen, so the caller knows whether to
+    // keep polling fast.
+    const render = (name, data, idleLabel) => {
+        const row = rowFor(name);
+        if (!row) return false;
+        if (data && data.active) {
+            lastPaint[name] = { at: Date.now(), data };
+            row.hidden = false;
+            paint(row, name, data, idleLabel);
+            return true;
+        }
+        // Gone - but it may only just have gone. One host against a warm digest
+        // cache finishes inside a single poll, so an honest bar appeared and
+        // vanished between two frames and the person who pressed the button saw
+        // nothing at all. Hold the finished frame briefly: a click deserves an
+        // answer, even a short one.
+        const last = lastPaint[name];
+        if (last && Date.now() - last.at < MIN_VISIBLE_MS) {
+            row.hidden = false;
+            paint(row, name, { ...last.data, done: last.data.total || last.data.done },
+                  idleLabel);
+            return true;
+        }
+        row.hidden = true;
+        return false;
+    };
+
     const tick = async () => {
         if (busy) return;
         if (document.hidden) {
@@ -100,10 +125,11 @@
         try {
             const res = await fetch('/api/activity', { headers: { Accept: 'application/json' } });
             const data = await res.json();
-            render('metrics', data.metrics, 'collecting');
-            render('docker', data.docker, 'scanning');
-            render('swarm', data.swarm, 'reading the cluster');
-            active = !!(data.metrics?.active || data.docker?.active || data.swarm?.active);
+            active = [
+                render('metrics', data.metrics, 'collecting'),
+                render('docker', data.docker, 'scanning'),
+                render('swarm', data.swarm, 'reading the cluster'),
+            ].some(Boolean);
             const host = strip();
             if (host) host.classList.toggle('hidden', !active);
         } catch (err) {
