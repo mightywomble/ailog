@@ -1,6 +1,6 @@
 """Log-source discovery must stay bounded.
 
-The matrix server reported 46,592 "sources": 46,533 of them were transient
+One busy container host reported 46,592 "sources": 46,533 of them were transient
 ``.scope`` systemd units (one per container/systemd-run invocation). Streaming
 that many ``source`` events is what locked the browser up mid-pull, and
 ``docker ps --size`` made the daemon measure every writable layer first.

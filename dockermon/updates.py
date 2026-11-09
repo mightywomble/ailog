@@ -303,7 +303,31 @@ def owner_project(container: dict) -> str:
     return ''
 
 
+def compose_project_of(container: dict) -> str:
+    """The compose project a container belongs to, whether or not it has a service.
+
+    :func:`owner_project` answers a narrower question - "is this container owned
+    by something other than compose?" - and deliberately returns nothing for a
+    normal compose service. This one answers for every container, because the
+    view it feeds is "these are the compose projects on this host, open one to
+    see its containers", and the containers it most needs to show are exactly
+    the ones that function ignores.
+
+    ``labels`` arrives either as the dict sshstats builds or as the
+    ``[["k", "v"], ...]`` pairs the API serialised it to, depending on whether
+    the caller came through the collector or a cached payload.
+    """
+    labels = (container or {}).get('labels') or {}
+    if isinstance(labels, list):
+        labels = {key: value for key, value in labels if key}
+    return str(labels.get('com.docker.compose.project') or '').strip()
+
+
 _SWARM_TASK = re.compile(r'^(?P<service>[^.\s]+)\.(?P<slot>\d+)\.(?P<task>[a-z0-9]{6,})$')
+
+# An image pinned by ID rather than by tag: `docker ps` then reports the whole
+# digest where a version would be.
+_IMAGE_ID = re.compile(r'^[0-9a-f]{64}$')
 
 
 def _is_swarm_task(container: dict) -> bool:
@@ -412,6 +436,12 @@ def updates_for(host_key: str, containers, run, refresh: bool = False) -> dict:
             'tag': container.get('image_tag'),
             'stack': container.get('stack'),
             'service': container.get('service'),
+            # Which docker-compose project owns it, if any. Carried through so a
+            # standalone host can be read as "projects, each holding containers"
+            # rather than a flat list of boxes: the compose label is already on
+            # the container, and losing it here was the only thing standing
+            # between this payload and that view.
+            'project': compose_project_of(container),
             'state': container.get('state'),
             'status': container.get('status'),
             'cpu_percent': container.get('cpu_percent'),
@@ -505,6 +535,54 @@ def updates_for(host_key: str, containers, run, refresh: bool = False) -> dict:
 # --------------------------------------------------------------------------
 # background scanning (what the sidebar badges read)
 # --------------------------------------------------------------------------
+
+def group_by_project(result: dict) -> dict:
+    """Fold a host's update rows into the compose projects that own them.
+
+    ``loose`` is every container with no compose project label - the portainer
+    agent, something started from a shell. They are returned rather than hidden:
+    a page that says a host runs three projects when it runs four is the kind of
+    quiet wrongness this view exists to stop.
+
+    A container keeps its own row, so "current vs latest" stays per image;
+    a project only aggregates the count and whether anything inside it moved.
+    """
+    projects: dict[str, dict] = {}
+    loose: list[dict] = []
+    for row in result.get('containers') or []:
+        name = str(row.get('project') or '').strip()
+        if not name:
+            loose.append(dict(row))
+            continue
+        row = dict(row)
+        row.pop('project', None)
+        project = projects.setdefault(name, {
+            'name': name,
+            'containers': [],
+            'update_available': False,
+            'updates': 0,
+        })
+        project['containers'].append(row)
+        if row.get('update_available'):
+            project['updates'] += 1
+            project['update_available'] = True
+
+    ordered = []
+    for project in projects.values():
+        project['containers'].sort(key=lambda r: str(r.get('service') or r.get('name') or ''))
+        project['count'] = len(project['containers'])
+        tags = {str(r.get('tag') or '') for r in project['containers']} - {''}
+        # A compose file may pin an image by its ID instead of a tag - managelm's
+        # postgres and redis do exactly that - and the "version" of such a
+        # container is a 64-character digest, not something to show in a
+        # subtitle. Counted separately so the summary reads as a version list.
+        project['tags'] = sorted(t for t in tags if not _IMAGE_ID.fullmatch(t))
+        project['by_image_id'] = sum(1 for r in project['containers']
+                                     if _IMAGE_ID.fullmatch(str(r.get('tag') or '')))
+        ordered.append(project)
+    ordered.sort(key=lambda p: p['name'])
+    return {'projects': ordered, 'loose': loose}
+
 
 def state(host_key: str) -> dict | None:
     with _state_lock:

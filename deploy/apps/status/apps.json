@@ -217,38 +217,6 @@
    "forward_port": 2283
   },
   {
-   "name": "matrix",
-   "host": "matrix.safehomelan.com",
-   "group": "home",
-   "url": "https://matrix.safehomelan.com",
-   "forward_host": "100.77.224.41",
-   "forward_port": 8088
-  },
-  {
-   "name": "call",
-   "host": "call.safehomelan.com",
-   "group": "home",
-   "url": "https://call.safehomelan.com",
-   "forward_host": "100.77.224.41",
-   "forward_port": 8089
-  },
-  {
-   "name": "matrixadmin",
-   "host": "matrixadmin.safehomelan.com",
-   "group": "home",
-   "url": "https://matrixadmin.safehomelan.com",
-   "forward_host": "100.77.224.41",
-   "forward_port": 8090
-  },
-  {
-   "name": "hermes",
-   "host": "hermes.safehomelan.com",
-   "group": "home",
-   "url": "https://hermes.safehomelan.com",
-   "forward_host": "100.77.224.41",
-   "forward_port": 8648
-  },
-  {
    "name": "watch",
    "host": "watch.safehomelan.com",
    "group": "media",

@@ -146,7 +146,7 @@ def test_one_noisy_host_cannot_fill_the_card(ctx, scan):
     """Nine `:latest` rows on one box hid a version pin on another behind "and N more" - the
     exact container nobody could find."""
     state, _queued = scan
-    state['db-5'] = _host_state(*[_row(f'matrix-{n:02d}') for n in range(9)])
+    state['db-5'] = _host_state(*[_row(f'noisy-{n:02d}') for n in range(9)])
     state['db-11'] = _host_state(_row('anchor', image='zot.safehomelan.com/anchor:0.9.1'))
     state['db-16'] = _host_state(_row('gitea'))
 

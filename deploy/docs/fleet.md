@@ -26,9 +26,10 @@ at one version - `immich-server` and `immich-machine-learning` are the case
 here - the services are pulled and recreated together, because the server
 refuses to run against a machine-learning container from a different release.
 The test for a set is narrow on purpose: same project, same image family, same
-tag. `matrix-server` has four services whose names start with `matrix` and they
-must *not* be treated as a set, because that would bounce postgres and redis to
-update synapse.
+tag. A project whose services share a name prefix but not a release - a
+`<name>-postgres` and `<name>-redis` alongside `<name>-app` - must *not* be
+folded into one set, because that would bounce the database to update the
+application.
 
 ## Hosts
 
@@ -64,14 +65,6 @@ tag, which is exactly the case the tag comparison cannot answer.
 of which are the versioned set described above; `immich-postgres` and
 `immich_redis` carry their own pins and are updated only by a deliberate immich
 upgrade.
-
-### matrix (db-5) - compose
-
-`matrix-server`, from `/home/david/code/matrix-server/docker-compose.yml` plus
-its override file. Seventeen containers, of which several are built locally
-(`matrix-infinigpt:local`, `matrix-mcp-server:local`) or pinned to `:latest` at
-the publisher's discretion. Local images have no registry to compare against, so
-they report no update rather than a false one.
 
 ### files (db-3) - managed by Nextcloud AIO
 
