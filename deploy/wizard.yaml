@@ -291,9 +291,9 @@ services:
 - name: status
   kind: build
   service: status
-  image: zot.safehomelan.com/status:${IMAGE_TAG:-build-179}
+  image: zot.safehomelan.com/status:${IMAGE_TAG:-build-587}
   repo: status
-  version: build-179
+  version: build-587
   source: ''
   ports:
   - host: 8094
