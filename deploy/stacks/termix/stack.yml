@@ -3,7 +3,7 @@
 # Everything else here is hand-maintained and survives a re-render.
 services:
   termix:
-    image: zot.safehomelan.com/termix:26.11.0
+    image: zot.safehomelan.com/termix:26.11.1
     environment:
       PORT: '8080'
     ports:
