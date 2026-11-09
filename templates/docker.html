@@ -243,6 +243,10 @@
     swarmContainersLoaded: false,
     appsOpen: new Set(),
     appFilter: '',
+    // Standalone hosts have no swarm to group by, so their compose projects
+    // come from /compose-updates instead. null = not asked yet, {} = answered
+    // with nothing, which is why it is not initialised to an empty object.
+    compose: null,
   };
 
   // ---------------------------------------------------------------- helpers
@@ -757,6 +761,10 @@
       btn.classList.toggle('hover:text-slate-200', !active);
     });
     if (view === 'apps' || view === 'cluster') loadSwarm();
+    // loadSwarm decides whether this host has a swarm; on one that does not,
+    // renderApps falls back to the compose projects below, so they have to be
+    // fetched too. Both settle into the same render.
+    if (view === 'apps') loadCompose().then(renderApps);
   }
 
   // ---------------------------------------------------------------- sparkline
@@ -842,6 +850,171 @@
     }
   }
 
+  // A standalone host has no swarm services, so "apps" means "compose
+  // projects". Same page, same expand-to-see-containers gesture, different
+  // source - and it carries the versions, because a list of projects that does
+  // not say whether any of them is behind is just a prettier `docker ps`.
+  async function loadCompose(force) {
+    if (state.compose && !force) return state.compose;
+    try {
+      state.compose = await getJSON(API + '/compose-updates' + (force ? '?refresh=1' : ''));
+    } catch (e) {
+      state.compose = { projects: [], loose: [], error: e.message };
+    }
+    return state.compose;
+  }
+
+  function composeApps() {
+    const data = state.compose || {};
+    return (data.projects || []).map(project => {
+      const containers = (project.containers || []).map(c => ({
+        ...c,
+        // /updates calls it cpu_percent; the app cards read cpu_pct.
+        cpu_pct: Number(c.cpu_percent || 0),
+      }));
+      const up = containers.filter(c => String(c.state || '').toLowerCase() === 'running').length;
+      return {
+        name: project.name,
+        services: [{
+          name: project.name,
+          containers,
+          running_count: up,
+          container_count: containers.length,
+        }],
+        container_count: containers.length,
+        running_count: up,
+        cpu_pct: containers.reduce((n, c) => n + c.cpu_pct, 0),
+        mem_used: containers.reduce((n, c) => n + Number(c.mem_used || 0), 0),
+        updates: project.updates || 0,
+        tags: project.tags || [],
+        byImageId: project.by_image_id || 0,
+      };
+    });
+  }
+
+  // Version and digest for one container, which is the whole reason this view
+  // exists. A tag alone does not say "behind" - `18` stays `18` while upstream
+  // republishes it - so the digests are shown when they differ, and the badge
+  // only appears when the scan actually found a newer manifest.
+  function composeVersions(c) {
+    const tag = c.tag || '';
+    const local = c.local_digest || '';
+    const remote = c.remote_digest || '';
+    const badge = c.update_available
+      ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">newer upstream</span>'
+      : (c.error ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400">unchecked</span>' : '');
+    const digests = (local && remote && local !== remote)
+      ? '<span class="font-mono text-[10px] text-slate-500">' + esc(local) + ' \u2192 ' + esc(remote) + '</span>'
+      : (local ? '<span class="font-mono text-[10px] text-slate-500">' + esc(local) + '</span>' : '');
+    return '<span class="font-mono text-[11px] text-slate-300">' + esc(tag || 'no tag') + '</span>' +
+      ' ' + badge + ' ' + digests;
+  }
+
+  function renderComposeApps() {
+    const data = state.compose;
+    const list = document.getElementById('apps-list');
+    if (!list) return;
+    if (!data) {
+      // Not asked yet; loadCompose will re-render.
+      return;
+    }
+    const apps = (data.projects || []).filter(appMatches);
+    const all = data.projects || [];
+    const updates = all.reduce((n, p) => n + (p.updates || 0), 0);
+    const containers = all.reduce((n, p) => n + (p.count || 0), 0);
+
+    document.getElementById('apps-count').textContent =
+      all.length + (all.length === 1 ? ' project' : ' projects') +
+      (data.loose && data.loose.length ? ' + ' + data.loose.length + ' loose' : '');
+
+    const cell = (label, value, sub) =>
+      '<div class="card rounded-xl px-4 py-3">' +
+        '<div class="text-[10px] uppercase tracking-wide text-slate-500">' + esc(label) + '</div>' +
+        '<div class="text-lg font-semibold tabular-nums text-slate-100 mt-0.5">' + value + '</div>' +
+        (sub ? '<div class="text-[11px] text-slate-500">' + sub + '</div>' : '') +
+      '</div>';
+    document.getElementById('apps-summary').innerHTML =
+      cell('Projects', all.length, containers + ' containers') +
+      cell('Updates', updates, updates ? 'waiting for you' : 'all current') +
+      cell('Loose containers', (data.loose || []).length, 'no compose project') +
+      cell('Mode', 'standalone', 'compose, not swarm');
+
+    list.innerHTML = '';
+    document.getElementById('apps-empty').classList.toggle('hidden', apps.length > 0 || Boolean(data.error));
+    if (data.error) {
+      list.innerHTML = '<div class="text-rose-400 text-sm">Could not read the compose projects: ' +
+        esc(data.error) + '</div>';
+      return;
+    }
+
+    apps.forEach(app => {
+      const open = state.appsOpen.has(app.name);
+      const rows = (app.services[0].containers || []).map(c =>
+        '<div class="flex flex-wrap items-center gap-2 px-3 py-2 border-t border-white/5">' +
+          '<span class="text-[11px] ' + stateColor(c.state) + '">\u25cf</span>' +
+          '<span class="truncate text-slate-200">' + esc(c.name || c.id) + '</span>' +
+          '<span class="truncate text-[11px] text-slate-500">' + esc(c.image || '') + '</span>' +
+          '<span class="ml-auto flex items-center gap-3">' + composeVersions(c) +
+            '<span class="tabular-nums text-[11px] text-slate-400">' +
+              Number(c.cpu_pct || 0).toFixed(1) + '% \u00b7 ' + humanBytes(c.mem_used) +
+            '</span>' +
+          '</span>' +
+        '</div>').join('');
+
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl overflow-hidden';
+      card.innerHTML =
+        '<button type="button" class="row-hover w-full text-left px-4 py-3 flex items-center gap-3 transition-colors" data-app="' + esc(app.name) + '">' +
+          appAvatar(app.name) +
+          '<div class="min-w-0 flex-1">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="truncate text-sm font-medium text-slate-100">' + esc(app.name) + '</span>' +
+              '<span class="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400">' +
+                app.running_count + '/' + app.container_count + ' up</span>' +
+              (app.updates
+                ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">' +
+                    app.updates + ' update' + (app.updates === 1 ? '' : 's') + '</span>'
+                : '') +
+            '</div>' +
+            '<div class="text-[11px] text-slate-500 truncate">' +
+              app.container_count + ' container' + (app.container_count === 1 ? '' : 's') +
+              (app.tags && app.tags.length ? ' \u00b7 ' + app.tags.join(', ') : '') +
+              (app.byImageId ? ' \u00b7 ' + app.byImageId + ' pinned by image id' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="hidden sm:block text-right text-[11px] tabular-nums text-slate-400 shrink-0">' +
+            Number(app.cpu_pct || 0).toFixed(1) + '%<br>' + humanBytes(app.mem_used) +
+          '</div>' +
+        '</button>' +
+        '<div class="apps-detail ' + (open ? '' : 'hidden') + '">' + rows + '</div>';
+
+      list.appendChild(card);
+      card.querySelector('[data-app]').addEventListener('click', () => {
+        if (state.appsOpen.has(app.name)) state.appsOpen.delete(app.name);
+        else state.appsOpen.add(app.name);
+        renderApps();
+      });
+    });
+
+    // Loose containers are shown, not hidden: a page that claims a host runs
+    // three projects when it also runs two unmanaged containers is lying by
+    // omission, and those are the ones nothing will ever update for you.
+    if ((data.loose || []).length) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-xl overflow-hidden';
+      card.innerHTML =
+        '<div class="px-4 py-3 text-sm font-medium text-slate-200">No compose project</div>' +
+        data.loose.map(c =>
+          '<div class="flex flex-wrap items-center gap-2 px-3 py-2 border-t border-white/5">' +
+            '<span class="text-[11px] ' + stateColor(c.state) + '">\u25cf</span>' +
+            '<span class="truncate text-slate-200">' + esc(c.name || c.id) + '</span>' +
+            '<span class="truncate text-[11px] text-slate-500">' + esc(c.image || '') + '</span>' +
+            '<span class="ml-auto">' + composeVersions(c) + '</span>' +
+          '</div>').join('');
+      list.appendChild(card);
+    }
+  }
+
   function appMatches(app) {
     const f = state.appFilter.trim().toLowerCase();
     if (!f) return true;
@@ -854,6 +1027,10 @@
 
   function renderApps() {
     const view = state.swarm || {};
+    // No swarm services here means the grouping has to come from compose
+    // labels instead. One page, two sources of truth, decided by what the host
+    // actually is rather than by which tab was clicked.
+    if (!view.swarm) return renderComposeApps();
     const totals = view.totals || {};
     const apps = (view.apps || []).filter(appMatches);
     const sparks = view.app_spark || {};

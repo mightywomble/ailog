@@ -39,7 +39,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////home/david/code/ailog/ailog
 
 # Shown in Settings and appended to every static asset URL as ``?v=`` so a new
 # release can never be masked by a cached stylesheet or module.
-APP_VERSION = '3.29.3'
+APP_VERSION = '3.29.5'
 
 # All routes in this module live on one blueprint so ``create_app`` can build a
 # fully wired application (phase 3 of the audit: app factory).
@@ -890,8 +890,9 @@ def get_log_sources_from_host_stream(hostname='local'):
         try:
             # `.scope` units are *transient*: every container/systemd-run
             # invocation leaves one behind, so a busy host answers with tens of
-            # thousands of them (46,533 on the matrix server) and none of them
-            # is a service you would read logs for. Services only, capped.
+            # thousands of them (a busy container host reported 46,533) and
+            # none of them is a service you would read logs for. Services only,
+            # capped.
             cmd_journal = (
                 "sudo journalctl --field _SYSTEMD_UNIT 2>/dev/null "
                 "| grep -v '\\.scope$' | sort -u "

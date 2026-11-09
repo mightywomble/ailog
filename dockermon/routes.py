@@ -672,6 +672,39 @@ def api_updates(host_key):
     return jsonify({'success': True, **result})
 
 
+@docker_bp.route('/api/docker/hosts/<path:host_key>/compose-updates')
+def api_compose_updates(host_key):
+    """One host's compose projects, each with the containers it owns.
+
+    Read-only, and deliberately a second view of the same scan rather than a
+    second scan: ``/updates`` already compares every running container's digest
+    against the registry, and the only thing missing from it was the compose
+    label. Re-walking the host here would double the SSH work to answer a
+    question the cached payload can already answer.
+    """
+    refresh = (request.args.get('refresh') or '').lower() in ('1', 'true', 'yes')
+    if not ep.resolve_host(host_key):
+        return _error(f"Unknown host '{host_key}'", status=404)
+    result = None if refresh else dupdates.state(host_key)
+    if not result:
+        try:
+            info, _transport, _client = _transport_for(host_key)
+            snap = host_snapshot(host_key)
+        except DockerRequestError as exc:
+            return _error(exc)
+        try:
+            result = dupdates.updates_for(host_key, snap.get('containers') or [],
+                                          _updates_runner(info), refresh=refresh)
+        except Exception as exc:                # noqa: BLE001 - report, never 500 the page
+            return _error(exc)
+        dupdates._store(host_key, result)
+    grouped = dupdates.group_by_project(result)
+    return jsonify({'success': True, 'host_key': host_key,
+                    'ts': result.get('ts'),
+                    'projects': grouped['projects'],
+                    'loose': grouped['loose']})
+
+
 @docker_bp.route('/api/docker/hosts/<path:host_key>/updates/refresh', methods=['POST'])
 def api_updates_refresh(host_key):
     """Queue a fresh scan (the answer comes back from /updates or /overview)."""

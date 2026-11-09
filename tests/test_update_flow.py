@@ -147,21 +147,22 @@ def test_a_publishers_set_is_updated_as_one(updateflow):
 
 
 def test_different_versions_in_one_project_are_not_a_set(updateflow):
-    """matrix-server is four services, three of which only share the word matrix.
+    """Services that share a name prefix are not a release set.
 
-    Folding those into one target would bounce postgres and redis to update
-    synapse, which is the opposite of what the user clicked.
+    A chat stack's `-app` sits beside its own `-postgres` and `-redis`. Folding
+    those into one target would bounce the database to update the application,
+    which is the opposite of what the user clicked.
     """
     labels = {
-        'com.docker.compose.project': 'matrix-server',
-        'com.docker.compose.project.config_files': '/home/david/code/matrix-server/docker-compose.yml',
+        'com.docker.compose.project': 'chatstack',
+        'com.docker.compose.project.config_files': '/home/david/code/chatstack/docker-compose.yml',
     }
     rows = [
-        _inspect('matrix-synapse', 'ghcr.io/element-hq/synapse:v1.152.0',
-                 dict(labels, **{'com.docker.compose.service': 'synapse'})),
-        _inspect('matrix-postgres', 'postgres:16',
+        _inspect('chatstack-app', 'ghcr.io/example/chat-app:v1.152.0',
+                 dict(labels, **{'com.docker.compose.service': 'app'})),
+        _inspect('chatstack-postgres', 'postgres:16',
                  dict(labels, **{'com.docker.compose.service': 'postgres'})),
-        _inspect('matrix-redis', 'redis:8-alpine',
+        _inspect('chatstack-redis', 'redis:8-alpine',
                  dict(labels, **{'com.docker.compose.service': 'redis'})),
     ]
     targets = updateflow.group_targets(rows)

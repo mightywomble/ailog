@@ -34,8 +34,7 @@ The `.env` stays on the host, in `/home/david/code/<project>`. The pipeline
 logs the host in to zot (it does the pulling), refuses a project whose `.env` is
 missing a key, and reads the deployed tree from `Settings → Docker`.
 
-Matrix is hand-managed. CasaOS hosts are out of scope by name: their compose
-projects belong to CasaOS.
+CasaOS hosts are out of scope by name: their compose projects belong to CasaOS.
 
 ## The shape of a change
 
@@ -67,8 +66,8 @@ AILog refuses them by name rather than undoing them.
 
 ## The rest of the fleet
 
-`wizard.yaml` is not the whole homelab. The CasaOS apps on `casaos`, immich on
-`photos` and matrix are plain compose projects; the swarm services AILog does not
+`wizard.yaml` is not the whole homelab. The CasaOS apps on `casaos` and immich on
+`photos` are plain compose projects; the swarm services AILog does not
 pin are plain swarm services. Which shape each host uses, and why the button is
 greyed out on the ones that are neither, is in
 [docs/fleet.md](docs/fleet.md).
