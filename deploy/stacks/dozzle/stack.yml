@@ -18,8 +18,7 @@ services:
     image: zot.safehomelan.com/dozzle:v11.4.1
     environment:
       DOZZLE_MODE: swarm
-      # MCP server (read-only container log tools) at /api/mcp, used by the
-      # matrix server agents (InfiniGPT/Openclaw/Hermes)
+      # MCP server (read-only container log tools) at /api/mcp
       DOZZLE_ENABLE_MCP: "true"
     volumes:
       - type: bind

@@ -71,9 +71,9 @@ def test_placeholders_are_known_and_have_labels():
 
 def test_filling_leaves_no_braces_and_marks_blanks():
     filled = aiprompts.fill_prompt('Host {{HOST}} at {{START}} about {{SYMPTOM}}',
-                                   {'HOST': 'matrix', 'START': '2026-10-31T10:00:00Z'})
+                                   {'HOST': 'example', 'START': '2026-10-31T10:00:00Z'})
     assert '{{' not in filled and '}}' not in filled
-    assert 'matrix' in filled
+    assert 'example' in filled
     assert '[SYMPTOM]' in filled          # unanswered blanks are explicit
 
 
@@ -139,13 +139,13 @@ def test_the_prompt_reaches_the_model_call(flask_app, monkeypatch):
         'log_content': '2026-10-31T10:00:00Z host systemd[1]: started\n',
         'log_name': 'syslog',
         'provider': 'ollama',
-        'host': 'matrix',
+        'host': 'example',
         'prompt': 'Timeline for {{HOST}} from {{START}} to {{END}} about {{SYMPTOM}}',
         'prompt_values': {'SYMPTOM': 'the reboot'},
     })
     assert response.status_code == 200
     assert response.get_json()['prompt_used'] is True
-    assert 'matrix' in seen['prompt']
+    assert 'example' in seen['prompt']
     assert 'the reboot' in seen['prompt']
     assert '{{' not in seen['prompt']
     assert '2026-10-31T10:00:00' in seen['prompt']      # inferred from the log

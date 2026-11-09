@@ -252,9 +252,10 @@ def coalesce(targets: list[dict]) -> list[dict]:
     same version - the server refuses to run against a machine-learning
     container from a different release - so they are pulled and recreated in one
     go.  The test for "one set" is deliberately narrow: same compose project,
-    same image family, *and* the identical tag.  matrix-server has four services
-    whose names start with ``matrix``, and folding those together would bounce
-    postgres and redis to update synapse.
+    same image family, *and* the identical tag.  A project whose services share
+    a name prefix but not a release - ``<name>-postgres`` and ``<name>-redis``
+    beside ``<name>-app`` - must not be folded together, because that would
+    bounce the database to update the application.
     """
     out: list[dict] = []
     sets: dict[tuple, dict] = {}
