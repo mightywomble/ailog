@@ -218,9 +218,9 @@ def create_host(settings, domain, forward_host, forward_port, cert_id=None,
     if dry_run:
         return {"domain": domain, "forward": f"{forward_host}:{forward_port}", "dry_run": True,
                 "sql": (f"insert into proxy_host(domain_names, forward_host, forward_port, "
-                        f"certificate_id, enabled, created_on, modified_on) values "
+                        f"certificate_id, enabled, locations, created_on, modified_on) values "
                         f"('{json.dumps([domain])}', '{forward_host}', {forward_port}, "
-                        f"{cert_id or 0}, 1, datetime('now'), datetime('now'));"),
+                        f"{cert_id or 0}, 1, '[]', datetime('now'), datetime('now'));"),
                 "conf": _conf("NEW", domain, forward_host, forward_port,
                               _cert_nice(settings, cert_id), advanced)}
 
@@ -231,8 +231,8 @@ cur = con.cursor()
 owner = con.execute("select id from user order by id limit 1").fetchone()[0]
 cur.execute("insert into proxy_host (owner_user_id, domain_names, forward_host, forward_port, "
             "forward_scheme, certificate_id, ssl_forced, http2_support, advanced_config, meta, "
-            "enabled, is_deleted, created_on, modified_on) "
-            "values (?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'), datetime('now'))",
+            "enabled, is_deleted, locations, created_on, modified_on) "
+            "values (?,?,?,?,?,?,?,?,?,?,?,?,'[]', datetime('now'), datetime('now'))",
             (owner, json.dumps([{domain!r}]), {forward_host!r}, {int(forward_port)}, 'http',
              {int(cert_id or 0)}, {1 if cert_id else 0}, 0, {advanced!r},
              json.dumps({{"nginx_online": True}}), 1, 0))
