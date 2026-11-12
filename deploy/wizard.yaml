@@ -384,3 +384,30 @@ services:
   source: ''
   env_count: 8
   companions: []
+- name: netbox
+  kind: mirror
+  repo: netbox
+  version: v4.7.5-5.1.1
+  service: netbox
+  ports:
+  - host: 8096
+    container: 8080
+    mode: host
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/netbox/media
+    container: /opt/netbox/netbox/media
+  - host: /opt/docker/data/netbox/reports
+    container: /opt/netbox/netbox/reports
+  - host: /opt/docker/data/netbox/scripts
+    container: /opt/netbox/netbox/scripts
+  url: cmdb.safehomelan.com
+  env: {}
+  image: zot.safehomelan.com/netbox:v4.7.5-5.1.1
+  source: docker.io/netboxcommunity/netbox:v4.7.5-5.1.1
+  env_count: 24
+  companions:
+  - netbox-worker
+  - postgres
+  - redis
+  - redis-cache

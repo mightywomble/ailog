@@ -1,0 +1,268 @@
+# NetBox (CMDB / DCIM / IPAM) on the swarm.
+#
+# Upstream is netbox-community/netbox-docker (release branch, tag v4.7.5-5.1.1
+# = NetBox 4.7.5 + netbox-docker 5.1.1). The upstream docker-compose.yml is a
+# single-host compose file: it uses env_file, depends_on with conditions, and
+# relative ./configuration bind mounts, none of which swarm honours. What is
+# kept and what changed:
+#
+#  - env_file is ignored by `docker stack deploy`, so every variable is inline.
+#  - depends_on is ignored. The image's own docker-entrypoint.sh already waits
+#    for the database and applies migrations, so startup ordering is covered
+#    there; every service gets restart_policy: any so a cold start converges.
+#  - ./configuration is not copied: the image ships the same defaults at
+#    /opt/netbox/netbox/netbox/configuration.py, and this deployment needs no
+#    change to it - ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS and the Redis/DB knobs
+#    are all environment variables the shipped configuration reads.
+#  - Passwords, SECRET_KEY and API_TOKEN_PEPPER_1 do not appear in this file.
+#    The netbox image's configuration reads them from the environment only (no
+#    _FILE variants), so the CMD wrapper below exports them from /run/secrets
+#    and then execs the image's own entrypoint. superuser_password is read
+#    natively by /opt/netbox/super_user.py from /run/secrets/superuser_password.
+#  - Static files need no sidecar: launch-netbox.sh runs granian with
+#    --static-path-route /static, so the app serves its own assets.
+#
+# Access: published in host mode on one node only, so the port exists on that
+# node alone rather than on the routing mesh. A DOCKER-USER rule on that node
+# (see deploy/stacks/netbox/tailnet-only.sh) allows it from tailscale0 and the
+# loopback only, which is what "bind to tailscale" means for swarm - swarm
+# cannot express a host_ip in a published port.
+#
+# Data: postgres, redis and the media/reports/scripts trees live on the shared
+# NFS mount so the stack can reschedule to any node.
+services:
+  netbox:
+    image: zot.safehomelan.com/netbox:v4.7.5-5.1.1
+    user: "netbox:root"
+    environment:
+      ALLOWED_HOSTS: "cmdb.safehomelan.com 100.109.38.8"
+      CSRF_TRUSTED_ORIGINS: "https://cmdb.safehomelan.com"
+      DB_HOST: "postgres"
+      DB_NAME: "netbox"
+      DB_USER: "netbox"
+      REDIS_HOST: "redis"
+      REDIS_DATABASE: "0"
+      REDIS_CACHE_HOST: "redis-cache"
+      REDIS_CACHE_DATABASE: "1"
+      # LOGIN_REQUIRED is left at its default (True) on purpose: a CMDB is not
+      # anonymous-readable. Setting the variable explicitly only earns a
+      # deprecation warning in 4.7 (it is removed in NetBox 5).
+      CORS_ORIGIN_ALLOW_ALL: "false"
+      GRAPHQL_ENABLED: "true"
+      WEBHOOKS_ENABLED: "true"
+      METRICS_ENABLED: "true"
+      EMAIL_FROM: "netbox@safehomelan.com"
+      EMAIL_SERVER: "localhost"
+      EMAIL_PORT: "25"
+      EMAIL_TIMEOUT: "5"
+      EMAIL_USE_SSL: "false"
+      EMAIL_USE_TLS: "false"
+      SKIP_SUPERUSER: "false"
+      SUPERUSER_NAME: "admin"
+      SUPERUSER_EMAIL: "david@davidfield.co.uk"
+      GRANIAN_WORKERS: "2"
+      TZ: "Europe/London"
+    # The image's ENTRYPOINT is tini and its CMD is
+    # ["/opt/netbox/docker-entrypoint.sh", "/opt/netbox/launch-netbox.sh"].
+    # Keep tini as PID 1 and hand it a shell that exports the secrets and then
+    # execs exactly the upstream entrypoint.
+    command:
+      - sh
+      - -c
+      - |
+        export SECRET_KEY="$$(cat /run/secrets/netbox_secret_key)"
+        export API_TOKEN_PEPPER_1="$$(cat /run/secrets/netbox_api_token_pepper_1)"
+        export DB_PASSWORD="$$(cat /run/secrets/netbox_db_password)"
+        export REDIS_PASSWORD="$$(cat /run/secrets/netbox_redis_password)"
+        export REDIS_CACHE_PASSWORD="$$(cat /run/secrets/netbox_redis_cache_password)"
+        exec /opt/netbox/docker-entrypoint.sh /opt/netbox/launch-netbox.sh
+    secrets:
+      - netbox_secret_key
+      - netbox_api_token_pepper_1
+      - netbox_db_password
+      - netbox_redis_password
+      - netbox_redis_cache_password
+      - superuser_password
+    volumes:
+      - type: bind
+        source: /opt/docker/data/netbox/media
+        target: /opt/netbox/netbox/media
+      - type: bind
+        source: /opt/docker/data/netbox/reports
+        target: /opt/netbox/netbox/reports
+      - type: bind
+        source: /opt/docker/data/netbox/scripts
+        target: /opt/netbox/netbox/scripts
+    ports:
+      - target: 8080
+        published: 8096
+        protocol: tcp
+        mode: host
+    healthcheck:
+      test: ["CMD", "/opt/netbox/health.sh"]
+      # First boot applies ~700 migrations to NFS-backed postgres and used to
+      # be killed at 180s mid-run, so the container never finished and the
+      # service stayed at 0/1. Steady-state boot is seconds; this only buys
+      # room for the initial schema build (and for major-upgrade migrations).
+      start_period: 1800s
+      timeout: 5s
+      interval: 15s
+      retries: 6
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w1
+      restart_policy:
+        condition: any
+
+  # Background task queue. Deliberately does not run docker-entrypoint.sh:
+  # netbox already waits for postgres and applies migrations, and letting both
+  # containers migrate at once on a cold start is a race swarm cannot order.
+  # It restarts until the schema exists.
+  netbox-worker:
+    image: zot.safehomelan.com/netbox:v4.7.5-5.1.1
+    user: "netbox:root"
+    environment:
+      ALLOWED_HOSTS: "cmdb.safehomelan.com"
+      DB_HOST: "postgres"
+      DB_NAME: "netbox"
+      DB_USER: "netbox"
+      REDIS_HOST: "redis"
+      REDIS_DATABASE: "0"
+      REDIS_CACHE_HOST: "redis-cache"
+      REDIS_CACHE_DATABASE: "1"
+      TZ: "Europe/London"
+    command:
+      - sh
+      - -c
+      - |
+        export SECRET_KEY="$$(cat /run/secrets/netbox_secret_key)"
+        export API_TOKEN_PEPPER_1="$$(cat /run/secrets/netbox_api_token_pepper_1)"
+        export DB_PASSWORD="$$(cat /run/secrets/netbox_db_password)"
+        export REDIS_PASSWORD="$$(cat /run/secrets/netbox_redis_password)"
+        export REDIS_CACHE_PASSWORD="$$(cat /run/secrets/netbox_redis_cache_password)"
+        exec /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py rqworker
+    secrets:
+      - netbox_secret_key
+      - netbox_api_token_pepper_1
+      - netbox_db_password
+      - netbox_redis_password
+      - netbox_redis_cache_password
+    volumes:
+      - type: bind
+        source: /opt/docker/data/netbox/media
+        target: /opt/netbox/netbox/media
+      - type: bind
+        source: /opt/docker/data/netbox/reports
+        target: /opt/netbox/netbox/reports
+      - type: bind
+        source: /opt/docker/data/netbox/scripts
+        target: /opt/netbox/netbox/scripts
+    healthcheck:
+      test: ["CMD-SHELL", "ps -aux | grep -v grep | grep -q rqworker || exit 1"]
+      start_period: 60s
+      timeout: 3s
+      interval: 15s
+      retries: 3
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w1
+      restart_policy:
+        condition: any
+
+  postgres:
+    image: zot.safehomelan.com/postgres:18-alpine
+    environment:
+      POSTGRES_DB: "netbox"
+      POSTGRES_USER: "netbox"
+      POSTGRES_PASSWORD_FILE: "/run/secrets/netbox_db_password"
+    secrets:
+      - netbox_db_password
+    volumes:
+      # postgres:18 keeps PGDATA under /var/lib/postgresql/<major>/docker, so
+      # mount the parent exactly as upstream does.
+      - type: bind
+        source: /opt/docker/data/netbox/postgres
+        target: /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -t 2 -d netbox -U netbox"]
+      start_period: 20s
+      timeout: 30s
+      interval: 10s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w1
+      restart_policy:
+        condition: any
+
+  redis:
+    image: zot.safehomelan.com/valkey:9.1-alpine
+    command:
+      - sh
+      - -c
+      - exec valkey-server --appendonly yes --requirepass "$$(cat /run/secrets/netbox_redis_password)"
+    secrets:
+      - netbox_redis_password
+    volumes:
+      - type: bind
+        source: /opt/docker/data/netbox/redis
+        target: /data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli --no-auth-warning -a \"$$(cat /run/secrets/netbox_redis_password)\" ping | grep -q PONG"]
+      start_period: 5s
+      timeout: 3s
+      interval: 10s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w1
+      restart_policy:
+        condition: any
+
+  redis-cache:
+    image: zot.safehomelan.com/valkey:9.1-alpine
+    command:
+      - sh
+      - -c
+      - exec valkey-server --requirepass "$$(cat /run/secrets/netbox_redis_cache_password)"
+    secrets:
+      - netbox_redis_cache_password
+    volumes:
+      - type: bind
+        source: /opt/docker/data/netbox/redis-cache
+        target: /data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli --no-auth-warning -a \"$$(cat /run/secrets/netbox_redis_cache_password)\" ping | grep -q PONG"]
+      start_period: 5s
+      timeout: 3s
+      interval: 10s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.pool == w1
+      restart_policy:
+        condition: any
+
+secrets:
+  netbox_secret_key:
+    external: true
+  netbox_api_token_pepper_1:
+    external: true
+  netbox_db_password:
+    external: true
+  netbox_redis_password:
+    external: true
+  netbox_redis_cache_password:
+    external: true
+  superuser_password:
+    external: true
