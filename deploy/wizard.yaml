@@ -109,8 +109,8 @@ services:
   service: dozzle
   image: zot.safehomelan.com/dozzle:v11.4.0
   repo: dozzle
-  version: v11.4.1
-  source: docker.io/amir20/dozzle:v11.4.1
+  version: v11.4.3
+  source: docker.io/amir20/dozzle:v11.4.3
   ports:
   - host: 8083
     container: 8080
