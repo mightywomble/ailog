@@ -235,9 +235,9 @@ services:
 - name: metamcp
   kind: build
   service: app
-  image: zot.safehomelan.com/metamcp:${IMAGE_TAG:-build-503}
+  image: zot.safehomelan.com/metamcp:${IMAGE_TAG:-build-597}
   repo: metamcp
-  version: build-503
+  version: build-597
   source: ghcr.io/metatool-ai/metamcp:2.4.22
   ports:
   - host: 8091
@@ -291,9 +291,9 @@ services:
 - name: status
   kind: build
   service: status
-  image: zot.safehomelan.com/status:${IMAGE_TAG:-build-179}
+  image: zot.safehomelan.com/status:${IMAGE_TAG:-build-587}
   repo: status
-  version: build-179
+  version: build-587
   source: ''
   ports:
   - host: 8094
@@ -381,6 +381,52 @@ services:
   url: wizard.safehomelan.com
   env: {}
   image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-209}
+  source: ''
+  env_count: 8
+  companions: []
+- name: netbox
+  kind: mirror
+  repo: netbox
+  version: v4.7.5-5.1.1
+  service: netbox
+  ports:
+  - host: 8096
+    container: 8080
+    mode: host
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/netbox/media
+    container: /opt/netbox/netbox/media
+  - host: /opt/docker/data/netbox/reports
+    container: /opt/netbox/netbox/reports
+  - host: /opt/docker/data/netbox/scripts
+    container: /opt/netbox/netbox/scripts
+  url: cmdb.safehomelan.com
+  env: {}
+  image: zot.safehomelan.com/netbox:v4.7.5-5.1.1
+  source: docker.io/netboxcommunity/netbox:v4.7.5-5.1.1
+  env_count: 24
+  companions:
+  - netbox-worker
+  - postgres
+  - redis
+  - redis-cache
+- name: netbox-mcp
+  kind: build
+  repo: netbox-mcp
+  version: 1.2.2
+  service: netbox-mcp
+  ports:
+  - host: 8299
+    container: 8000
+    mode: host
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/netbox-mcp
+    container: /data
+  url: mcp.netbox.safehomelan.com
+  env: {}
+  image: zot.safehomelan.com/netbox-mcp:${IMAGE_TAG:-1.2.2}
   source: ''
   env_count: 8
   companions: []

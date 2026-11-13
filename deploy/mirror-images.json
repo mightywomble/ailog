@@ -92,6 +92,10 @@
     {
       "name": "valkey",
       "source": "docker.io/valkey/valkey:9"
+    },
+    {
+      "name": "netbox",
+      "source": "docker.io/netboxcommunity/netbox:v4.7.5-5.1.1"
     }
   ]
 }

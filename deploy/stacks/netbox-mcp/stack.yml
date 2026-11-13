@@ -1,0 +1,118 @@
+# NetBox MCP (read-only) on the swarm.
+#
+# Upstream: https://github.com/netboxlabs/netbox-mcp-server - NetBox Labs' own
+# MCP server, Apache-2.0. FastMCP over HTTP, MCP endpoint /mcp. It carries four
+# tools and every one of them reads:
+#   netbox_get_objects, netbox_get_object_by_id, netbox_get_changelogs,
+#   netbox_search_objects
+# There is no create/update/delete tool in the code, so "read-only" is not a
+# setting here that someone can flip.
+#
+# Image: deploy/apps/netbox-mcp builds upstream v1.2.2 (upstream published no
+# 1.2.2 image, only 1.2.1), so this file's pin names a tag CI builds rather
+# than one anybody could pull from upstream. No image reference is spelled out
+# here on purpose: the deploy job's registry check reads this file with a
+# regex, and a bare reference in prose looks like an image that must exist.
+#
+# NetBox is reached over its public origin (cmdb.safehomelan.com) through NPM,
+# so the netbox stack needs no ALLOWED_HOSTS change and no redeploy. That name
+# has to resolve inside the container, so the container gets Pi-hole as its
+# resolver - exactly what metamcp does, and for the same reason (the node's
+# upstream resolvers include OpenDNS, which NXDOMAIN-redirects the name).
+#
+# Access:
+#   https://mcp.netbox.safehomelan.com   (NPM proxy host on casaos ->
+#                                         100.109.38.8:8299, tailnet only)
+#   Consumed by MetaMCP as a STREAMABLE_HTTP server. MetaMCP shares
+#   metamcp_default with this service, so it uses the overlay name and never
+#   goes through NPM:
+#     url      http://netbox-mcp:8000/mcp
+#     headers  Authorization: Bearer <netbox_mcp_auth_token>
+#
+# The published port is host mode on the node that runs netbox, and
+# stacks/netbox-mcp/tailnet-only.sh closes it to everything but tailscale0 and
+# loopback - the same treatment as netbox's own 8096.
+services:
+  netbox-mcp:
+    image: zot.safehomelan.com/netbox-mcp:${IMAGE_TAG:-1.2.2}
+    environment:
+      NETBOX_URL: "https://cmdb.safehomelan.com"
+      TRANSPORT: "http"
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      VERIFY_SSL: "true"
+      LOG_LEVEL: "INFO"
+      # this NetBox has no plugins installed; the switch exists if one lands
+      ENABLE_PLUGIN_DISCOVERY: "false"
+      TZ: "Europe/London"
+    # The image has no _FILE support and no wrapper of its own, so both secrets
+    # are read by sh and exported before exec - the same shape as netbox's
+    # entrypoint wrapper. Nothing secret ends up in the stack file.
+    command:
+      - sh
+      - -c
+      - |
+        export NETBOX_TOKEN="$$(cat /run/secrets/netbox_mcp_token)"
+        export MCP_AUTH_TOKEN="$$(cat /run/secrets/netbox_mcp_auth_token)"
+        exec netbox-mcp-server
+    secrets:
+      - netbox_mcp_token
+      - netbox_mcp_auth_token
+    ports:
+      - target: 8000
+        published: 8299
+        protocol: tcp
+        mode: host
+    volumes:
+      # shared NFS, so the task keeps its state (and any future cache) when it
+      # is rescheduled; the server is stateless today and writes nothing here
+      - type: bind
+        source: /opt/docker/data/netbox-mcp
+        target: /data
+    # *.safehomelan.com -> NPM; Docker's own 127.0.0.11 still answers
+    # netbox-mcp (for MetaMCP) before this resolver is consulted
+    dns:
+      - 100.122.246.45
+    networks:
+      - metamcp_default
+    # the server exposes no /health route, so this is a TCP liveness probe -
+    # it proves the listener is up, not that a NetBox call would succeed
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import socket; socket.create_connection(('127.0.0.1', 8000), 5)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          # same node as netbox and metamcp: one overlay hop to NetBox's
+          # proxy host and to the aggregator
+          - node.labels.pool == w1
+      restart_policy:
+        condition: any
+        delay: 10s
+      update_config:
+        order: stop-first
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+
+networks:
+  # MetaMCP's own overlay, declared external: this stack is one service and the
+  # only thing that has to reach it is the aggregator. Avoids redeploying
+  # metamcp just to share a network.
+  metamcp_default:
+    external: true
+
+secrets:
+  netbox_mcp_token:
+    external: true
+  netbox_mcp_auth_token:
+    external: true
