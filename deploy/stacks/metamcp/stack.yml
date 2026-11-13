@@ -83,6 +83,16 @@ services:
       - type: bind
         source: /opt/docker/data/metamcp/uv
         target: /root/.cache/uv
+      # Present in the live service spec (tailnet bridge for STDIO MCP servers);
+      # preserved here so a stack redeploy does not drop it.
+      - type: bind
+        source: /usr/bin/tailscale
+        target: /usr/bin/tailscale
+        read_only: true
+      - type: bind
+        source: /var/run/tailscale
+        target: /var/run/tailscale
+        read_only: true
     # The app talks to itself over its public origin (APP_URL), and the stdio
     # MCP servers talk to *.safehomelan.com. Without this, the container uses
     # the node's upstream resolvers - which include OpenDNS - and OpenDNS
@@ -96,21 +106,38 @@ services:
     ports:
       - "8091:12008"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:12008/health || exit 1"]
+      # /health proxies to the backend :12009 -> 502 when the backend is dead.
+      # Uses node (already in the image) so there is no curl/wget dependency.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.HEALTH_PORT||'12008')+'/health',{signal:AbortSignal.timeout(8000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 3
       start_period: 90s
     deploy:
       replicas: 1
       placement:
         constraints:
           - node.labels.pool == w1
+          # SAF-99: mcp.safehomelan.com is proxied to worker1, so MetaMCP must
+          # never reschedule to another node (a move returns 504).
+          - node.hostname==swarm-worker1
       restart_policy:
-        condition: any
-        delay: 10s
+        condition: on-failure
+        delay: 15s
+        max_attempts: 10
+        window: 10m
       update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        monitor: 120s
+        delay: 10s
+        max_failure_ratio: 0
+      rollback_config:
+        parallelism: 1
         order: stop-first
+        failure_action: pause
+        monitor: 60s
       # Limits cover the whole cgroup (node + all STDIO children). Steady state
       # is ~0.5-0.9 GB with one shared process per server; 2 GB is headroom.
       resources:
