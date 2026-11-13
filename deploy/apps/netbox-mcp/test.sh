@@ -28,6 +28,40 @@ done
 docker logs "$NAME" 2>&1 | grep -q "Starting HTTP transport" \
   || { echo "server did not start:"; docker logs "$NAME" 2>&1 | tail -20; exit 1; }
 
+# The log line comes from FastMCP before uvicorn is listening, and docker-proxy
+# accepts the host port either way: probing too early is accepted and then reset
+# ("ConnectionResetError: [Errno 104]"), which is how this test failed once in
+# CI after passing locally. Wait for a real HTTP answer - 401 means the socket
+# is serving and the bearer check is live - before asserting anything.
+python3 - "$PORT" <<'PY'
+import sys
+import time
+import urllib.error
+import urllib.request
+
+url = "http://127.0.0.1:%s/mcp" % sys.argv[1]
+body = b'{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}'
+head = {"Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream"}
+deadline = time.time() + 60
+last = None
+while time.time() < deadline:
+    req = urllib.request.Request(url, data=body, headers=head, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            last = "HTTP %s" % resp.status
+            if resp.status == 401:
+                raise SystemExit(0)
+    except urllib.error.HTTPError as exc:
+        last = "HTTP %s" % exc.code
+        if exc.code == 401:
+            raise SystemExit(0)
+    except Exception as exc:                       # reset, refused, timeout
+        last = "%s: %s" % (type(exc).__name__, exc)
+    time.sleep(0.5)
+raise SystemExit("server never answered: last attempt %s" % last)
+PY
+
 python3 - "$PORT" <<'PY'
 import json
 import sys
