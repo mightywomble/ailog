@@ -14,6 +14,11 @@ docker run --rm --entrypoint sh "$IMG" -eu -c '
   command -v uvx >/dev/null                   || { echo "missing uvx"; exit 1; }
   test -x /usr/local/bin/patchmon-mcp         || { echo "missing patchmon-mcp"; exit 1; }
   PYTHONPATH=/opt/patchmon python3 -c "import patchmon_mcp.server" || { echo "patchmon_mcp import failed"; exit 1; }
+  # get_host_packages must filter pending_only itself: PatchMon ignores
+  # ?update=true, and the unfiltered 950-row reply is ~1.27 MB, which the MCP
+  # gateway in front of MetaMCP rejects at 1,000,000 bytes per response.
+  grep -q "p.get(\"needs_update\")" /opt/patchmon/patchmon_mcp/server.py \
+    || { echo "patchmon_mcp does not filter pending_only"; exit 1; }
   test -f /app/docker-entrypoint.sh           || { echo "missing entrypoint"; exit 1; }
   # the session/process lifecycle patch (RECON.md in the source branch) must be
   # in the bundle this image actually runs, not just in the git patch

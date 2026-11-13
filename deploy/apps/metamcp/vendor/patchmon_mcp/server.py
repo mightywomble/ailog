@@ -123,13 +123,24 @@ async def get_host(host_id: str) -> dict:
 
 
 @mcp.tool
-async def get_host_packages(host_id: str, pending_only: bool = True) -> dict:
+async def get_host_packages(
+    host_id: str,
+    pending_only: bool = True,
+    limit: int | None = None,
+    offset: int = 0,
+) -> dict:
     """Get package list for a host.
 
     Args:
         host_id: Host UUID from list_hosts.
         pending_only: If True (default), return only packages with pending updates.
+        limit: Optional cap on the number of rows returned.
+        offset: Skip this many rows before applying limit.
     """
+    if limit is not None and limit < 1:
+        return _tool_error("get_host_packages", ValueError("limit must be >= 1"))
+    if offset < 0:
+        return _tool_error("get_host_packages", ValueError("offset must be >= 0"))
     client = get_client()
     try:
         path = f"/hosts/{host_id}/packages"
@@ -138,8 +149,31 @@ async def get_host_packages(host_id: str, pending_only: bool = True) -> dict:
         resp, _ = await _timed_integration(client, "GET", path)
         data = resp.json()
         packages = data if isinstance(data, list) else data.get("packages", data)
-        log.info("get_host_packages", host_id=host_id, count=len(packages), pending_only=pending_only)
-        return {"host_id": host_id, "packages": packages, "count": len(packages)}
+        # PatchMon ignores `?update=true` (2026-11: a host with 2 pending updates
+        # returns all 950 packages), and the gateway in front of MetaMCP rejects
+        # any single tools/call response over 1,000,000 bytes. Filtering here is
+        # what keeps this tool usable; the payload roughly doubles on the wire
+        # because FastMCP sends it as both content text and structuredContent.
+        if pending_only:
+            packages = [p for p in packages if p.get("needs_update")]
+        total = len(packages)
+        if offset:
+            packages = packages[offset:]
+        if limit is not None:
+            packages = packages[:limit]
+        log.info(
+            "get_host_packages",
+            host_id=host_id,
+            count=len(packages),
+            total=total,
+            pending_only=pending_only,
+        )
+        return {
+            "host_id": host_id,
+            "packages": packages,
+            "count": len(packages),
+            "total": total,
+        }
     except (PatchMonError, PatchMonConfigError) as e:
         return _tool_error("get_host_packages", e)
 
