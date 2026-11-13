@@ -1,0 +1,6 @@
+{
+  "source": "https://github.com/netboxlabs/netbox-mcp-server.git",
+  "ref": "v1.2.2",
+  "dockerfile": "Dockerfile",
+  "context": "."
+}

@@ -63,6 +63,7 @@ depends on it.
 | 5 | metamcp | `metamcp_postgres_password`, `metamcp_auth_secret`, `metamcp_bootstrap_password` | ✅ `DATABASE_URL` embeds the password, so the wrapper rebuilds it - leaving it in the file would have put the value straight back |
 | 6 | ailog | `ailog_secret_key`, `ailog_mcp_token`, `ailog_sshkey_master_key` | ✅ `utils/secretfiles.py` in the app; moved in two stages so the master key was never briefly absent |
 | 7 | patchmon | five secrets | ✅ server wrapper rebuilds `DATABASE_URL`; database uses `POSTGRES_PASSWORD_FILE`; redis gets `--requirepass` from the file, healthcheck included, so the password is not in argv |
+| 8 | netbox-mcp | `netbox_mcp_token`, `netbox_mcp_auth_token` | ✅ upstream `netbox-mcp-server` reads `NETBOX_TOKEN` and `MCP_AUTH_TOKEN` from the environment only, so the stack `command` exports both from `/run/secrets` and execs the server. The NetBox token is a v2 (`nbt_...`) read-only token on `svc-netbox-mcp`; the auth token is the bearer the MCP itself demands (MetaMCP sends it as `bearerToken`) |
 | — | vikunja | three | ❌ **blocked - see below** |
 
 ## The one that cannot be moved yet: vikunja

@@ -411,3 +411,22 @@ services:
   - postgres
   - redis
   - redis-cache
+- name: netbox-mcp
+  kind: build
+  repo: netbox-mcp
+  version: 1.2.2
+  service: netbox-mcp
+  ports:
+  - host: 8299
+    container: 8000
+    mode: host
+  replicas: 1
+  volumes:
+  - host: /opt/docker/data/netbox-mcp
+    container: /data
+  url: mcp.netbox.safehomelan.com
+  env: {}
+  image: zot.safehomelan.com/netbox-mcp:${IMAGE_TAG:-1.2.2}
+  source: ''
+  env_count: 8
+  companions: []
