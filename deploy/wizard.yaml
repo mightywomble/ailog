@@ -368,7 +368,7 @@ services:
 - name: homelab-wizard
   kind: build
   repo: homelab-wizard
-  version: build-209
+  version: build-611
   service: wizard
   ports:
   - host: 8095
@@ -380,7 +380,7 @@ services:
     container: /data
   url: wizard.safehomelan.com
   env: {}
-  image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-209}
+  image: zot.safehomelan.com/homelab-wizard:${IMAGE_TAG:-build-611}
   source: ''
   env_count: 8
   companions: []
@@ -414,7 +414,7 @@ services:
 - name: netbox-mcp
   kind: build
   repo: netbox-mcp
-  version: 1.2.2
+  version: build-624
   service: netbox-mcp
   ports:
   - host: 8299
@@ -426,7 +426,7 @@ services:
     container: /data
   url: mcp.netbox.safehomelan.com
   env: {}
-  image: zot.safehomelan.com/netbox-mcp:${IMAGE_TAG:-1.2.2}
+  image: zot.safehomelan.com/netbox-mcp:${IMAGE_TAG:-build-624}
   source: ''
   env_count: 8
   companions: []
