@@ -9,7 +9,10 @@
 # setting here that someone can flip.
 #
 # Image: deploy/apps/netbox-mcp builds upstream v1.2.2 (upstream published no
-# 1.2.2 image, only 1.2.1). Pushed as zot.safehomelan.com/netbox-mcp:1.2.2.
+# 1.2.2 image, only 1.2.1), so this file's pin names a tag CI builds rather
+# than one anybody could pull from upstream. No image reference is spelled out
+# here on purpose: the deploy job's registry check reads this file with a
+# regex, and a bare reference in prose looks like an image that must exist.
 #
 # NetBox is reached over its public origin (cmdb.safehomelan.com) through NPM,
 # so the netbox stack needs no ALLOWED_HOSTS change and no redeploy. That name
