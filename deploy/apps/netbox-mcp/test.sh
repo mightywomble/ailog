@@ -21,19 +21,15 @@ docker run -d --name "$NAME" -p "127.0.0.1:$PORT:8000" \
   -e NETBOX_URL=http://127.0.0.1:9/ -e NETBOX_TOKEN=not-a-real-token \
   -e MCP_AUTH_TOKEN=smoke-token "$IMG" >/dev/null
 
-for _ in $(seq 60); do
-  docker logs "$NAME" 2>&1 | grep -q "Starting HTTP transport" && break
-  sleep 0.5
-done
-docker logs "$NAME" 2>&1 | grep -q "Starting HTTP transport" \
-  || { echo "server did not start:"; docker logs "$NAME" 2>&1 | tail -20; exit 1; }
-
-# The log line comes from FastMCP before uvicorn is listening, and docker-proxy
-# accepts the host port either way: probing too early is accepted and then reset
-# ("ConnectionResetError: [Errno 104]"), which is how this test failed once in
-# CI after passing locally. Wait for a real HTTP answer - 401 means the socket
-# is serving and the bearer check is live - before asserting anything.
-python3 - "$PORT" <<'PY'
+# Readiness is decided by a real HTTP answer, never by a log line. Matching a
+# startup message was wrong twice over: FastMCP's wording and wrapping change
+# between versions ("Starting HTTP transport" in one, "Starting MCP server ...
+# with transport 'http'" in another), and it is printed before uvicorn listens.
+# docker-proxy accepts the published port either way, so an early POST is
+# accepted and then reset ("ConnectionResetError: [Errno 104]") - which is how
+# this passed on the build host and failed in CI. A 401 means the socket is
+# serving and the bearer check is live.
+if ! python3 - "$PORT" <<'PY'
 import sys
 import time
 import urllib.error
@@ -61,6 +57,11 @@ while time.time() < deadline:
     time.sleep(0.5)
 raise SystemExit("server never answered: last attempt %s" % last)
 PY
+then
+  echo "server did not become ready:"
+  docker logs "$NAME" 2>&1 | tail -20
+  exit 1
+fi
 
 python3 - "$PORT" <<'PY'
 import json
