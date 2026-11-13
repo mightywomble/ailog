@@ -1,5 +1,7 @@
-# CANONICAL SOURCE for the vikunja swarm stack (SAF-88). Matches the live spec
-# captured in SAF-87 (DB host "db", restart any/5s, placement pool == w3).
+# CANONICAL SOURCE for the vikunja swarm stack (SAF-88, corrected SAF-90). Matches the live spec
+# captured in SAF-87 (DB host "db." WITH trailing dot, restart any/5s, placement pool == w3).
+# The trailing dot is required: bare "db" falls through to the *.safehomelan.com
+# wildcard (216.40.34.41) instead of the swarm service VIP. Do not remove it.
 # Any copy of this file in another repo (e.g. david/homelab-ops, archived) is
 # non-authoritative.
 # Placement decision: node.labels.pool == w3 is KEPT - live uses it and dropping
@@ -48,7 +50,7 @@ services:
       # node's Tailscale origin as well as the PUBLICURL above.
       VIKUNJA_SERVICE_CORSORIGINS: "https://tasks.safehomelan.com,http://100.79.189.118:3456,http://100.109.38.8:3456,http://100.86.172.63:3456,http://100.65.120.72:3456,http://100.106.96.24:3456"
       VIKUNJA_DATABASE_TYPE: "postgres"
-      VIKUNJA_DATABASE_HOST: "db"
+      VIKUNJA_DATABASE_HOST: "db."
       VIKUNJA_DATABASE_DATABASE: "vikunja"
       VIKUNJA_DATABASE_USER: "vikunja"
       VIKUNJA_DATABASE_SSLMODE: "disable"
