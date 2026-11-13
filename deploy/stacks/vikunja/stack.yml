@@ -1,3 +1,13 @@
+# CANONICAL SOURCE for the vikunja swarm stack (SAF-88). Matches the live spec
+# captured in SAF-87 (DB host "db", restart any/5s, placement pool == w3).
+# Any copy of this file in another repo (e.g. david/homelab-ops, archived) is
+# non-authoritative.
+# Placement decision: node.labels.pool == w3 is KEPT - live uses it and dropping
+# it would change the vikunja_vikunja spec on redeploy.
+# Secrets: the session secret (VIKUNJA_SERVICE_SECRET / JWT secret) and the DB
+# password live in the external swarm secret vikunja_config (mounted as
+# /etc/vikunja/config.yml) and vikunja_db_password. Never put values in git.
+#
 # Vikunja (self-hosted todo / project management) on the swarm.
 # Upstream guide: https://vikunja.io/install/#linux/docker
 # Images mirrored into zot by homelab_docker_build's "Mirror upstream images to
@@ -60,7 +70,7 @@ services:
           - node.labels.pool == w3
       restart_policy:
         condition: any
-        delay: 10s
+        delay: 5s
       update_config:
         order: stop-first
 
