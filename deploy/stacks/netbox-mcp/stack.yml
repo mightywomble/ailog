@@ -34,7 +34,7 @@
 # loopback - the same treatment as netbox's own 8096.
 services:
   netbox-mcp:
-    image: zot.safehomelan.com/netbox-mcp:${IMAGE_TAG:-1.2.2}
+    image: zot.safehomelan.com/netbox-mcp:${IMAGE_TAG:-build-624}
     environment:
       NETBOX_URL: "https://cmdb.safehomelan.com"
       TRANSPORT: "http"
