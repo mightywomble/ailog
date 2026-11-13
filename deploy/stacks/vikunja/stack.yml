@@ -7,7 +7,7 @@
 # Placement decision: node.labels.pool == w3 is KEPT - live uses it and dropping
 # it would change the vikunja_vikunja spec on redeploy.
 # Secrets: the session secret (VIKUNJA_SERVICE_SECRET / JWT secret) and the DB
-# password live in the external swarm secret vikunja_config (mounted as
+# password live in the external swarm secret vikunja_config_v2 (mounted as
 # /etc/vikunja/config.yml) and vikunja_db_password. Never put values in git.
 #
 # Vikunja (self-hosted todo / project management) on the swarm.
@@ -56,7 +56,7 @@ services:
       VIKUNJA_DATABASE_SSLMODE: "disable"
       TZ: "Europe/London"
     secrets:
-      - source: vikunja_config
+      - source: vikunja_config_v2
         target: /etc/vikunja/config.yml
         mode: 0440
     volumes:
@@ -108,5 +108,5 @@ services:
 secrets:
   vikunja_db_password:
     external: true
-  vikunja_config:
+  vikunja_config_v2:
     external: true
