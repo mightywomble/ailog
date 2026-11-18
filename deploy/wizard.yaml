@@ -56,8 +56,8 @@ services:
   service: anchor
   image: zot.safehomelan.com/anchor:0.9.1
   repo: anchor
-  version: 0.18.0
-  source: ghcr.io/zhfahim/anchor:0.18.0
+  version: 0.18.1
+  source: ghcr.io/zhfahim/anchor:0.18.1
   ports:
   - host: 3001
     container: 3000
@@ -76,8 +76,8 @@ services:
   service: anythingllm
   image: zot.safehomelan.com/anythingllm:1.18.0
   repo: anythingllm
-  version: 1.19.0
-  source: docker.io/mintplexlabs/anythingllm:1.19.0
+  version: 1.20.0
+  source: docker.io/mintplexlabs/anythingllm:1.20.0
   ports:
   - host: 3005
     container: 3001
@@ -96,8 +96,8 @@ services:
   service: cloudflared
   image: cloudflare/cloudflared:2026.10.4
   repo: cloudflared
-  version: 2026.10.7
-  source: docker.io/cloudflare/cloudflared:2026.10.7
+  version: 2026.11.1
+  source: docker.io/cloudflare/cloudflared:2026.11.1
   ports: []
   url: ''
   replicas: 2

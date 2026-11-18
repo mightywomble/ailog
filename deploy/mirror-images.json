@@ -35,11 +35,11 @@
     },
     {
       "name": "anchor",
-      "source": "ghcr.io/zhfahim/anchor:0.18.0"
+      "source": "ghcr.io/zhfahim/anchor:0.18.1"
     },
     {
       "name": "anythingllm",
-      "source": "docker.io/mintplexlabs/anythingllm:1.19.0"
+      "source": "docker.io/mintplexlabs/anythingllm:1.20.0"
     },
     {
       "name": "langlearn",
@@ -51,7 +51,7 @@
     },
     {
       "name": "cloudflared",
-      "source": "docker.io/cloudflare/cloudflared:2026.10.7"
+      "source": "docker.io/cloudflare/cloudflared:2026.11.1"
     },
     {
       "name": "dozzle",
