@@ -30,7 +30,7 @@
 #   that is not part of the estate is a workaround wearing a service's clothes.
 services:
   cloudflared:
-    image: zot.safehomelan.com/cloudflared:2026.10.7
+    image: zot.safehomelan.com/cloudflared:2026.11.1
     # the image's entrypoint is already `cloudflared`, so command: is its argv
     command: tunnel --no-autoupdate run --token-file /run/secrets/cloudflared_token
     secrets:
