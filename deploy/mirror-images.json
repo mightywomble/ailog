@@ -3,7 +3,7 @@
   "mirrors": [
     {
       "name": "termix",
-      "source": "ghcr.io/termix-ssh/termix:26.11.1"
+      "source": "ghcr.io/termix-ssh/termix:26.11.2"
     },
     {
       "name": "guacd",
