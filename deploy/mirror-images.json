@@ -79,11 +79,11 @@
     },
     {
       "name": "immich-server",
-      "source": "ghcr.io/immich-app/immich-server:v3.3.6"
+      "source": "ghcr.io/immich-app/immich-server:v3.4.2"
     },
     {
       "name": "immich-machine-learning",
-      "source": "ghcr.io/immich-app/immich-machine-learning:v3.3.6"
+      "source": "ghcr.io/immich-app/immich-machine-learning:v3.4.2"
     },
     {
       "name": "immich-postgres",
