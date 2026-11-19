@@ -23,7 +23,7 @@ name: immich
 services:
   immich-server:
     container_name: immich_server
-    image: zot.safehomelan.com/immich-server:v3.3.6
+    image: zot.safehomelan.com/immich-server:v3.4.2
     volumes:
       - ${UPLOAD_LOCATION}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -40,7 +40,7 @@ services:
 
   immich-machine-learning:
     container_name: immich_machine_learning
-    image: zot.safehomelan.com/immich-machine-learning:v3.3.6
+    image: zot.safehomelan.com/immich-machine-learning:v3.4.2
     volumes:
       - model-cache:/cache
     env_file:

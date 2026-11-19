@@ -20,8 +20,8 @@
     "url": "http://127.0.0.1:2283/api/server/ping"
   },
   "images": {
-    "immich-server": "zot.safehomelan.com/immich-server:v3.3.6",
-    "immich-machine-learning": "zot.safehomelan.com/immich-machine-learning:v3.3.6",
+    "immich-server": "zot.safehomelan.com/immich-server:v3.4.2",
+    "immich-machine-learning": "zot.safehomelan.com/immich-machine-learning:v3.4.2",
     "valkey": "zot.safehomelan.com/valkey:9",
     "immich-postgres": "zot.safehomelan.com/immich-postgres:14-vectorchord0.4.3-pgvectors0.2.0"
   }
