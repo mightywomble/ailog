@@ -13,7 +13,7 @@
 # IP>:8199 (routing mesh)
 services:
   langlearn:
-    image: zot.safehomelan.com/langlearn:1.0
+    image: zot.safehomelan.com/langlearn:1.0-noentrust2006
     environment:
       TZ: "Europe/London"
     # This is a mirrored upstream image (docker.io/mightywomble/langlearn:1.0),
