@@ -29,7 +29,7 @@
 # re-provision).
 services:
   freshrss:
-    image: zot.safehomelan.com/freshrss:1.30.4
+    image: zot.safehomelan.com/freshrss:1.30.4-noentrust2006
     environment:
       TZ: "Europe/London"
       FRESHRSS_ENV: "production"
