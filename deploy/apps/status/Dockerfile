@@ -1,4 +1,11 @@
 FROM python:3.12-slim
+# SAF-174: remove the Entrust Root CA that expires 2026-11-27 from the trust
+# store. ca-certificates still ships it, so a rebuild alone does not clear it.
+RUN sed -i '/Entrust_Root_Certification_Authority\.crt$/d' /etc/ca-certificates.conf \
+ && rm -f /usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority.crt \
+ && update-ca-certificates --fresh \
+ && test ! -e /etc/ssl/certs/Entrust_Root_Certification_Authority.pem
+
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
