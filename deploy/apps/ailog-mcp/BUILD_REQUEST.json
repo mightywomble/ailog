@@ -1,0 +1,8 @@
+{
+  "requested_at": "2026-11-26T08:17:13Z",
+  "requested_by": "Technical Architect (SAF-175: rebuild ailog-mcp from the fixed docker/Dockerfile)",
+  "app": "ailog-mcp",
+  "source": "https://git.safehomelan.com/david/ailog",
+  "ref": "main",
+  "replaces": "build-256"
+}
