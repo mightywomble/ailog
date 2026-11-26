@@ -2,6 +2,13 @@ FROM python:3.12-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-client curl ca-certificates git \
  && rm -rf /var/lib/apt/lists/*
+# SAF-174: remove the Entrust Root CA that expires 2026-11-27 from the trust
+# store. ca-certificates still ships it, so a rebuild alone does not clear it.
+RUN sed -i '/Entrust_Root_Certification_Authority\.crt$/d' /etc/ca-certificates.conf \
+ && rm -f /usr/share/ca-certificates/mozilla/Entrust_Root_Certification_Authority.crt \
+ && update-ca-certificates --fresh \
+ && test ! -e /etc/ssl/certs/Entrust_Root_Certification_Authority.pem
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
